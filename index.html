@@ -22,29 +22,40 @@
     }
 
     html { scroll-behavior: smooth; }
-    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; cursor:none; }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; cursor:default; }
     h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; line-height:1.05; }
 
-    /* ─── CURSOR ─── */
-    #cursor-dot, #cursor-ring { position:fixed; border-radius:50%; pointer-events:none; z-index:9999; transform:translate(-50%,-50%); }
-    #cursor-dot { width:6px; height:6px; background:var(--neon); box-shadow:0 0 12px var(--neon); transition:opacity .3s; }
-    #cursor-ring { width:32px; height:32px; border:1.5px solid rgba(61,255,122,.5); transition:width .25s,height .25s,border-color .25s; }
-    body:has(a:hover) #cursor-ring, body:has(button:hover) #cursor-ring { width:48px; height:48px; border-color:var(--neon); }
-    @media (hover:none) { #cursor-dot,#cursor-ring { display:none; } body { cursor:auto; } }
+    /* ─── CURSOR GLOW SHADOW ─── */
+    #cursor-glow {
+      position:fixed; pointer-events:none; z-index:9999;
+      width:340px; height:340px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(61,255,122,.13) 0%, rgba(61,255,122,.04) 40%, transparent 70%);
+      transform:translate(-50%,-50%);
+      transition:width .4s ease, height .4s ease, opacity .3s;
+      mix-blend-mode:screen;
+      will-change:left,top;
+    }
+    body:has(a:hover) #cursor-glow, body:has(button:hover) #cursor-glow {
+      width:480px; height:480px;
+      background:radial-gradient(circle, rgba(61,255,122,.18) 0%, rgba(61,255,122,.05) 40%, transparent 70%);
+    }
+    @media (hover:none) { #cursor-glow { display:none; } }
 
     /* ─── NAV ─── */
     nav {
       position:fixed; top:0; width:100%; z-index:1000;
-      padding:1rem 2.5rem;
-      display:flex; justify-content:space-between; align-items:center; gap:1rem;
+      padding:.85rem 2rem;
+      display:flex; justify-content:space-between; align-items:center; gap:1.5rem;
       background:rgba(8,13,8,.88); backdrop-filter:blur(24px);
       border-bottom:1px solid var(--border); transition:padding .3s;
     }
-    nav.scrolled { padding:.72rem 2.5rem; }
-    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.3rem; color:var(--white); text-decoration:none; letter-spacing:-.5px; display:flex; align-items:center; gap:.5rem; }
-    .logo-pulse { width:8px; height:8px; background:var(--neon); border-radius:50%; box-shadow:0 0 10px var(--neon); animation:pulse-ring 2s ease-in-out infinite; }
-    @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(61,255,122,.6)} 50%{box-shadow:0 0 0 6px rgba(61,255,122,0)} }
-    .logo span { color:var(--neon); }
+    nav.scrolled { padding:.65rem 2rem; }
+    .nav-brand { display:flex; align-items:center; gap:1rem; flex-shrink:0; }
+    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.55rem; color:var(--white); text-decoration:none; letter-spacing:-.8px; display:flex; align-items:center; gap:.45rem; }
+    .logo-pulse { width:9px; height:9px; background:var(--neon); border-radius:50%; box-shadow:0 0 12px var(--neon); animation:pulse-ring 2s ease-in-out infinite; flex-shrink:0; }
+    @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(61,255,122,.6)} 50%{box-shadow:0 0 0 7px rgba(61,255,122,0)} }
+    .logo .lg { color:var(--neon); }
 
     /* Mode toggle pill */
     .mode-toggle {
@@ -53,9 +64,9 @@
     }
     .mt-btn {
       position:relative; z-index:1;
-      padding:.38rem 1.1rem; font-size:.78rem; font-weight:700;
+      padding:.35rem 1rem; font-size:.76rem; font-weight:700;
       background:transparent; border:none; color:var(--muted-l);
-      cursor:none; border-radius:5px; transition:color .25s;
+      cursor:pointer; border-radius:5px; transition:color .25s;
       font-family:'Space Grotesk',sans-serif; white-space:nowrap;
     }
     .mt-btn.active { color:#060E06; }
@@ -93,10 +104,10 @@
     .mode-panel.entering { animation:panelIn .4s cubic-bezier(.4,0,.2,1) forwards; }
 
     /* ─── TICKER ─── */
-    .ticker-wrap { overflow:hidden; background:var(--neon); padding:.5rem 0; }
-    .ticker-track { display:flex; animation:ticker 22s linear infinite; white-space:nowrap; }
+    .ticker-wrap { overflow:hidden; background:var(--neon); padding:0; height:34px; display:flex; align-items:center; }
+    .ticker-track { display:flex; align-items:center; animation:ticker 22s linear infinite; white-space:nowrap; height:100%; }
     .ticker-track:hover { animation-play-state:paused; }
-    .ticker-item { display:inline-flex; align-items:center; gap:1.2rem; padding:0 2rem; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.78rem; letter-spacing:.8px; text-transform:uppercase; color:#060E06; }
+    .ticker-item { display:inline-flex; align-items:center; gap:1.2rem; padding:0 2rem; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.78rem; letter-spacing:.8px; text-transform:uppercase; color:#060E06; line-height:1; }
     .ticker-sep { width:5px; height:5px; background:#060E06; border-radius:50%; flex-shrink:0; }
     @keyframes ticker { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
@@ -118,6 +129,14 @@
     .hero-inner { position:relative; z-index:1; max-width:920px; margin:0 auto; }
 
     .hero-kicker { display:inline-flex; align-items:center; gap:.6rem; border:1px solid var(--border-s); color:var(--neon); padding:.35rem 1rem; border-radius:4px; font-size:.71rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:1.8rem; animation:fadeInDown .8s ease both; }
+
+    /* ─── KEYWORD HIGHLIGHTS ─── */
+    .kw {
+      color:var(--neon); font-weight:800;
+      background:rgba(61,255,122,.08);
+      padding:.05em .25em; border-radius:3px;
+      border-bottom:1px solid rgba(61,255,122,.3);
+    }
     .live-pip { width:6px; height:6px; background:var(--neon); border-radius:50%; box-shadow:0 0 8px var(--neon); animation:blink 2s ease-in-out infinite; }
     @keyframes fadeInDown { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:translateY(0)} }
 
@@ -407,17 +426,18 @@
 </head>
 <body>
 
-<!-- CURSOR -->
-<div id="cursor-dot"></div>
-<div id="cursor-ring"></div>
+<!-- CURSOR GLOW -->
+<div id="cursor-glow"></div>
 
 <!-- NAV -->
 <nav id="main-nav">
-  <a href="index.html" class="logo"><span class="logo-pulse"></span>Clip<span>Grow</span></a>
-  <div class="mode-toggle">
-    <button class="mt-btn active" data-mode="clipper" onclick="setMode('clipper')">For Clippers</button>
-    <button class="mt-btn" data-mode="brand" onclick="setMode('brand')">For Brands</button>
-    <div class="mt-slider" id="mt-slider"></div>
+  <div class="nav-brand">
+    <a href="index.html" class="logo"><span class="logo-pulse"></span>Clip<span class="lg">Grow</span></a>
+    <div class="mode-toggle">
+      <button class="mt-btn active" data-mode="clipper" onclick="setMode('clipper')">For Clippers</button>
+      <button class="mt-btn" data-mode="brand" onclick="setMode('brand')">For Brands</button>
+      <div class="mt-slider" id="mt-slider"></div>
+    </div>
   </div>
   <ul class="nav-links" id="nav-links">
     <li><a href="#" onclick="scrollToSection('why','how-brand')">About</a></li>
@@ -425,7 +445,6 @@
     <li><a href="#" onclick="scrollToSection('earnings','brand-calc-sec')">Earnings</a></li>
     <li><a href="#" onclick="scrollToSection('faq','brand-faq')">FAQ</a></li>
     <li><a href="tracker.html">Leaderboard</a></li>
-    <li><a href="brands.html">For Brands</a></li>
     <li><a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-nav" target="_blank" rel="noopener">Join Free</a></li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
@@ -457,16 +476,19 @@
     <div class="hero-bg-grid"></div>
     <div class="hero-glow"></div>
     <div class="hero-inner">
-      <div class="hero-kicker"><span class="live-pip"></span>Kerala's First Clipping Agency — Recruiting Now</div>
+      <div class="hero-kicker"><span class="live-pip"></span><span style="color:var(--neon);font-weight:900">Kerala's First</span>&nbsp;Clipping Agency — <span style="color:var(--neon)">Hiring Now</span></div>
       <h1 class="hero-title">
-        <span class="word" style="animation-delay:.1s">Clip</span>
-        <span class="word c-neon" style="animation-delay:.25s">&nbsp;Videos.</span><br>
-        <span class="word" style="animation-delay:.4s">Earn</span>
-        <span class="word c-neon" style="animation-delay:.55s">&nbsp;Every View.</span>
+        <span class="word" style="animation-delay:.1s">No reason</span><br>
+        <span class="word" style="animation-delay:.22s">not to</span>
+        <span class="word c-neon" style="animation-delay:.38s">&nbsp;try it.</span>
       </h1>
-      <p class="hero-sub">The side hustle that pays you for your skill — not your followers. Zero investment. Brand provides everything. Get paid per 1,000 views, every month via UPI.</p>
+      <p class="hero-sub">
+        Clip videos. Make money. <span class="kw">We don't ask you for a penny.</span><br>
+        <span class="kw">Zero investment.</span> Brand provides everything — videos, guides, templates.
+        Get paid per 1,000 views via UPI every month. <span class="kw">Win win for all of us.</span>
+      </p>
       <div class="hero-tags">
-        <span class="tag">Zero Investment</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Ages 14+</span>
+        <span class="tag" style="color:var(--neon);border-color:rgba(61,255,122,.35);background:rgba(61,255,122,.1);font-weight:700">Zero Investment Required</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Ages 14+</span>
       </div>
       <div class="hero-cta">
         <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" target="_blank" rel="noopener">Join WhatsApp Community</a>
@@ -943,12 +965,14 @@
 <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="wa-float" title="Join ClipGrow on WhatsApp" target="_blank" rel="noopener">💬</a>
 
 <script>
-  /* ── Cursor ── */
-  const dot = document.getElementById('cursor-dot');
-  const ring = document.getElementById('cursor-ring');
-  let mx=0,my=0,rx=0,ry=0;
-  document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
-  (function animC(){dot.style.left=mx+'px';dot.style.top=my+'px';rx+=(mx-rx)*.12;ry+=(my-ry)*.12;ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(animC);})();
+  /* ── Cursor Glow (CSS depth shadow, no rAF loop) ── */
+  const glowEl=document.getElementById('cursor-glow');
+  if(glowEl&&window.matchMedia('(hover:hover)').matches){
+    document.addEventListener('mousemove',e=>{
+      glowEl.style.left=e.clientX+'px';
+      glowEl.style.top=e.clientY+'px';
+    },{passive:true});
+  }
 
   /* ── Nav scroll ── */
   const navEl=document.getElementById('main-nav');
