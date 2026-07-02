@@ -77,6 +77,7 @@
       box-shadow:0 0 14px var(--glow-s);
     }
     .mt-slider.brand { transform:translateX(100%); }
+    .mobile-toggle-wrap { display: none; }
 
     .nav-links { display:flex; gap:1.8rem; list-style:none; align-items:center; }
     .nav-links a { color:var(--muted-l); text-decoration:none; font-size:.83rem; font-weight:500; transition:color .2s; position:relative; }
@@ -418,9 +419,18 @@
       footer { padding:1.8rem 1.2rem; }
     }
     @media (max-width:768px) {
-      .nav-brand { gap: 0.6rem; }
+      nav { justify-content: center; }
+      .nav-brand { justify-content: center; width: 100%; position: relative; gap: 0; }
+      nav .mode-toggle { display: none; }
+      .hamburger { position: absolute; right: 0; display: flex; }
       .logo { font-size: 1.35rem; }
-      .mt-btn { padding: .3rem .7rem; font-size: .7rem; }
+      
+      .mobile-toggle-wrap { display: flex; justify-content: flex-end; padding: 1rem 1.5rem; padding-top: 70px; background: #060E06; }
+      .mode-panel .ticker-wrap { margin-top: 0 !important; }
+      
+      .hero-kicker { font-size: 0.6rem; padding: 0.4rem 0.8rem; text-align: center; white-space: normal; line-height: 1.4; display: inline-block; }
+      .live-pip { display: inline-block; margin-right: 0.4rem; vertical-align: baseline; }
+
       .terms-grid, .brand-calc-grid, .tr-controls, .offer-grid { grid-template-columns: 1fr; }
       .steps, .tiers, .flow { grid-template-columns: 1fr 1fr; }
       .br-main { margin-bottom: 1rem; }
@@ -449,7 +459,7 @@
     <div class="mode-toggle">
       <button class="mt-btn active" data-mode="clipper" onclick="setMode('clipper')">For Clippers</button>
       <button class="mt-btn" data-mode="brand" onclick="setMode('brand')">For Brands</button>
-      <div class="mt-slider" id="mt-slider"></div>
+      <div class="mt-slider"></div>
     </div>
   </div>
   <ul class="nav-links" id="nav-links">
@@ -462,6 +472,14 @@
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
 </nav>
+
+<div class="mobile-toggle-wrap">
+  <div class="mode-toggle">
+    <button class="mt-btn active" data-mode="clipper" onclick="setMode('clipper')">For Clippers</button>
+    <button class="mt-btn" data-mode="brand" onclick="setMode('brand')">For Brands</button>
+    <div class="mt-slider"></div>
+  </div>
+</div>
 
 <!-- ═══════════════════ CLIPPER PANEL ═══════════════════ -->
 <div id="clipper-panel" class="mode-panel">
@@ -501,7 +519,7 @@
         <span class="kw">Do you know what viral content looks like?</span> Prove you have an eye for virality.
       </p>
       <div class="hero-tags">
-        <span class="tag" style="color:var(--neon);border-color:rgba(61,255,122,.35);background:rgba(61,255,122,.1);font-weight:700">Zero Investment Required</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Anyone Can Try It</span>
+        <span class="tag">Zero Investment Required</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Anyone Can Try It</span>
       </div>
       <div class="hero-cta">
         <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" target="_blank" rel="noopener">Join WhatsApp Community</a>
@@ -989,11 +1007,10 @@
     currentMode=mode;
     const from=document.getElementById((mode==='clipper'?'brand':'clipper')+'-panel');
     const to=document.getElementById(mode+'-panel');
-    const slider=document.getElementById('mt-slider');
 
     // Toggle pill
     document.querySelectorAll('.mt-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
-    slider.classList.toggle('brand',mode==='brand');
+    document.querySelectorAll('.mt-slider').forEach(s=>s.classList.toggle('brand',mode==='brand'));
 
     // Animate out
     from.style.opacity='0';
