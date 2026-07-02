@@ -22,8 +22,10 @@
     }
 
     html { scroll-behavior: smooth; }
-    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; cursor:default; }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; cursor:default; word-break: break-word; }
     h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; line-height:1.05; }
+    .why-card > div, .camp-body, .math-card { min-width: 0; }
+    @media (hover: hover) { .math-card:hover { transform: translateY(-5px); } }
 
     /* ─── CURSOR GLOW SHADOW ─── */
     #cursor-glow {
@@ -96,6 +98,7 @@
       background:rgba(8,13,8,.98); backdrop-filter:blur(20px);
       padding:1.5rem 1.8rem 2rem; gap:1.2rem;
       border-bottom:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,.6);
+      max-height: calc(100vh - 65px); overflow-y: auto;
     }
 
     /* ─── MODE PANELS ─── */
@@ -107,7 +110,7 @@
     /* ─── TICKER ─── */
     .ticker-wrap { overflow:hidden; background:var(--neon); padding:0.5rem 0; display:flex; align-items:center; }
     .ticker-track { display:flex; align-items:center; animation:ticker 22s linear infinite; white-space:nowrap; }
-    .ticker-track:hover { animation-play-state:paused; }
+    @media (hover: hover) { .ticker-track:hover { animation-play-state:paused; } }
     .ticker-item { display:inline-flex; align-items:center; gap:1.2rem; padding:0 2rem; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.78rem; letter-spacing:.8px; text-transform:uppercase; color:#060E06; line-height:1; }
     .ticker-sep { width:5px; height:5px; background:#060E06; border-radius:50%; flex-shrink:0; }
     @keyframes ticker { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
@@ -141,7 +144,7 @@
     .live-pip { width:6px; height:6px; background:var(--neon); border-radius:50%; box-shadow:0 0 8px var(--neon); animation:blink 2s ease-in-out infinite; }
     @keyframes fadeInDown { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:translateY(0)} }
 
-    .hero-title { font-size:clamp(2.8rem,9vw,7rem); font-weight:900; letter-spacing:-3px; color:var(--white); line-height:.9; margin-bottom:1.5rem; }
+    .hero-title { font-size:clamp(2.3rem,9vw,7rem); font-weight:900; letter-spacing:-3px; color:var(--white); line-height:.9; margin-bottom:1.5rem; }
     .hero-title .word { display:inline-block; opacity:0; transform:translateY(40px); animation:wordIn .6s ease forwards; }
     .hero-title .c-neon { color:var(--neon); text-shadow:0 0 40px rgba(61,255,122,.4); display:inline-block; }
     @keyframes wordIn { to{opacity:1;transform:translateY(0)} }
@@ -496,6 +499,18 @@
       <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
       <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
       <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Kerala's First Clipping Agency <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
+      <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Kerala's First Clipping Agency <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
+      <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
     </div>
   </div>
 
@@ -566,7 +581,7 @@
       
       <div class="math-grid reveal delay-3" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1.5rem; margin-top:3rem;">
         
-        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;">
           <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 1</div>
           <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The "Okay" Clip</h4>
           <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem; line-height:1.5;">You find a decent hook, add some basic captions, and the algorithm pushes it a little bit.</p>
@@ -580,7 +595,7 @@
           </div>
         </div>
 
-        <div class="math-card" style="background:var(--card); border:1px solid var(--neon); padding:2rem; border-radius:12px; box-shadow:0 0 20px rgba(61,255,122,0.05); position:relative; overflow:hidden; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="math-card" style="background:var(--card); border:1px solid var(--neon); padding:2rem; border-radius:12px; box-shadow:0 0 20px rgba(61,255,122,0.05); position:relative; overflow:hidden; transition:transform 0.3s; cursor:default;">
           <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--neon);"></div>
           <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 2</div>
           <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The Solid Hit</h4>
@@ -595,7 +610,7 @@
           </div>
         </div>
 
-        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;">
           <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 3</div>
           <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The Viral Banger</h4>
           <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem; line-height:1.5;">You nail the trend. The clip gets shared everywhere and blows up for a whole week.</p>
@@ -755,6 +770,18 @@
   <!-- Ticker -->
   <div class="ticker-wrap" style="margin-top:57px;background:#060E06;border-bottom:1px solid var(--border)">
     <div class="ticker-track">
+      <span class="ticker-item" style="color:var(--neon)">Only Pay When You Get Results <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">No Results = No Payment <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">We Handle All Distribution <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Brand Guidelines Enforced <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">20% Management Fee Only <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Kerala's First Clipping Agency <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Only Pay When You Get Results <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">No Results = No Payment <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">We Handle All Distribution <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Brand Guidelines Enforced <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">20% Management Fee Only <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Kerala's First Clipping Agency <span class="ticker-sep" style="background:var(--neon)"></span></span>
       <span class="ticker-item" style="color:var(--neon)">Only Pay When You Get Results <span class="ticker-sep" style="background:var(--neon)"></span></span>
       <span class="ticker-item" style="color:var(--neon)">No Results = No Payment <span class="ticker-sep" style="background:var(--neon)"></span></span>
       <span class="ticker-item" style="color:var(--neon)">We Handle All Distribution <span class="ticker-sep" style="background:var(--neon)"></span></span>
@@ -1055,9 +1082,12 @@
 
   /* ── Mode Switch ── */
   let currentMode='clipper';
+  let modeTimeout;
   function setMode(mode){
     if(mode===currentMode)return;
     currentMode=mode;
+    if(modeTimeout) clearTimeout(modeTimeout);
+    
     const from=document.getElementById((mode==='clipper'?'brand':'clipper')+'-panel');
     const to=document.getElementById(mode+'-panel');
 
@@ -1070,7 +1100,7 @@
     from.style.transform='translateY(-10px)';
     from.style.pointerEvents='none';
 
-    setTimeout(()=>{
+    modeTimeout = setTimeout(()=>{
       from.classList.add('hidden');
       from.style.opacity=''; from.style.transform=''; from.style.pointerEvents='';
       to.classList.remove('hidden');
