@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipGrow for Brands — Pay Only When You Get Paid</title>
+  <meta name="description" content="ClipGrow runs performance-based short-form video campaigns for Indian brands. You pay nothing upfront — only a 30% commission on the sales we generate via tracked links." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:        #090E09;
+      --bg-mid:    #0C130C;
+      --card:      #101810;
+      --card-hover:#162016;
+      --border:    #1C2E1C;
+      --border-soft:#243824;
+      --neon:      #3DFF7A;
+      --neon-glow: rgba(61,255,122,.10);
+      --neon-glow-strong: rgba(61,255,122,.18);
+      --white:     #F2F7F2;
+      --text:      #C8D5C8;
+      --muted:     #607060;
+      --muted-l:   #8A9E8A;
+      --red:       #FF4D4D;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      overflow-x: hidden;
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+    }
+    h1, h2, h3, h4 { font-family: 'Space Grotesk', sans-serif; line-height: 1.08; }
+
+    /* ─── NAV ─── */
+    nav {
+      padding: 1.1rem 2.5rem;
+      display: flex; justify-content: space-between; align-items: center;
+      background: rgba(9,14,9,.95);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.3rem;
+      color: var(--white); text-decoration: none; letter-spacing: -.5px;
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .logo-mark { width: 7px; height: 7px; background: var(--neon); border-radius: 50%; box-shadow: 0 0 10px var(--neon); }
+    .logo span { color: var(--neon); }
+
+    .back-link {
+      font-size: .83rem; color: var(--muted-l); text-decoration: none;
+      font-weight: 500; display: flex; align-items: center; gap: .4rem;
+      transition: color .2s;
+    }
+    .back-link:hover { color: var(--neon); }
+
+    /* ─── MAIN ─── */
+    main { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 5rem 2rem; }
+    .inner { max-width: 680px; width: 100%; }
+
+    /* ─── BADGE ─── */
+    .brand-badge {
+      display: inline-flex; align-items: center; gap: .6rem;
+      border: 1px solid var(--border-soft); color: var(--muted-l);
+      padding: .32rem .95rem; border-radius: 4px;
+      font-size: .72rem; font-weight: 600; letter-spacing: 1px;
+      text-transform: uppercase; margin-bottom: 1.8rem;
+    }
+
+    /* ─── TITLE ─── */
+    .brand-title {
+      font-size: clamp(2.4rem, 7vw, 4.8rem);
+      font-weight: 900; letter-spacing: -2px; color: var(--white);
+      margin-bottom: 1.4rem; line-height: .92;
+    }
+    .brand-title .c-neon { color: var(--neon); text-shadow: 0 0 40px var(--neon-glow-strong); }
+
+    /* ─── INTRO ─── */
+    .brand-intro {
+      font-size: 1rem; color: var(--muted-l); margin-bottom: 2.5rem; line-height: 1.8;
+    }
+    .brand-intro strong { color: var(--white); }
+
+    /* ─── HOW IT WORKS ─── */
+    .how-stack { display: flex; flex-direction: column; gap: .85rem; margin-bottom: 2.5rem; }
+    .how-item {
+      display: flex; align-items: flex-start; gap: 1.2rem;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 1.2rem 1.4rem;
+      transition: all .25s;
+      box-shadow: 0 2px 14px rgba(0,0,0,.35);
+    }
+    .how-item:hover {
+      border-color: var(--border-soft);
+      box-shadow: 0 6px 28px rgba(0,0,0,.5), 0 0 0 1px var(--border-soft);
+      transform: translateX(3px);
+    }
+    .how-num {
+      width: 28px; height: 28px; min-width: 28px;
+      background: var(--neon); color: #060E06;
+      border-radius: 4px; display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: .77rem; font-family: 'Space Grotesk', sans-serif;
+      box-shadow: 0 0 12px var(--neon-glow-strong);
+    }
+    .how-item h4 { font-size: .9rem; font-weight: 700; color: var(--white); margin-bottom: .25rem; }
+    .how-item p  { font-size: .82rem; color: var(--muted-l); line-height: 1.65; }
+
+    /* ─── ZERO RISK ─── */
+    .zero-risk {
+      padding: 1.6rem 1.8rem;
+      border-left: 3px solid var(--neon);
+      background: var(--neon-glow);
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 2.5rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,.35);
+    }
+    .zero-risk h3 { font-size: 1.05rem; font-weight: 700; color: var(--white); margin-bottom: .5rem; }
+    .zero-risk p  { font-size: .88rem; color: var(--muted-l); line-height: 1.75; }
+    .zero-risk strong { color: var(--neon); }
+
+    /* ─── DIVIDER ─── */
+    .divider { height: 1px; background: var(--border); margin: 2rem 0; }
+
+    /* ─── WA CTA ─── */
+    .wa-cta-block { text-align: center; margin-bottom: 1.5rem; }
+    .wa-hint {
+      font-size: .85rem; color: var(--muted-l); margin-bottom: 1.3rem; line-height: 1.6;
+    }
+    .wa-hint strong { color: var(--white); }
+
+    .wa-btn {
+      display: inline-flex; align-items: center; gap: 1rem;
+      background: #25D366; color: #fff;
+      padding: 1.1rem 2.4rem; border-radius: 8px;
+      font-weight: 800; font-size: 1.05rem; text-decoration: none;
+      font-family: 'Space Grotesk', sans-serif;
+      transition: all .3s;
+      box-shadow: 0 4px 28px rgba(37,211,102,.35);
+    }
+    .wa-btn:hover {
+      background: #1db954;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 40px rgba(37,211,102,.5);
+    }
+    .wa-btn-main { font-size: 1.05rem; display: block; }
+    .wa-btn-sub  { font-size: .76rem; font-weight: 400; opacity: .8; display: block; margin-top: .15rem; }
+
+    .wa-fine { font-size: .76rem; color: var(--muted); margin-top: .9rem; }
+
+    /* ─── FOOTER ─── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 1.4rem 2.5rem;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: .76rem; color: var(--muted); flex-wrap: wrap; gap: .5rem;
+    }
+    footer a { color: var(--muted); text-decoration: none; transition: color .2s; }
+    footer a:hover { color: var(--neon); }
+    .foot-logo-sm {
+      font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+      color: var(--muted-l); display: flex; align-items: center; gap: .4rem;
+    }
+    .foot-logo-sm span { color: var(--neon); }
+    .foot-dot { width: 5px; height: 5px; background: var(--neon); border-radius: 50%; box-shadow: 0 0 6px var(--neon); }
+
+    /* Tablet */
+    @media (max-width: 768px) {
+      nav { padding: .9rem 1.4rem; }
+      main { padding: 4rem 1.5rem; }
+      .brand-title { font-size: clamp(2rem, 9vw, 3.5rem); letter-spacing: -1.5px; }
+      .inner { max-width: 100%; }
+    }
+
+    /* Large phone */
+    @media (max-width: 600px) {
+      nav { padding: .85rem 1.2rem; }
+      main { padding: 3rem 1.2rem; }
+
+      .brand-title { letter-spacing: -1.2px; }
+      .brand-badge { font-size: .68rem; }
+
+      .how-item { padding: 1rem 1.1rem; }
+      .how-item h4 { font-size: .87rem; }
+      .how-item p  { font-size: .8rem; }
+
+      .zero-risk { padding: 1.2rem 1.2rem; }
+      .zero-risk h3 { font-size: 1rem; }
+
+      .wa-btn { padding: .9rem 1.4rem; font-size: .95rem; width: 100%; justify-content: center; }
+      .wa-btn-main { font-size: .95rem; }
+
+      footer { justify-content: center; text-align: center; flex-direction: column; gap: .6rem; }
+    }
+
+    /* Small phone */
+    @media (max-width: 400px) {
+      nav { padding: .75rem 1rem; }
+      main { padding: 2.5rem 1rem; }
+
+      .brand-title { font-size: 2.1rem; letter-spacing: -.8px; }
+      .brand-intro { font-size: .88rem; }
+
+      .how-num { width: 24px; height: 24px; font-size: .7rem; min-width: 24px; }
+      .how-item { gap: .9rem; padding: .9rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="index.html" class="logo">
+    <span class="logo-mark"></span>
+    Clip<span>Grow</span>
+  </a>
+  <a href="index.html" class="back-link">← Back to main site</a>
+</nav>
+
+<!-- MAIN -->
+<main>
+  <div class="inner">
+
+    <div class="brand-badge">For Brands &amp; Creators</div>
+
+    <h1 class="brand-title">
+      Pay only when<br>
+      <span class="c-neon">you get paid.</span><br>
+      Nothing to lose.
+    </h1>
+
+    <p class="brand-intro">
+      ClipGrow runs <strong>performance-based short-form video campaigns</strong> for Indian brands.
+      Our network of vetted clippers repurposes your long-form content into Reels and Shorts —
+      and you pay us a commission only on revenue we directly generate.
+      <strong>Zero upfront cost. Zero retainer. Zero risk.</strong>
+    </p>
+
+    <div class="how-stack">
+      <div class="how-item">
+        <div class="how-num">1</div>
+        <div>
+          <h4>Share your content and set the campaign terms</h4>
+          <p>Send us your existing long-form video — a podcast, course preview, or interview. We build the campaign brief, set content guidelines, and recruit clippers on your behalf.</p>
+        </div>
+      </div>
+      <div class="how-item">
+        <div class="how-num">2</div>
+        <div>
+          <h4>Clippers edit and distribute short-form content</h4>
+          <p>Verified editors create 30–60 second clips from your source material, add CTAs, and publish to their Instagram Reels and YouTube Shorts audience. We review every clip for quality and brand compliance before it counts.</p>
+        </div>
+      </div>
+      <div class="how-item">
+        <div class="how-num">3</div>
+        <div>
+          <h4>Sales are tracked via your custom link</h4>
+          <p>You provide a unique tracked link. Every purchase that comes through it is attributed to the ClipGrow campaign. Full visibility — you see exactly what we drive and when.</p>
+        </div>
+      </div>
+      <div class="how-item">
+        <div class="how-num">4</div>
+        <div>
+          <h4>Pay 30% of attributed revenue — nothing else</h4>
+          <p>At the end of each month, you pay ClipGrow 30% of the revenue generated through your tracked link. No setup fee. No retainer. No minimum. If we bring zero sales, you pay zero.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="zero-risk">
+      <h3>Nothing to lose for either party.</h3>
+      <p>
+        You keep <strong>70% of every sale we generate</strong>. We keep 30% as our performance commission — only paid after you collect your revenue. Our clippers are also paid from results, not from your budget. <strong>Every party in this model earns only when the product earns.</strong>
+      </p>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="wa-cta-block">
+      <p class="wa-hint">
+        Ready to run your first campaign? Message us directly on WhatsApp.<br>
+        <strong>+91 80865 55528</strong>
+      </p>
+      <a
+        href="https://wa.me/918086555528?text=Hi%20ClipGrow%2C%20I%27m%20interested%20in%20running%20a%20clipping%20campaign%20for%20my%20brand.%20Let%27s%20talk."
+        class="wa-btn"
+        target="_blank"
+        rel="noopener"
+        id="brand-wa"
+      >
+        <span style="font-size:1.4rem">💬</span>
+        <span>
+          <span class="wa-btn-main">Message ClipGrow on WhatsApp</span>
+          <span class="wa-btn-sub">+91 80865 55528 &nbsp;·&nbsp; Tap to open chat</span>
+        </span>
+      </a>
+      <p class="wa-fine">We respond within a few hours. Discuss your product, audience, and campaign goals — no obligation.</p>
+    </div>
+
+  </div>
+</main>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-logo-sm">
+    <span class="foot-dot"></span>
+    Clip<span>Grow</span>
+  </div>
+  <span>© 2026 ClipGrow · Performance Clipping Network</span>
+  <a href="index.html">For Clippers →</a>
+</footer>
+
+</body>
+</html>

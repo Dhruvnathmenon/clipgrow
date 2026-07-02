@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipGrow — Kerala's First Clipping Agency</title>
+  <meta name="description" content="ClipGrow connects clippers and brands. Clip videos and earn per view, or run performance campaigns that pay only on results." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:       #080D08; --bg-mid: #0B120B;
+      --card:     #0F170F; --card-h: #141E14;
+      --border:   #1A2C1A; --border-s: #223322;
+      --neon:     #3DFF7A; --neon-d: #2CC760;
+      --glow:     rgba(61,255,122,.12); --glow-s: rgba(61,255,122,.22);
+      --white:    #F0F5F0; --text: #C4D4C4;
+      --muted:    #566056; --muted-l: #849484;
+      --red:      #FF4D4D;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; cursor:none; }
+    h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; line-height:1.05; }
+
+    /* ─── CURSOR ─── */
+    #cursor-dot, #cursor-ring { position:fixed; border-radius:50%; pointer-events:none; z-index:9999; transform:translate(-50%,-50%); }
+    #cursor-dot { width:6px; height:6px; background:var(--neon); box-shadow:0 0 12px var(--neon); transition:opacity .3s; }
+    #cursor-ring { width:32px; height:32px; border:1.5px solid rgba(61,255,122,.5); transition:width .25s,height .25s,border-color .25s; }
+    body:has(a:hover) #cursor-ring, body:has(button:hover) #cursor-ring { width:48px; height:48px; border-color:var(--neon); }
+    @media (hover:none) { #cursor-dot,#cursor-ring { display:none; } body { cursor:auto; } }
+
+    /* ─── NAV ─── */
+    nav {
+      position:fixed; top:0; width:100%; z-index:1000;
+      padding:1rem 2.5rem;
+      display:flex; justify-content:space-between; align-items:center; gap:1rem;
+      background:rgba(8,13,8,.88); backdrop-filter:blur(24px);
+      border-bottom:1px solid var(--border); transition:padding .3s;
+    }
+    nav.scrolled { padding:.72rem 2.5rem; }
+    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.3rem; color:var(--white); text-decoration:none; letter-spacing:-.5px; display:flex; align-items:center; gap:.5rem; }
+    .logo-pulse { width:8px; height:8px; background:var(--neon); border-radius:50%; box-shadow:0 0 10px var(--neon); animation:pulse-ring 2s ease-in-out infinite; }
+    @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(61,255,122,.6)} 50%{box-shadow:0 0 0 6px rgba(61,255,122,0)} }
+    .logo span { color:var(--neon); }
+
+    /* Mode toggle pill */
+    .mode-toggle {
+      position:relative; background:var(--card); border:1px solid var(--border);
+      border-radius:7px; padding:3px; display:flex; gap:0; flex-shrink:0;
+    }
+    .mt-btn {
+      position:relative; z-index:1;
+      padding:.38rem 1.1rem; font-size:.78rem; font-weight:700;
+      background:transparent; border:none; color:var(--muted-l);
+      cursor:none; border-radius:5px; transition:color .25s;
+      font-family:'Space Grotesk',sans-serif; white-space:nowrap;
+    }
+    .mt-btn.active { color:#060E06; }
+    .mt-slider {
+      position:absolute; top:3px; bottom:3px; left:3px;
+      width:calc(50% - 3px); background:var(--neon); border-radius:4px;
+      transition:transform .3s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 0 14px var(--glow-s);
+    }
+    .mt-slider.brand { transform:translateX(100%); }
+
+    .nav-links { display:flex; gap:1.8rem; list-style:none; align-items:center; }
+    .nav-links a { color:var(--muted-l); text-decoration:none; font-size:.83rem; font-weight:500; transition:color .2s; position:relative; }
+    .nav-links a::after { content:''; position:absolute; bottom:-3px; left:0; width:0; height:1px; background:var(--neon); transition:width .25s; }
+    .nav-links a:hover { color:var(--white); }
+    .nav-links a:hover::after { width:100%; }
+    .btn-nav { background:var(--neon) !important; color:#060E06 !important; padding:.42rem 1.1rem; border-radius:6px; font-weight:800 !important; font-size:.8rem !important; box-shadow:0 0 16px var(--glow-s); transition:all .2s !important; }
+    .btn-nav:hover { background:var(--white) !important; transform:translateY(-1px); }
+    .btn-nav::after { display:none !important; }
+
+    .hamburger { display:none; flex-direction:column; gap:5px; cursor:pointer; padding:4px; }
+    .hamburger span { width:22px; height:2px; background:var(--white); border-radius:2px; transition:.3s; display:block; }
+    #nav-links.nav-open {
+      display:flex !important; flex-direction:column; position:fixed;
+      top:57px; left:0; right:0; z-index:999;
+      background:rgba(8,13,8,.98); backdrop-filter:blur(20px);
+      padding:1.5rem 1.8rem 2rem; gap:1.2rem;
+      border-bottom:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,.6);
+    }
+
+    /* ─── MODE PANELS ─── */
+    .mode-panel { transition:opacity .35s ease, transform .35s ease; }
+    .mode-panel.hidden { display:none; }
+    @keyframes panelIn { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+    .mode-panel.entering { animation:panelIn .4s cubic-bezier(.4,0,.2,1) forwards; }
+
+    /* ─── TICKER ─── */
+    .ticker-wrap { overflow:hidden; background:var(--neon); padding:.5rem 0; }
+    .ticker-track { display:flex; animation:ticker 22s linear infinite; white-space:nowrap; }
+    .ticker-track:hover { animation-play-state:paused; }
+    .ticker-item { display:inline-flex; align-items:center; gap:1.2rem; padding:0 2rem; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.78rem; letter-spacing:.8px; text-transform:uppercase; color:#060E06; }
+    .ticker-sep { width:5px; height:5px; background:#060E06; border-radius:50%; flex-shrink:0; }
+    @keyframes ticker { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+    /* ─── HERO (SHARED STRUCTURE) ─── */
+    .hero-sec {
+      min-height:100svh; display:flex; align-items:center; justify-content:center;
+      text-align:center; padding:clamp(6rem,15vw,10rem) clamp(1rem,5vw,2rem) clamp(4rem,8vw,6rem);
+      position:relative; overflow:hidden;
+    }
+    .hero-bg-grid {
+      position:absolute; inset:0; z-index:0;
+      background-image:linear-gradient(rgba(61,255,122,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(61,255,122,.04) 1px,transparent 1px);
+      background-size:60px 60px; animation:grid-drift 20s linear infinite;
+    }
+    @keyframes grid-drift { 0%{background-position:0 0} 100%{background-position:60px 60px} }
+    .hero-glow { position:absolute; top:30%; left:50%; transform:translate(-50%,-50%); width:min(700px,130vw); height:min(500px,90vw); background:radial-gradient(ellipse,rgba(61,255,122,.09) 0%,transparent 65%); pointer-events:none; z-index:0; animation:glow-breathe 5s ease-in-out infinite; }
+    @keyframes glow-breathe { 0%,100%{opacity:.7} 50%{opacity:1} }
+    .hero-inner { position:relative; z-index:1; max-width:920px; margin:0 auto; }
+
+    .hero-kicker { display:inline-flex; align-items:center; gap:.6rem; border:1px solid var(--border-s); color:var(--neon); padding:.35rem 1rem; border-radius:4px; font-size:.71rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:1.8rem; animation:fadeInDown .8s ease both; }
+    .live-pip { width:6px; height:6px; background:var(--neon); border-radius:50%; box-shadow:0 0 8px var(--neon); animation:blink 2s ease-in-out infinite; }
+    @keyframes fadeInDown { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:translateY(0)} }
+
+    .hero-title { font-size:clamp(2.8rem,9vw,7rem); font-weight:900; letter-spacing:-3px; color:var(--white); line-height:.9; margin-bottom:1.5rem; }
+    .hero-title .word { display:inline-block; opacity:0; transform:translateY(40px); animation:wordIn .6s ease forwards; }
+    .hero-title .c-neon { color:var(--neon); text-shadow:0 0 40px rgba(61,255,122,.4); display:inline-block; }
+    @keyframes wordIn { to{opacity:1;transform:translateY(0)} }
+    @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+    .hero-sub { font-size:clamp(.9rem,2.5vw,1.15rem); color:var(--muted-l); max-width:580px; margin:0 auto 2rem; line-height:1.8; opacity:0; animation:fadeIn .8s .9s ease forwards; }
+    .hero-tags { display:flex; gap:.6rem; justify-content:center; flex-wrap:wrap; margin-bottom:2.2rem; opacity:0; animation:fadeIn .8s 1.1s ease forwards; }
+    .tag { background:rgba(61,255,122,.07); border:1px solid var(--border-s); color:var(--muted-l); padding:.28rem .8rem; border-radius:100px; font-size:.74rem; font-weight:500; }
+    .hero-cta { display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; margin-bottom:3.2rem; opacity:0; animation:fadeIn .8s 1.3s ease forwards; }
+    .hero-stats { display:flex; gap:.9rem; justify-content:center; flex-wrap:wrap; opacity:0; animation:fadeIn .8s 1.5s ease forwards; }
+
+    .btn-primary { display:inline-flex; align-items:center; gap:.5rem; background:var(--neon); color:#060E06; padding:.9rem 2.2rem; border-radius:6px; font-weight:800; font-size:.97rem; text-decoration:none; border:none; cursor:none; font-family:'Space Grotesk',sans-serif; transition:all .25s; box-shadow:0 4px 28px var(--glow-s); }
+    .btn-primary:hover { background:var(--white); transform:translateY(-2px); box-shadow:0 8px 40px var(--glow-s); }
+    .btn-ghost { display:inline-flex; align-items:center; gap:.5rem; background:transparent; color:var(--muted-l); padding:.9rem 2rem; border-radius:6px; font-weight:600; font-size:.95rem; text-decoration:none; border:1px solid var(--border-s); cursor:none; font-family:'Space Grotesk',sans-serif; transition:all .25s; }
+    .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
+
+    .stat-pill { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:.9rem 1.4rem; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,.4); transition:transform .3s,box-shadow .3s; animation:float-drift 4s ease-in-out infinite; }
+    .stat-pill:nth-child(2){animation-delay:.7s} .stat-pill:nth-child(3){animation-delay:1.4s} .stat-pill:nth-child(4){animation-delay:2.1s} .stat-pill:nth-child(5){animation-delay:2.8s}
+    @keyframes float-drift { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    .stat-pill:hover { transform:translateY(-8px) !important; box-shadow:0 12px 36px rgba(0,0,0,.5),0 0 0 1px var(--neon); }
+    .sp-val { font-size:1.3rem; font-weight:900; color:var(--neon); font-family:'Space Grotesk',sans-serif; text-shadow:0 0 20px var(--glow-s); line-height:1; }
+    .sp-lbl { font-size:.62rem; color:var(--muted); font-weight:600; margin-top:.2rem; letter-spacing:.5px; text-transform:uppercase; }
+
+    /* ─── SHARED SECTION STYLES ─── */
+    section { padding:clamp(3.5rem,8vw,6rem) clamp(1rem,4vw,2rem); }
+    .container { max-width:1100px; margin:0 auto; }
+    .sec-eyebrow { display:flex; align-items:center; gap:.6rem; font-size:.67rem; font-weight:700; letter-spacing:2.5px; text-transform:uppercase; color:var(--neon); margin-bottom:.9rem; }
+    .sec-eyebrow::before { content:''; display:block; width:18px; height:1px; background:var(--neon); }
+    .sec-title { font-size:clamp(1.8rem,4.5vw,3.2rem); font-weight:800; color:var(--white); letter-spacing:-1.2px; margin-bottom:.9rem; line-height:1; }
+    .sec-sub { font-size:clamp(.84rem,2vw,.97rem); color:var(--muted-l); max-width:540px; line-height:1.8; }
+
+    .reveal { opacity:0; transform:translateY(28px); transition:opacity .7s ease,transform .7s ease; }
+    .reveal.in { opacity:1; transform:translateY(0); }
+    .reveal-l { opacity:0; transform:translateX(-28px); transition:opacity .7s ease,transform .7s ease; }
+    .reveal-l.in { opacity:1; transform:translateX(0); }
+    .reveal-r { opacity:0; transform:translateX(28px); transition:opacity .7s ease,transform .7s ease; }
+    .reveal-r.in { opacity:1; transform:translateX(0); }
+    .delay-1{transition-delay:.1s} .delay-2{transition-delay:.2s} .delay-3{transition-delay:.3s} .delay-4{transition-delay:.4s} .delay-5{transition-delay:.5s}
+
+    /* ─── CLIPPER: WHY ─── */
+    .why-grid { display:grid; grid-template-columns:1fr 1fr; gap:clamp(2rem,5vw,5rem); align-items:center; margin-top:clamp(2rem,4vw,3.5rem); }
+    .why-hl { font-size:clamp(2rem,5vw,3.8rem); font-weight:900; color:var(--white); letter-spacing:-1.5px; line-height:.95; margin-bottom:1.4rem; }
+    .why-hl .hl { color:var(--neon); }
+
+    .bullet-list { list-style:none; display:flex; flex-direction:column; gap:.9rem; margin-top:1.2rem; }
+    .bullet-list li { position:relative; padding-left:1.5rem; font-size:clamp(.84rem,2vw,.93rem); color:var(--muted-l); line-height:1.75; }
+    .bullet-list li::before { content:'→'; position:absolute; left:0; top:.1rem; color:var(--neon); font-weight:700; line-height:1; }
+    .bullet-list li strong { color:var(--white); }
+
+    .green-strip { margin-top:1.8rem; padding:1rem 1.3rem; border-left:3px solid var(--neon); background:var(--glow); border-radius:0 6px 6px 0; font-size:clamp(.8rem,2vw,.9rem); color:var(--text); line-height:1.75; }
+    .green-strip strong { color:var(--neon); }
+
+    .why-cards { display:flex; flex-direction:column; gap:1rem; }
+    .why-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.2rem 1.3rem; display:flex; align-items:flex-start; gap:1rem; transition:all .3s; box-shadow:0 2px 12px rgba(0,0,0,.3); }
+    .why-card:hover { border-color:var(--neon); transform:translateX(5px); box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 0 1px var(--neon); }
+    .wc-bar { width:3px; min-width:3px; align-self:stretch; min-height:32px; background:var(--neon); border-radius:3px; box-shadow:0 0 10px var(--glow-s); }
+    .why-card h4 { font-size:.91rem; font-weight:700; color:var(--white); margin-bottom:.22rem; }
+    .why-card p  { font-size:.8rem; color:var(--muted-l); line-height:1.65; }
+
+    /* ─── CLIPPER: HOW ─── */
+    .steps { display:grid; grid-template-columns:repeat(4,1fr); gap:1.2rem; margin-top:clamp(2rem,4vw,3rem); }
+    .step { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1.2rem,3vw,1.8rem) clamp(1rem,2.5vw,1.4rem); transition:all .35s; position:relative; overflow:hidden; box-shadow:0 2px 14px rgba(0,0,0,.35); }
+    .step::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--neon); transform:scaleX(0); transform-origin:left; transition:transform .4s ease; }
+    .step:hover::before { transform:scaleX(1); }
+    .step:hover { border-color:var(--neon); transform:translateY(-6px); box-shadow:0 16px 40px rgba(0,0,0,.5),0 0 0 1px var(--neon),0 4px 20px var(--glow); }
+    .step-n { width:32px; height:32px; background:var(--neon); color:#060E06; border-radius:4px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:.8rem; margin-bottom:1.1rem; font-family:'Space Grotesk',sans-serif; box-shadow:0 0 14px var(--glow-s); }
+    .step h4 { font-size:clamp(.84rem,2vw,.94rem); font-weight:700; color:var(--white); margin-bottom:.5rem; }
+    .step p  { font-size:clamp(.74rem,1.8vw,.81rem); color:var(--muted-l); line-height:1.7; }
+
+    /* ─── CAMPAIGNS ─── */
+    .camp-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr)); gap:1.5rem; margin-top:2rem; }
+    .camp-card { background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; transition:all .35s; box-shadow:0 4px 20px rgba(0,0,0,.4); }
+    .camp-card:hover { border-color:var(--neon); transform:translateY(-5px); box-shadow:0 20px 50px rgba(0,0,0,.6),0 0 0 1px var(--neon),0 4px 24px var(--glow); }
+    .camp-head { background:var(--card-h); padding:1.2rem 1.3rem; border-bottom:1px solid var(--border); }
+    .live-tag { display:inline-flex; align-items:center; gap:.45rem; font-size:.67rem; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--neon); margin-bottom:.7rem; }
+    .live-pip2 { width:5px; height:5px; background:var(--neon); border-radius:50%; box-shadow:0 0 6px var(--neon); animation:blink 2s infinite; }
+    .camp-head h3 { font-size:1rem; font-weight:700; color:var(--white); margin-bottom:.2rem; }
+    .camp-head p  { font-size:.79rem; color:var(--muted-l); }
+    .camp-body { padding:1.2rem 1.3rem; }
+    .camp-nums { display:grid; grid-template-columns:repeat(3,1fr); gap:.7rem; margin-bottom:1rem; }
+    .cn { text-align:center; }
+    .cn-v { font-size:clamp(.84rem,2.5vw,.98rem); font-weight:800; color:var(--neon); font-family:'Space Grotesk',sans-serif; }
+    .cn-l { font-size:.62rem; color:var(--muted); font-weight:500; margin-top:.14rem; text-transform:uppercase; letter-spacing:.4px; }
+    .camp-note { background:rgba(61,255,122,.04); border:1px solid var(--border-s); border-radius:6px; padding:.65rem .9rem; font-size:.77rem; color:var(--muted-l); margin-bottom:.9rem; line-height:1.55; }
+    .camp-btn { display:block; text-align:center; background:var(--neon); color:#060E06; padding:.7rem; border-radius:6px; font-weight:800; font-size:.85rem; text-decoration:none; font-family:'Space Grotesk',sans-serif; transition:all .2s; box-shadow:0 2px 14px var(--glow-s); }
+    .camp-btn:hover { background:var(--white); box-shadow:0 4px 24px var(--glow-s); }
+
+    /* ─── EARNINGS TIERS ─── */
+    .tiers { display:grid; grid-template-columns:repeat(4,1fr); gap:1.2rem; margin-top:clamp(1.8rem,4vw,2.5rem); }
+    .tier { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1.4rem,3vw,2rem) clamp(1.1rem,2.5vw,1.5rem); text-align:center; transition:all .35s; box-shadow:0 2px 14px rgba(0,0,0,.35); }
+    .tier:hover { transform:translateY(-8px); box-shadow:0 20px 48px rgba(0,0,0,.5); }
+    .tier.hot { border-color:var(--neon); background:linear-gradient(150deg,rgba(61,255,122,.08) 0%,var(--card) 55%); box-shadow:0 4px 32px rgba(0,0,0,.5),0 0 0 1px var(--neon),0 8px 40px var(--glow); }
+    .tier-tag { font-size:.65rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted-l); margin-bottom:1.2rem; display:block; }
+    .tier.hot .tier-tag { color:var(--neon); }
+    .tier-cpm { font-size:clamp(2rem,5vw,2.8rem); font-weight:900; font-family:'Space Grotesk',sans-serif; line-height:1; color:var(--white); margin-bottom:.15rem; }
+    .tier-cpm .rs { font-size:55%; vertical-align:super; }
+    .tier.hot .tier-cpm { color:var(--neon); text-shadow:0 0 28px var(--glow-s); }
+    .tier-unit  { font-size:.74rem; color:var(--muted); margin-bottom:1rem; }
+    .tier-range { font-size:.81rem; font-weight:600; color:var(--muted-l); margin-bottom:.45rem; }
+    .tier-desc  { font-size:.77rem; color:var(--muted); line-height:1.6; }
+    .payout-strip { margin-top:1.5rem; padding:1rem clamp(.9rem,3vw,1.4rem); border-left:3px solid var(--neon); background:var(--glow); border-radius:0 8px 8px 0; font-size:clamp(.8rem,2vw,.88rem); color:var(--muted-l); line-height:1.7; }
+    .payout-strip strong { color:var(--white); }
+
+    /* ─── CALCULATOR (shared) ─── */
+    .calc-box { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:clamp(1.4rem,4vw,2.5rem); margin-top:clamp(1.5rem,3vw,2.5rem); box-shadow:0 8px 48px rgba(0,0,0,.5); }
+    .calc-cols { display:grid; grid-template-columns:1fr 1fr; gap:clamp(1.5rem,4vw,3rem); }
+    .c-lbl { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.48rem; letter-spacing:.3px; }
+    .s-wrap { margin-bottom:1.4rem; }
+    .s-row  { display:flex; justify-content:space-between; align-items:center; margin-bottom:.38rem; flex-wrap:wrap; gap:.2rem; }
+    .s-hint { font-size:.68rem; color:var(--muted); }
+    .s-cur  { font-size:.95rem; font-weight:700; color:var(--neon); font-family:'Space Grotesk',sans-serif; }
+    input[type="range"] { width:100%; height:3px; background:var(--border-s); border-radius:4px; outline:none; -webkit-appearance:none; cursor:pointer; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; background:var(--neon); border-radius:50%; cursor:pointer; box-shadow:0 0 12px var(--glow-s); transition:transform .2s; }
+    input[type="range"]::-webkit-slider-thumb:hover { transform:scale(1.4); }
+
+    .pills { display:flex; gap:.5rem; flex-wrap:wrap; }
+    .pill { padding:.33rem .78rem; border-radius:5px; font-size:.75rem; font-weight:700; border:1px solid var(--border-s); background:transparent; color:var(--muted-l); cursor:pointer; transition:all .2s; font-family:'Inter',sans-serif; }
+    .pill.on { background:var(--neon); border-color:var(--neon); color:#060E06; box-shadow:0 0 14px var(--glow-s); }
+    .pill:hover:not(.on) { border-color:var(--neon); color:var(--neon); }
+
+    .calc-out { display:flex; flex-direction:column; gap:1.3rem; justify-content:center; }
+    .result-box { text-align:center; padding:clamp(1.1rem,3vw,1.8rem); background:linear-gradient(135deg,rgba(61,255,122,.08) 0%,transparent 100%); border:1px solid var(--neon); border-radius:10px; box-shadow:0 4px 24px var(--glow),inset 0 1px 0 rgba(61,255,122,.1); }
+    .r-lbl { font-size:.7rem; color:var(--muted); margin-bottom:.3rem; letter-spacing:.5px; text-transform:uppercase; }
+    .r-num { font-size:clamp(2rem,7vw,3.2rem); font-weight:900; color:var(--neon); font-family:'Space Grotesk',sans-serif; line-height:1; text-shadow:0 0 32px var(--glow-s); }
+    .r-sub { font-size:.78rem; color:var(--muted-l); margin-top:.38rem; }
+    .bd-row { display:flex; justify-content:space-between; align-items:center; padding:.52rem 0; border-bottom:1px solid var(--border); font-size:.81rem; }
+    .bd-row:last-child { border-bottom:none; }
+    .bd-row span:first-child { color:var(--muted); }
+    .bd-row span:last-child  { font-weight:700; color:var(--white); font-family:'Space Grotesk',sans-serif; }
+
+    /* ─── REVENUE TRACKER ─── */
+    .tr-controls { display:grid; grid-template-columns:1fr 1fr; gap:2rem; margin-bottom:1.8rem; }
+    .tr-lbl { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.45rem; }
+    .num-input { width:100%; background:var(--card); border:1px solid var(--border-s); border-radius:6px; padding:.65rem .95rem; color:var(--white); font-size:1rem; font-family:'Inter',sans-serif; font-weight:600; outline:none; transition:border-color .2s; }
+    .num-input:focus { border-color:var(--neon); box-shadow:0 0 0 3px var(--glow); }
+    .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.4rem; }
+    .flow-c { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(.9rem,2.5vw,1.3rem) clamp(.7rem,2vw,1.1rem); text-align:center; box-shadow:0 2px 14px rgba(0,0,0,.3); transition:all .3s; }
+    .flow-c:hover { border-color:var(--border-s); }
+    .flow-c.hi { border-color:var(--neon); background:rgba(61,255,122,.05); box-shadow:0 4px 20px var(--glow); }
+    .fl { font-size:.62rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:.4rem; }
+    .fv { font-size:clamp(.94rem,2.5vw,1.2rem); font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--white); }
+    .flow-c.hi .fv { color:var(--neon); text-shadow:0 0 18px var(--glow-s); }
+    .tr-note { padding:1rem clamp(.85rem,3vw,1.4rem); border-left:3px solid var(--border-s); font-size:.79rem; color:var(--muted); line-height:1.75; }
+    .tr-note strong { color:var(--muted-l); }
+
+    /* ─── TERMS ─── */
+    .terms-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-top:2rem; }
+    .term { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1rem,2.5vw,1.3rem) clamp(1rem,2.5vw,1.4rem); display:flex; gap:.9rem; align-items:flex-start; box-shadow:0 2px 12px rgba(0,0,0,.3); transition:all .3s; }
+    .term.ok { border-left:3px solid var(--neon); }
+    .term.no { border-left:3px solid var(--red); }
+    .term.ok:hover { border-color:var(--neon); box-shadow:0 6px 24px rgba(0,0,0,.4),0 0 0 1px var(--neon); }
+    .term.no:hover { border-left-color:var(--red); border-color:var(--red); }
+    .t-badge { font-size:.61rem; font-weight:700; letter-spacing:.8px; text-transform:uppercase; padding:.17rem .46rem; border-radius:3px; min-width:44px; text-align:center; margin-top:.1rem; white-space:nowrap; }
+    .t-badge.r { background:rgba(61,255,122,.12); color:var(--neon); }
+    .t-badge.v { background:rgba(255,77,77,.12); color:var(--red); }
+    .term h4 { font-size:clamp(.81rem,2vw,.9rem); font-weight:700; color:var(--white); margin-bottom:.22rem; }
+    .term p  { font-size:clamp(.74rem,1.8vw,.81rem); color:var(--muted-l); line-height:1.6; }
+    .terms-note { margin-top:1.3rem; padding:1rem clamp(.9rem,2.5vw,1.4rem); background:var(--card); border:1px solid var(--border); border-radius:8px; font-size:clamp(.77rem,2vw,.85rem); color:var(--muted-l); line-height:1.75; }
+    .terms-note strong { color:var(--white); }
+    .terms-note .nc { color:var(--neon); }
+
+    /* ─── FAQ ─── */
+    .faq-list { margin-top:2.5rem; max-width:760px; }
+    .faq-item { border-bottom:1px solid var(--border); }
+    .faq-q { display:flex; justify-content:space-between; align-items:center; padding:1.1rem 0; cursor:pointer; font-weight:600; font-size:clamp(.84rem,2vw,.93rem); color:var(--white); transition:color .2s; gap:1rem; }
+    .faq-q:hover { color:var(--neon); }
+    .faq-ic { font-size:1.1rem; color:var(--neon); min-width:20px; text-align:center; transition:transform .3s; font-weight:300; font-family:monospace; }
+    .faq-a { display:none; padding-bottom:1.1rem; font-size:clamp(.79rem,2vw,.87rem); color:var(--muted-l); line-height:1.8; }
+    .faq-a ul { margin-top:.5rem; list-style:none; display:flex; flex-direction:column; gap:.4rem; padding-left:.5rem; }
+    .faq-a ul li::before { content:'—'; color:var(--neon); margin-right:.6rem; }
+    .faq-item.open .faq-a  { display:block; }
+    .faq-item.open .faq-ic { transform:rotate(45deg); }
+    .faq-item.open .faq-q  { color:var(--neon); }
+
+    /* ─── FINAL CTA ─── */
+    .cta-wrap { text-align:center; border:1px solid var(--border-s); border-radius:16px; padding:clamp(3rem,8vw,5.5rem) clamp(1.2rem,5vw,2rem); position:relative; overflow:hidden; background:var(--card); box-shadow:0 8px 60px rgba(0,0,0,.6); }
+    .cta-wrap::before { content:''; position:absolute; top:-40%; left:50%; transform:translateX(-50%); width:min(600px,120vw); height:min(500px,90vw); background:radial-gradient(ellipse,rgba(61,255,122,.08) 0%,transparent 65%); pointer-events:none; }
+    .cta-wrap h2 { font-size:clamp(2rem,6vw,4.5rem); font-weight:900; letter-spacing:-1.5px; color:var(--white); margin-bottom:1rem; position:relative; }
+    .cta-wrap h2 .nc { color:var(--neon); text-shadow:0 0 48px rgba(61,255,122,.5); }
+    .cta-wrap p { color:var(--muted-l); font-size:clamp(.88rem,2vw,1rem); max-width:460px; margin:0 auto 2.2rem; position:relative; line-height:1.8; }
+    .cta-fine { font-size:.72rem; color:var(--muted); margin-top:1rem; }
+
+    /* ─── BRAND: OFFER CARDS ─── */
+    .offer-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; margin-top:clamp(2rem,4vw,3rem); }
+    .offer-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.8rem 1.4rem; transition:all .35s; box-shadow:0 4px 20px rgba(0,0,0,.4); text-align:center; }
+    .offer-card:hover { border-color:var(--neon); transform:translateY(-6px); box-shadow:0 20px 48px rgba(0,0,0,.5),0 0 0 1px var(--neon),0 8px 32px var(--glow); }
+    .oc-icon { font-size:2rem; margin-bottom:.9rem; display:block; }
+    .offer-card h3 { font-size:1rem; font-weight:700; color:var(--white); margin-bottom:.5rem; }
+    .offer-card p  { font-size:.81rem; color:var(--muted-l); line-height:1.65; }
+
+    /* ─── BRAND: OBJECTIVE TOGGLE ─── */
+    .obj-toggle { display:flex; gap:0; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:4px; width:fit-content; margin:2rem 0 1.5rem; }
+    .obj-btn { padding:.55rem 1.6rem; border-radius:5px; border:none; background:transparent; color:var(--muted-l); font-weight:700; font-size:.85rem; cursor:pointer; transition:all .25s; font-family:'Space Grotesk',sans-serif; position:relative; z-index:1; }
+    .obj-btn.active { color:#060E06; }
+    .obj-slider { position:absolute; top:4px; bottom:4px; left:4px; width:calc(50% - 4px); background:var(--neon); border-radius:5px; transition:transform .3s cubic-bezier(.4,0,.2,1); box-shadow:0 0 14px var(--glow-s); }
+    .obj-slider.traffic { transform:translateX(100%); }
+    .obj-wrap { position:relative; }
+    .obj-panel { display:none; }
+    .obj-panel.active { display:block; }
+
+    /* ─── BRAND CALCULATOR ─── */
+    .brand-calc-grid { display:grid; grid-template-columns:1fr 1fr; gap:clamp(1.5rem,4vw,3rem); }
+
+    .input-group { margin-bottom:1.2rem; }
+    .input-label { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.45rem; }
+    .input-row { display:flex; align-items:center; gap:.5rem; }
+    .inp-prefix { font-size:.9rem; font-weight:700; color:var(--neon); font-family:'Space Grotesk',sans-serif; }
+    .brand-input { width:100%; background:var(--card); border:1px solid var(--border-s); border-radius:6px; padding:.62rem .9rem; color:var(--white); font-size:.97rem; font-family:'Space Grotesk',sans-serif; font-weight:700; outline:none; transition:border-color .2s; -moz-appearance:textfield; }
+    .brand-input::-webkit-inner-spin-button, .brand-input::-webkit-outer-spin-button { -webkit-appearance:none; }
+    .brand-input:focus { border-color:var(--neon); box-shadow:0 0 0 3px var(--glow); }
+
+    .brand-results { display:flex; flex-direction:column; gap:1rem; }
+    .br-main { text-align:center; padding:clamp(1.2rem,3vw,1.8rem); background:linear-gradient(135deg,rgba(61,255,122,.08) 0%,transparent 100%); border:1px solid var(--neon); border-radius:10px; box-shadow:0 4px 24px var(--glow),inset 0 1px 0 rgba(61,255,122,.1); }
+    .br-label { font-size:.7rem; color:var(--muted); margin-bottom:.3rem; letter-spacing:.5px; text-transform:uppercase; }
+    .br-value { font-size:clamp(1.8rem,6vw,3rem); font-weight:900; color:var(--neon); font-family:'Space Grotesk',sans-serif; line-height:1; text-shadow:0 0 32px var(--glow-s); }
+    .br-sub { font-size:.77rem; color:var(--muted-l); margin-top:.35rem; }
+    .br-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+    .br-card { background:var(--bg-mid); border:1px solid var(--border); border-radius:8px; padding:.85rem 1rem; }
+    .br-card-lbl { font-size:.62rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:.3rem; }
+    .br-card-val { font-size:1.1rem; font-weight:800; font-family:'Space Grotesk',sans-serif; color:var(--white); }
+    .br-card-val.green { color:var(--neon); }
+    .br-breakdown { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .br-row { display:flex; justify-content:space-between; align-items:center; padding:.55rem 1rem; border-bottom:1px solid var(--border); font-size:.8rem; }
+    .br-row:last-child { border-bottom:none; }
+    .br-row span:first-child { color:var(--muted); }
+    .br-row span:last-child  { font-weight:700; color:var(--white); font-family:'Space Grotesk',sans-serif; }
+
+    /* ─── BRAND: HOW IT WORKS ─── */
+    .brand-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; margin-top:clamp(2rem,4vw,3rem); }
+
+    /* ─── FOOTER ─── */
+    footer { background:#040804; border-top:1px solid var(--border); padding:clamp(1.8rem,4vw,2.5rem); text-align:center; }
+    .foot-logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.1rem; color:var(--white); margin-bottom:.6rem; display:flex; align-items:center; justify-content:center; gap:.45rem; }
+    .foot-logo span { color:var(--neon); }
+    .foot-dot { width:6px; height:6px; background:var(--neon); border-radius:50%; box-shadow:0 0 8px var(--neon); }
+    .foot-links { display:flex; gap:clamp(.8rem,2vw,1.8rem); justify-content:center; margin:.9rem 0; flex-wrap:wrap; }
+    .foot-links a { font-size:.77rem; color:var(--muted); text-decoration:none; transition:color .2s; }
+    .foot-links a:hover { color:var(--neon); }
+    .foot-note { font-size:.7rem; color:var(--muted); margin-top:.4rem; line-height:1.7; }
+
+    .wa-float { position:fixed; bottom:1.8rem; right:1.8rem; background:#25D366; color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.35rem; text-decoration:none; box-shadow:0 4px 20px rgba(37,211,102,.5); z-index:998; transition:all .3s; animation:wa-bounce 3s ease-in-out infinite; }
+    @keyframes wa-bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+    .wa-float:hover { transform:scale(1.12) translateY(-3px) !important; box-shadow:0 8px 32px rgba(37,211,102,.65); animation-play-state:paused; }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width:900px) {
+      nav { padding:.9rem 1.4rem; flex-wrap:wrap; gap:.6rem; }
+      .nav-links { display:none; }
+      .hamburger { display:flex; }
+      .why-grid { grid-template-columns:1fr; gap:2rem; }
+      .steps, .brand-steps { grid-template-columns:repeat(2,1fr); }
+      .tiers { grid-template-columns:repeat(2,1fr); }
+      .calc-cols, .brand-calc-grid { grid-template-columns:1fr; gap:1.8rem; }
+      .flow { grid-template-columns:repeat(2,1fr); }
+      .terms-grid { grid-template-columns:1fr; }
+      .tr-controls { grid-template-columns:1fr; }
+      .camp-grid { grid-template-columns:1fr; }
+      .offer-grid { grid-template-columns:1fr; gap:1rem; }
+      .br-grid { grid-template-columns:1fr; }
+    }
+    @media (max-width:600px) {
+      nav { padding:.85rem 1.2rem; }
+      .mode-toggle { order:-1; width:100%; }
+      .mt-btn { flex:1; text-align:center; }
+      .hero-cta { flex-direction:column; align-items:stretch; }
+      .hero-cta .btn-primary, .hero-cta .btn-ghost { text-align:center; justify-content:center; width:100%; }
+      .hero-stats { gap:.6rem; }
+      .steps, .brand-steps { grid-template-columns:1fr; }
+      .tiers { grid-template-columns:1fr; }
+      .tiers .tier.hot { order:-1; }
+      .flow { grid-template-columns:repeat(2,1fr); gap:.7rem; }
+      .flow-c { padding:.85rem .7rem; }
+      .fv { font-size:.93rem; }
+      .obj-btn { padding:.5rem 1rem; font-size:.78rem; }
+      footer { padding:1.8rem 1.2rem; }
+    }
+    @media (max-width:400px) {
+      nav { padding:.75rem 1rem; }
+      .flow { grid-template-columns:1fr 1fr; gap:.55rem; }
+      .br-grid { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- CURSOR -->
+<div id="cursor-dot"></div>
+<div id="cursor-ring"></div>
+
+<!-- NAV -->
+<nav id="main-nav">
+  <a href="index.html" class="logo"><span class="logo-pulse"></span>Clip<span>Grow</span></a>
+  <div class="mode-toggle">
+    <button class="mt-btn active" data-mode="clipper" onclick="setMode('clipper')">For Clippers</button>
+    <button class="mt-btn" data-mode="brand" onclick="setMode('brand')">For Brands</button>
+    <div class="mt-slider" id="mt-slider"></div>
+  </div>
+  <ul class="nav-links" id="nav-links">
+    <li><a href="#" onclick="scrollToSection('why','how-brand')">About</a></li>
+    <li><a href="#" onclick="scrollToSection('how','how-brand')">How it Works</a></li>
+    <li><a href="#" onclick="scrollToSection('earnings','brand-calc-sec')">Earnings</a></li>
+    <li><a href="#" onclick="scrollToSection('faq','brand-faq')">FAQ</a></li>
+    <li><a href="brands.html">For Brands</a></li>
+    <li><a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-nav" target="_blank" rel="noopener">Join Free</a></li>
+  </ul>
+  <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
+</nav>
+
+<!-- ═══════════════════ CLIPPER PANEL ═══════════════════ -->
+<div id="clipper-panel" class="mode-panel">
+
+  <!-- Ticker -->
+  <div class="ticker-wrap" style="margin-top:57px">
+    <div class="ticker-track">
+      <span class="ticker-item">Kerala's First Clipping Agency <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
+      <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Kerala's First Clipping Agency <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
+      <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
+      <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <section class="hero-sec" id="hero">
+    <div class="hero-bg-grid"></div>
+    <div class="hero-glow"></div>
+    <div class="hero-inner">
+      <div class="hero-kicker"><span class="live-pip"></span>Kerala's First Clipping Agency — Recruiting Now</div>
+      <h1 class="hero-title">
+        <span class="word" style="animation-delay:.1s">Clip</span>
+        <span class="word c-neon" style="animation-delay:.25s">&nbsp;Videos.</span><br>
+        <span class="word" style="animation-delay:.4s">Earn</span>
+        <span class="word c-neon" style="animation-delay:.55s">&nbsp;Every View.</span>
+      </h1>
+      <p class="hero-sub">The side hustle that pays you for your skill — not your followers. Zero investment. Brand provides everything. Get paid per 1,000 views, every month via UPI.</p>
+      <div class="hero-tags">
+        <span class="tag">Zero Investment</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Ages 14+</span>
+      </div>
+      <div class="hero-cta">
+        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" target="_blank" rel="noopener">Join WhatsApp Community</a>
+        <a href="#how" class="btn-ghost">See how it works</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-pill"><div class="sp-val" data-count="30" data-prefix="₹">₹30</div><div class="sp-lbl">Starting CPM</div></div>
+        <div class="stat-pill"><div class="sp-val" data-count="50" data-prefix="₹">₹50</div><div class="sp-lbl">Pro CPM</div></div>
+        <div class="stat-pill"><div class="sp-val">UPI</div><div class="sp-lbl">Monthly Payout</div></div>
+        <div class="stat-pill"><div class="sp-val" data-count="500" data-prefix="₹">₹500</div><div class="sp-lbl">Min Withdrawal</div></div>
+        <div class="stat-pill"><div class="sp-val">Free</div><div class="sp-lbl">To Join</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why ClipGrow -->
+  <section id="why" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">The Opportunity</div>
+      <div class="why-grid">
+        <div class="reveal-l">
+          <h2 class="why-hl">Get paid for<br><span class="hl">your skill.</span><br>Not your followers.</h2>
+          <ul class="bullet-list">
+            <li>Brands have long-form content — podcasts, interviews, course previews — getting almost zero reach on YouTube.</li>
+            <li>We repurpose it into <strong>30–60 second Reels and Shorts</strong> engineered to go viral.</li>
+            <li>You earn by <strong>performance</strong>. Every 1,000 verified views = real money in your UPI account.</li>
+            <li>Better edits, better hooks — the more you earn. <strong>No cap. No ceiling. Complete creative agency.</strong></li>
+            <li>We provide the brand's raw videos, style guides, caption templates, and posting instructions. <strong>You just create.</strong></li>
+          </ul>
+          <div class="green-strip">Start with a phone and CapCut — it's completely free. Zero investment, zero risk. If you have skill, there is <strong>absolutely no reason not to try this.</strong></div>
+        </div>
+        <div class="why-cards">
+          <div class="why-card reveal delay-1"><div class="wc-bar"></div><div><h4>You — The Clipper</h4><p>Earn ₹30–₹50 per 1,000 verified views with no cap. One viral clip in a big campaign can hit ₹10,000+ in a single month — from your phone, on your time.</p></div></div>
+          <div class="why-card reveal delay-2"><div class="wc-bar"></div><div><h4>The Brand</h4><p>Pays nothing upfront. Every rupee tied to real results. More clips = more reach = more sales. Pure performance marketing.</p></div></div>
+          <div class="why-card reveal delay-3"><div class="wc-bar"></div><div><h4>ClipGrow</h4><p>Kerala's first clipping agency. We manage campaigns, verify quality, share all brand resources, and handle payouts. Aligned with everyone's success.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how">
+    <div class="container">
+      <div class="sec-eyebrow reveal">The Process</div>
+      <h2 class="sec-title reveal delay-1">Four steps from zero to paid.</h2>
+      <p class="sec-sub reveal delay-2">No experience. No followers. No investment. Brand provides every resource — you show up and create.</p>
+      <div class="steps">
+        <div class="step reveal delay-1"><div class="step-n">1</div><h4>Join the Community</h4><p>Hit the WhatsApp button. Campaigns drop every week — source videos, CPM rates, style guides, caption templates, and post instructions all in one place.</p></div>
+        <div class="step reveal delay-2"><div class="step-n">2</div><h4>Pick a Campaign</h4><p>Browse active campaigns. Full brand guidelines and source material shared before you commit. No surprises, no hidden rules.</p></div>
+        <div class="step reveal delay-3"><div class="step-n">3</div><h4>Edit and Post</h4><p>Download the source video, cut the best 30–60 seconds, add captions on CapCut (free), and post to Instagram Reels or YouTube Shorts.</p></div>
+        <div class="step reveal delay-4"><div class="step-n">4</div><h4>Submit and Get Paid</h4><p>Submit your link at month-end. We verify views and quality. Approved clippers receive UPI payment by the 7th of the following month.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Campaigns -->
+  <section id="campaigns" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Live Now</div>
+      <h2 class="sec-title reveal delay-1">Active Campaigns</h2>
+      <p class="sec-sub reveal delay-2">All brand resources — source videos, style guides, caption templates — shared in the community before you start.</p>
+      <div class="camp-grid">
+        <div class="camp-card reveal delay-1">
+          <div class="camp-head"><div class="live-tag"><span class="live-pip2"></span>Active</div><h3>E-Commerce Mastery Course</h3><p>Indian ecommerce training — ₹8,000 course</p></div>
+          <div class="camp-body">
+            <div class="camp-nums"><div class="cn"><div class="cn-v">₹30–₹50</div><div class="cn-l">CPM (tier-based)</div></div><div class="cn"><div class="cn-v">Monthly</div><div class="cn-l">Payout</div></div><div class="cn"><div class="cn-v">Reels / Shorts</div><div class="cn-l">Platform</div></div></div>
+            <div class="camp-note">Accepting clippers now. All brand guidelines, source videos and caption templates provided. Verification in 24–48 hrs.</div>
+            <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="camp-btn" target="_blank" rel="noopener">Join Community to Apply</a>
+          </div>
+        </div>
+        <div class="camp-card reveal delay-2" style="opacity:.38;pointer-events:none">
+          <div class="camp-head"><div class="live-tag" style="color:var(--muted)">Coming Soon</div><h3>Campaign Slot 2</h3><p>New brand partnership — details dropping soon</p></div>
+          <div class="camp-body">
+            <div class="camp-nums"><div class="cn"><div class="cn-v" style="color:var(--muted-l)">TBA</div><div class="cn-l">CPM Rate</div></div><div class="cn"><div class="cn-v" style="color:var(--muted-l)">Monthly</div><div class="cn-l">Payout</div></div><div class="cn"><div class="cn-v" style="color:var(--muted-l)">Shorts</div><div class="cn-l">Platform</div></div></div>
+            <div class="camp-note">Join the community to get first access when this goes live.</div>
+            <span class="camp-btn" style="background:var(--border);cursor:default;box-shadow:none">Coming Soon</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Earnings Tiers -->
+  <section id="earnings">
+    <div class="container">
+      <div class="sec-eyebrow reveal">What You Earn</div>
+      <h2 class="sec-title reveal delay-1">Performance-based tiers.</h2>
+      <p class="sec-sub reveal delay-2">More views this month = higher CPM. Tiers auto-calculate from your verified views every 30 days.</p>
+      <div class="tiers">
+        <div class="tier reveal delay-1"><span class="tier-tag">Beginner</span><div class="tier-cpm"><span class="rs">₹</span>30</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">0 – 10,000 views / month</div><div class="tier-desc">Start from zero. No minimum clip count. Earn while you learn the skill.</div></div>
+        <div class="tier hot reveal delay-2"><span class="tier-tag">Active</span><div class="tier-cpm"><span class="rs">₹</span>40</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">10,000 – 50,000 views / month</div><div class="tier-desc">Most clippers hit Active in 2–4 weeks. Consistent posting with strong hooks gets you here.</div></div>
+        <div class="tier reveal delay-3"><span class="tier-tag">Pro</span><div class="tier-cpm"><span class="rs">₹</span>50</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">50,000 – 1,00,000 views / month</div><div class="tier-desc">For dedicated clippers building consistent reach across multiple campaigns.</div></div>
+        <div class="tier reveal delay-4"><span class="tier-tag">Elite</span><div class="tier-cpm" style="font-size:clamp(1.2rem,4vw,1.55rem);margin-top:.4rem;color:var(--neon)">Contact us</div><div class="tier-unit">custom rate + bonuses</div><div class="tier-range">1,00,000+ views / month</div><div class="tier-desc">Hit 1L views and we negotiate a custom CPM plus monthly performance bonuses.</div></div>
+      </div>
+      <div class="payout-strip reveal"><strong>Monthly payout cycle.</strong> Views locked last day of month. UPI payments by the 7th. Min payout ₹500 — balance rolls over.</div>
+    </div>
+  </section>
+
+  <!-- Calculator -->
+  <section id="calculator" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Earnings Calculator</div>
+      <h2 class="sec-title reveal delay-1">How much could you make?</h2>
+      <p class="sec-sub reveal delay-2">Move the sliders. See your real potential based on clips posted and average views.</p>
+      <div class="calc-box reveal">
+        <div class="calc-cols">
+          <div>
+            <div class="s-wrap"><label class="c-lbl">Clips posted per month</label><div class="s-row"><span class="s-hint">1</span><span class="s-cur" id="c-clips">15 clips</span><span class="s-hint">60</span></div><input type="range" id="sl-clips" min="1" max="60" value="15" oninput="calcUpdate()"></div>
+            <div class="s-wrap"><label class="c-lbl">Average views per clip</label><div class="s-row"><span class="s-hint">500</span><span class="s-cur" id="c-views">5,000</span><span class="s-hint">1L</span></div><input type="range" id="sl-views" min="500" max="100000" step="500" value="5000" oninput="calcUpdate()"></div>
+            <div><label class="c-lbl" style="margin-bottom:.6rem">Your tier</label><div class="pills"><button class="pill on" onclick="setTier(30,this)">₹30 Beginner</button><button class="pill" onclick="setTier(40,this)">₹40 Active</button><button class="pill" onclick="setTier(50,this)">₹50 Pro</button></div></div>
+          </div>
+          <div class="calc-out">
+            <div class="result-box"><div class="r-lbl">Estimated Monthly Earnings</div><div class="r-num" id="r-earn">₹2,250</div><div class="r-sub" id="r-sub">from 75,000 total views</div></div>
+            <div>
+              <div class="bd-row"><span>Clips per month</span><span id="bd-clips">15</span></div>
+              <div class="bd-row"><span>Avg views per clip</span><span id="bd-avv">5,000</span></div>
+              <div class="bd-row"><span>Total monthly views</span><span id="bd-total">75,000</span></div>
+              <div class="bd-row"><span>CPM rate</span><span id="bd-cpm" style="color:var(--neon)">₹30</span></div>
+              <div class="bd-row"><span>Monthly earnings</span><span id="bd-earn" style="color:var(--neon)">₹2,250</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Revenue Tracker -->
+  <section id="tracker">
+    <div class="container">
+      <div class="sec-eyebrow reveal">The Full Picture</div>
+      <h2 class="sec-title reveal delay-1">How the money flows.</h2>
+      <p class="sec-sub reveal delay-2">See exactly how views translate into revenue — for the brand, ClipGrow, and you.</p>
+      <div class="tr-controls reveal">
+        <div><label class="tr-lbl">Total views your clips generate this month</label><div class="s-row" style="margin-bottom:.4rem"><span class="s-hint">10K</span><span class="s-cur" id="tr-v-lbl">1,00,000</span><span class="s-hint">50L</span></div><input type="range" id="tr-slider" min="10000" max="5000000" step="10000" value="100000" oninput="trackerUpdate()"></div>
+        <div><label class="tr-lbl">Course / product price (₹)</label><input type="number" class="num-input" id="tr-price" value="8000" min="100" step="100" oninput="trackerUpdate()"></div>
+      </div>
+      <div class="flow reveal">
+        <div class="flow-c"><div class="fl">Views Generated</div><div class="fv" id="tr-views">1,00,000</div></div>
+        <div class="flow-c"><div class="fl">Link Clicks (1%)</div><div class="fv" id="tr-clicks">1,000</div></div>
+        <div class="flow-c"><div class="fl">Sales (1% of clicks)</div><div class="fv" id="tr-sales">10</div></div>
+        <div class="flow-c"><div class="fl">Brand Revenue</div><div class="fv" id="tr-brand-rev">₹80,000</div></div>
+        <div class="flow-c hi"><div class="fl">ClipGrow Cut (30%)</div><div class="fv" id="tr-cg-cut">₹24,000</div></div>
+        <div class="flow-c hi"><div class="fl">Clippers Paid (₹30 CPM)</div><div class="fv" id="tr-clipper-pay">₹3,000</div></div>
+        <div class="flow-c hi"><div class="fl">Agency Margin</div><div class="fv" id="tr-margin">₹21,000</div></div>
+        <div class="flow-c hi"><div class="fl">Your Earnings</div><div class="fv" id="tr-you">₹3,000</div></div>
+      </div>
+      <div class="tr-note reveal"><strong>Conversion assumptions:</strong> 1% of viewers click the brand link → 1% of those buy = 0.01% overall. Conservative for a warm short-form video audience. Brand pays ClipGrow 30% of attributed revenue. Clippers earn based on monthly verified view tier.</div>
+    </div>
+  </section>
+
+  <!-- Terms -->
+  <section id="rules" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Rules of the Game</div>
+      <h2 class="sec-title reveal delay-1">What gets your clip verified.</h2>
+      <p class="sec-sub reveal delay-2">Only verified clips are paid. Clear rules. No grey areas.</p>
+      <div class="terms-grid reveal">
+        <div class="term ok"><div class="t-badge r">Required</div><div><h4>Clear CTA in every clip</h4><p>Every clip must include a CTA — on-screen text, voiceover, or caption pointing to the brand's link. No CTA = not verified.</p></div></div>
+        <div class="term ok"><div class="t-badge r">Required</div><div><h4>Brand style followed</h4><p>Clips must follow the brand guidelines provided. Tone, framing, messaging must match. Full brief given before you start.</p></div></div>
+        <div class="term ok"><div class="t-badge r">Required</div><div><h4>Original edit from source</h4><p>Each submission must be independently created from the provided source material. Re-uploading another clipper's work disqualifies you.</p></div></div>
+        <div class="term ok"><div class="t-badge r">Required</div><div><h4>Organic views only</h4><p>Only genuine viewer views count. Paid views, bots, or view farms result in permanent account disqualification.</p></div></div>
+        <div class="term no"><div class="t-badge v">Violation</div><div><h4>False or exaggerated claims</h4><p>Do not make claims the brand hasn't approved — no fake testimonials, fabricated income figures, or misleading statistics.</p></div></div>
+        <div class="term no"><div class="t-badge v">Violation</div><div><h4>Spam distribution</h4><p>Do not push clips into unrelated groups. Post only where audiences genuinely match the content niche.</p></div></div>
+      </div>
+      <div class="terms-note reveal"><strong>Brand-specific terms</strong> — restrictions, posting schedule, account requirements — disclosed in full in the WhatsApp community <span class="nc">before you commit to any campaign.</span></div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Common Questions</div>
+      <h2 class="sec-title reveal delay-1">FAQ</h2>
+      <div class="faq-list reveal">
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">Do I need followers or an existing account? <span class="faq-ic">+</span></div><div class="faq-a">No. You can start on a brand new account with zero followers. What determines your earnings is edit quality and your hook — not your audience size. Many clippers on fresh accounts have generated lakhs of views in their first month.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What do I need to get started? <span class="faq-ic">+</span></div><div class="faq-a">A smartphone is all you need.<ul><li>CapCut — free editing app</li><li>Instagram or YouTube account — free to create</li><li>Stable internet for uploads</li></ul>We provide all brand source videos, style guides, caption templates, and posting instructions inside the community.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What resources does ClipGrow provide? <span class="faq-ic">+</span></div><div class="faq-a">Everything you need:<ul><li>Brand source videos (raw footage to clip from)</li><li>Brand style guide and tone of voice</li><li>Caption and CTA templates</li><li>Posting schedule and platform guidelines</li><li>A community of clippers to learn from</li></ul></div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">When exactly do I get paid? <span class="faq-ic">+</span></div><div class="faq-a">Views locked last day of month. UPI payments by the 7th of the following month.<ul><li>Minimum payout: ₹500</li><li>Balance below ₹500 rolls over</li><li>Supported: GPay, PhonePe, Paytm</li></ul></div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">Is there any fee to join? <span class="faq-ic">+</span></div><div class="faq-a">None. ClipGrow is completely free. No fee to access campaigns, receive payouts, or participate. Zero investment — ever. You clip, we verify, you get paid.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What if a clip goes viral — millions of views? <span class="faq-ic">+</span></div><div class="faq-a">You get paid for every verified view with no cap. 10L views at ₹50 CPM = ₹50,000 from a single month. One algorithm-catching clip can change your income entirely.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section id="clipper-cta" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="cta-wrap reveal">
+        <h2>Get paid for your skill.<br><span class="nc">There's no reason not to try.</span></h2>
+        <p>Zero investment. Zero followers required. All resources provided. One WhatsApp join and you're in Kerala's first clipping agency — earning on your own terms.</p>
+        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" style="font-size:1rem;padding:1rem 2.5rem" target="_blank" rel="noopener">Join WhatsApp Community — Free</a>
+        <p class="cta-fine">No followers required &nbsp;·&nbsp; No joining fee &nbsp;·&nbsp; All resources provided &nbsp;·&nbsp; Paid every month via UPI</p>
+      </div>
+    </div>
+  </section>
+
+</div><!-- end clipper-panel -->
+
+
+<!-- ═══════════════════ BRAND PANEL ═══════════════════ -->
+<div id="brand-panel" class="mode-panel hidden">
+
+  <!-- Ticker -->
+  <div class="ticker-wrap" style="margin-top:57px;background:#060E06;border-bottom:1px solid var(--border)">
+    <div class="ticker-track">
+      <span class="ticker-item" style="color:var(--neon)">Only Pay When You Get Results <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">No Results = No Payment <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">We Handle All Distribution <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Brand Guidelines Enforced <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">20% Management Fee Only <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Kerala's First Clipping Agency <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Only Pay When You Get Results <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">No Results = No Payment <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">We Handle All Distribution <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Brand Guidelines Enforced <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">20% Management Fee Only <span class="ticker-sep" style="background:var(--neon)"></span></span>
+      <span class="ticker-item" style="color:var(--neon)">Kerala's First Clipping Agency <span class="ticker-sep" style="background:var(--neon)"></span></span>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <section class="hero-sec" id="brand-hero">
+    <div class="hero-bg-grid"></div>
+    <div class="hero-glow"></div>
+    <div class="hero-inner">
+      <div class="hero-kicker"><span class="live-pip"></span>For Brands — An Offer You Can't Refuse</div>
+      <h1 class="hero-title">
+        <span class="word" style="animation-delay:.1s">Only pay</span><br>
+        <span class="word c-neon" style="animation-delay:.25s">when you</span>
+        <span class="word c-neon" style="animation-delay:.38s">get paid.</span>
+      </h1>
+      <p class="hero-sub">We run short-form video campaigns across dozens of creators for your brand. You set the objective. You set the budget. You only pay when the results are real — zero upfront, zero risk.</p>
+      <div class="hero-tags">
+        <span class="tag">No Upfront Cost</span><span class="tag">Performance Based</span><span class="tag">We Handle Distribution</span><span class="tag">Guidelines Verified</span><span class="tag">20% Management Fee</span>
+      </div>
+      <div class="hero-cta">
+        <a href="https://wa.me/918086555528?text=Hi%20ClipGrow%2C%20I%27m%20interested%20in%20running%20a%20campaign%20for%20my%20brand." class="btn-primary" target="_blank" rel="noopener">Message Us on WhatsApp</a>
+        <a href="#brand-calc-sec" class="btn-ghost">See the calculator</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-pill"><div class="sp-val">0</div><div class="sp-lbl">Upfront Cost</div></div>
+        <div class="stat-pill"><div class="sp-val">20%</div><div class="sp-lbl">Management Fee</div></div>
+        <div class="stat-pill"><div class="sp-val">100%</div><div class="sp-lbl">Distribution Handled</div></div>
+        <div class="stat-pill"><div class="sp-val">0</div><div class="sp-lbl">Pay if No Results</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The Offer -->
+  <section id="how-brand" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">The Deal</div>
+      <h2 class="sec-title reveal delay-1">An offer you can't refuse.</h2>
+      <p class="sec-sub reveal delay-2">A model so aligned with your success that there is literally no reason not to say yes.</p>
+      <div class="offer-grid">
+        <div class="offer-card reveal delay-1"><span class="oc-icon">🎯</span><h3>Pay Only for Results</h3><p>No results, no payment. We only earn when your campaign generates real sales or traffic. Every rupee you spend is tied to measurable outcomes.</p></div>
+        <div class="offer-card reveal delay-2"><span class="oc-icon">📦</span><h3>We Handle Everything</h3><p>Campaign brief, creator recruitment, content review, distribution, compliance — handled entirely by ClipGrow. You share your product. We do the rest.</p></div>
+        <div class="offer-card reveal delay-3"><span class="oc-icon">🛡️</span><h3>Brand Safety Guaranteed</h3><p>Every clip is reviewed before it counts. We verify CTA accuracy, guideline compliance, and that your brand is portrayed positively. Violations disqualify clippers permanently.</p></div>
+      </div>
+
+      <!-- How it works for brands -->
+      <div style="margin-top:3.5rem">
+        <h3 class="sec-title reveal" style="font-size:clamp(1.5rem,3.5vw,2.4rem)">How it works for brands.</h3>
+        <div class="brand-steps" style="margin-top:1.5rem">
+          <div class="step reveal delay-1"><div class="step-n">1</div><h4>Share Your Product</h4><p>Send us your product details, existing content (if any), and campaign objective. We build the brief, recruit clippers, and set brand guidelines.</p></div>
+          <div class="step reveal delay-2"><div class="step-n">2</div><h4>We Distribute</h4><p>Dozens of creators clip and post verified content to their Instagram Reels and YouTube Shorts audiences. We review every single clip for brand compliance before it counts.</p></div>
+          <div class="step reveal delay-3"><div class="step-n">3</div><h4>You Pay for Results</h4><p>Tracked via your custom link. Sales and traffic are measured. At month-end, you pay only for the outcomes delivered. No outcome = no invoice.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Brand Calculator -->
+  <section id="brand-calc-sec">
+    <div class="container">
+      <div class="sec-eyebrow reveal">ROI Calculator</div>
+      <h2 class="sec-title reveal delay-1">Calculate your return.</h2>
+      <p class="sec-sub reveal delay-2">Set your budget, objective, and CPM. See exactly what you get — before you commit to anything.</p>
+
+      <div class="calc-box reveal">
+        <!-- Objective Toggle -->
+        <div style="margin-bottom:1.5rem">
+          <p class="c-lbl" style="margin-bottom:.6rem">Campaign Objective</p>
+          <div class="obj-wrap">
+            <div class="obj-toggle">
+              <button class="obj-btn active" onclick="setObj('sales',this)">Sales / Conversions</button>
+              <button class="obj-btn" onclick="setObj('traffic',this)">Traffic / Awareness</button>
+              <div class="obj-slider" id="obj-slider"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SALES PANEL -->
+        <div class="obj-panel active" id="panel-sales">
+          <div class="brand-calc-grid">
+            <div>
+              <div class="input-group">
+                <label class="input-label">Marketing Budget (₹)</label>
+                <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="b-budget" value="50000" min="1000" step="1000" oninput="brandCalc()"></div>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Product / Course Price (₹)</label>
+                <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="b-price" value="8000" min="100" step="100" oninput="brandCalc()"></div>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Editor CPM — what you pay per 1,000 views (₹)</label>
+                <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="b-cpm" value="30" min="10" step="5" oninput="brandCalc()"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem">
+                <div class="input-group">
+                  <label class="input-label">Min payout per video (₹)</label>
+                  <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="b-min" value="200" min="0" step="50" oninput="brandCalc()"></div>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Max payout per video (₹)</label>
+                  <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="b-max" value="5000" min="0" step="100" oninput="brandCalc()"></div>
+                </div>
+              </div>
+              <div class="green-strip" style="margin-top:.8rem;font-size:.78rem">
+                <strong>How it works:</strong> 20% of your budget = ClipGrow's management fee. 80% goes directly to paying editors based on the CPM you set. Editors keep posting until the editor pool is fully used.
+              </div>
+            </div>
+            <div class="brand-results">
+              <div class="br-main">
+                <div class="br-label">Expected Revenue Generated</div>
+                <div class="br-value" id="bs-revenue">₹0</div>
+                <div class="br-sub" id="bs-roi-sub">— calculating —</div>
+              </div>
+              <div class="br-grid">
+                <div class="br-card"><div class="br-card-lbl">ClipGrow Fee (20%)</div><div class="br-card-val" id="bs-fee">₹10,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Editor Pool (80%)</div><div class="br-card-val" id="bs-pool">₹40,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Views Generated</div><div class="br-card-val" id="bs-views">13,33,333</div></div>
+                <div class="br-card"><div class="br-card-lbl">Estimated Sales</div><div class="br-card-val green" id="bs-sales">133</div></div>
+              </div>
+              <div class="br-breakdown">
+                <div class="br-row"><span>Link clicks (1% CTR)</span><span id="bs-clicks">13,333</span></div>
+                <div class="br-row"><span>Sales (1% of clicks)</span><span id="bs-sales2">133</span></div>
+                <div class="br-row"><span>Revenue (sales × price)</span><span id="bs-rev2" style="color:var(--neon)">₹10,64,000</span></div>
+                <div class="br-row"><span>Your cost (total budget)</span><span id="bs-cost">₹50,000</span></div>
+                <div class="br-row"><span>ROI</span><span id="bs-roival" style="color:var(--neon)">2,028%</span></div>
+                <div class="br-row"><span>Cost per sale</span><span id="bs-cps">₹376</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TRAFFIC PANEL -->
+        <div class="obj-panel" id="panel-traffic">
+          <div class="brand-calc-grid">
+            <div>
+              <div class="input-group">
+                <label class="input-label">Marketing Budget (₹)</label>
+                <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="t-budget" value="50000" min="1000" step="1000" oninput="trafficCalc()"></div>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Editor CPM — what you pay per 1,000 views (₹)</label>
+                <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="t-cpm" value="30" min="10" step="5" oninput="trafficCalc()"></div>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Expected click-through rate (%)</label>
+                <div class="input-row"><input type="range" id="t-ctr" min="0.1" max="5" step="0.1" value="1" oninput="trafficCalc()" style="margin-top:.3rem"><span class="s-cur" id="t-ctr-lbl" style="margin-left:.7rem;white-space:nowrap">1.0%</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem">
+                <div class="input-group">
+                  <label class="input-label">Min payout per video (₹)</label>
+                  <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="t-min" value="200" min="0" step="50" oninput="trafficCalc()"></div>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Max payout per video (₹)</label>
+                  <div class="input-row"><span class="inp-prefix">₹</span><input type="number" class="brand-input" id="t-max" value="5000" min="0" step="100" oninput="trafficCalc()"></div>
+                </div>
+              </div>
+              <div class="green-strip" style="margin-top:.8rem;font-size:.78rem">
+                <strong>How it works:</strong> 20% goes to ClipGrow. 80% pays editors via your CPM rate. The content drives traffic to your landing page or social profiles — brand awareness at scale.
+              </div>
+            </div>
+            <div class="brand-results">
+              <div class="br-main">
+                <div class="br-label">Estimated Website Visitors</div>
+                <div class="br-value" id="bt-visitors">13,333</div>
+                <div class="br-sub" id="bt-cpv-sub">₹3.75 cost per visitor</div>
+              </div>
+              <div class="br-grid">
+                <div class="br-card"><div class="br-card-lbl">ClipGrow Fee (20%)</div><div class="br-card-val" id="bt-fee">₹10,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Editor Pool (80%)</div><div class="br-card-val" id="bt-pool">₹40,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Views Generated</div><div class="br-card-val" id="bt-views">13,33,333</div></div>
+                <div class="br-card"><div class="br-card-lbl">Cost per Visitor</div><div class="br-card-val green" id="bt-cpv">₹3.75</div></div>
+              </div>
+              <div class="br-breakdown">
+                <div class="br-row"><span>Total views (from editor pool)</span><span id="bt-views2">13,33,333</span></div>
+                <div class="br-row"><span>Website visitors (at set CTR)</span><span id="bt-vis2" style="color:var(--neon)">13,333</span></div>
+                <div class="br-row"><span>Cost per visitor</span><span id="bt-cpv2" style="color:var(--neon)">₹3.75</span></div>
+                <div class="br-row"><span>Equivalent Google Ads spend*</span><span id="bt-gads">₹6,66,650</span></div>
+                <div class="br-row"><span>Your total budget</span><span id="bt-cost">₹50,000</span></div>
+              </div>
+              <p style="font-size:.68rem;color:var(--muted);margin-top:.5rem">*Google Ads avg CPC ₹50. Comparison for reference only.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Why ClipGrow for Brands -->
+  <section style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Why ClipGrow</div>
+      <h2 class="sec-title reveal delay-1">Everything handled. Zero risk.</h2>
+      <p class="sec-sub reveal delay-2">We're not an ad agency. We're a performance network that only wins when you win.</p>
+      <div class="why-grid" style="margin-top:2rem">
+        <div class="reveal-l">
+          <ul class="bullet-list">
+            <li>You <strong>never pay upfront</strong>. Budget is allocated, not charged. Payment only occurs on results.</li>
+            <li>We recruit and manage <strong>dozens of creators</strong> for your campaign — you approve the brief, we handle distribution.</li>
+            <li>Every clip is <strong>verified against your brand guidelines</strong> before it counts. We check CTA, tone, accuracy, and brand portrayal.</li>
+            <li>All creators <strong>follow guidelines that protect your brand</strong> — no false claims, no misleading statistics, no off-brand content.</li>
+            <li>You get a <strong>custom tracking link</strong> — every attributed sale or visit is measured. Full transparency, no guesswork.</li>
+            <li>Our fee is <strong>20% of your marketing budget</strong> as a management fee. The remaining 80% goes directly to paying editors based on your CPM.</li>
+          </ul>
+        </div>
+        <div class="why-cards">
+          <div class="why-card reveal delay-1"><div class="wc-bar"></div><div><h4>Brand Safety First</h4><p>Guidelines are shared and enforced. Clippers who post content that misrepresents your brand are permanently removed and that content is not counted.</p></div></div>
+          <div class="why-card reveal delay-2"><div class="wc-bar"></div><div><h4>Scale On Demand</h4><p>One campaign can have 5 or 50 clippers working simultaneously. The more budget you allocate, the wider your reach — without extra management effort.</p></div></div>
+          <div class="why-card reveal delay-3"><div class="wc-bar"></div><div><h4>Completely Transparent</h4><p>You set the CPM, the min/max per video, the campaign objective. You approve the brief. We execute. No hidden markups, no mystery fees.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Brand FAQ -->
+  <section id="brand-faq">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Brand Questions</div>
+      <h2 class="sec-title reveal delay-1">FAQ — For Brands</h2>
+      <div class="faq-list reveal">
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How does the payment model work exactly? <span class="faq-ic">+</span></div><div class="faq-a">You set a marketing budget. 20% goes to ClipGrow as a management/distribution fee. The remaining 80% forms the editor pool — paid to creators based on the CPM you set, until the pool is exhausted. If results don't meet your expectations, you renegotiate the next campaign or walk away. No lock-in.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How do you verify brand guidelines? <span class="faq-ic">+</span></div><div class="faq-a">Every clip is manually reviewed before it counts toward payout or reporting. We check: CTA accuracy, brand tone, visual style, no false claims, no off-brand content. Clips that fail are disqualified — the clipper is not paid and the content is flagged. Your brand is always shown in a positive, accurate light.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What is the minimum budget to run a campaign? <span class="faq-ic">+</span></div><div class="faq-a">Contact us to discuss — we tailor campaigns based on your product price, target audience, and objectives. We'll recommend a budget that makes mathematical sense for your ROI expectations before you commit.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How do you track sales and traffic? <span class="faq-ic">+</span></div><div class="faq-a">You provide a unique tracked link (UTM-tagged or your own tracking tool). Every sale or click that comes through that link is attributed to the campaign. We don't touch your backend — you have full visibility at all times.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What types of products work best? <span class="faq-ic">+</span></div><div class="faq-a">Short-form video works best for digital products (courses, SaaS, subscriptions), e-commerce with a clear value proposition, service businesses, and personal brands. If your product solves a real problem for 14–35 year old Indians, it's a great fit for this format.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Brand CTA -->
+  <section style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="cta-wrap reveal">
+        <h2>No results.<br><span class="nc">No payment.</span><br>No reason to say no.</h2>
+        <p>An offer that's completely aligned with your success. We only win when you win. Message us on WhatsApp to discuss your brand and get your campaign live this week.</p>
+        <a href="https://wa.me/918086555528?text=Hi%20ClipGrow%2C%20I%27m%20interested%20in%20running%20a%20clipping%20campaign%20for%20my%20brand." class="btn-primary" style="font-size:1rem;padding:1rem 2.5rem" target="_blank" rel="noopener">Message Us on WhatsApp</a>
+        <p class="cta-fine">+91 80865 55528 &nbsp;·&nbsp; We respond within a few hours &nbsp;·&nbsp; No commitment required</p>
+      </div>
+    </div>
+  </section>
+
+</div><!-- end brand-panel -->
+
+<!-- FOOTER (shared) -->
+<footer>
+  <div class="foot-logo"><span class="foot-dot"></span>Clip<span>Grow</span></div>
+  <div class="foot-links">
+    <a href="#" onclick="setMode('clipper')">For Clippers</a>
+    <a href="#" onclick="setMode('brand')">For Brands</a>
+    <a href="#" onclick="setMode('clipper');setTimeout(()=>document.getElementById('faq').scrollIntoView({behavior:'smooth'}),500)">FAQ</a>
+    <a href="https://wa.me/918086555528" target="_blank">Contact</a>
+  </div>
+  <p class="foot-note">© 2026 ClipGrow — Kerala's First Performance Clipping Agency. All rights reserved.</p>
+  <p class="foot-note">Monthly UPI payouts &nbsp;·&nbsp; Verified views only &nbsp;·&nbsp; Free to join &nbsp;·&nbsp; All resources provided</p>
+</footer>
+
+<!-- WA FLOAT -->
+<a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="wa-float" title="Join ClipGrow on WhatsApp" target="_blank" rel="noopener">💬</a>
+
+<script>
+  /* ── Cursor ── */
+  const dot = document.getElementById('cursor-dot');
+  const ring = document.getElementById('cursor-ring');
+  let mx=0,my=0,rx=0,ry=0;
+  document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
+  (function animC(){dot.style.left=mx+'px';dot.style.top=my+'px';rx+=(mx-rx)*.12;ry+=(my-ry)*.12;ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(animC);})();
+
+  /* ── Nav scroll ── */
+  const navEl=document.getElementById('main-nav');
+  window.addEventListener('scroll',()=>navEl.classList.toggle('scrolled',scrollY>60),{passive:true});
+
+  /* ── Mobile nav ── */
+  const navLinks=document.getElementById('nav-links');
+  const burger=document.getElementById('hamburger');
+  function toggleMenu(){
+    const open=navLinks.classList.contains('nav-open');
+    navLinks.classList.toggle('nav-open',!open);
+    burger.querySelectorAll('span').forEach((s,i)=>{
+      if(!open){if(i===0)s.style.transform='translateY(7px) rotate(45deg)';if(i===1)s.style.opacity='0';if(i===2)s.style.transform='translateY(-7px) rotate(-45deg)';}
+      else{s.style.transform='';s.style.opacity='';}
+    });
+  }
+  navLinks.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{navLinks.classList.remove('nav-open');burger.querySelectorAll('span').forEach(s=>{s.style.transform='';s.style.opacity='';});}));
+  document.addEventListener('click',e=>{if(!navLinks.contains(e.target)&&!burger.contains(e.target)){navLinks.classList.remove('nav-open');burger.querySelectorAll('span').forEach(s=>{s.style.transform='';s.style.opacity='';})}});
+
+  /* ── Mode Switch ── */
+  let currentMode='clipper';
+  function setMode(mode){
+    if(mode===currentMode)return;
+    currentMode=mode;
+    const from=document.getElementById((mode==='clipper'?'brand':'clipper')+'-panel');
+    const to=document.getElementById(mode+'-panel');
+    const slider=document.getElementById('mt-slider');
+
+    // Toggle pill
+    document.querySelectorAll('.mt-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+    slider.classList.toggle('brand',mode==='brand');
+
+    // Animate out
+    from.style.opacity='0';
+    from.style.transform='translateY(-10px)';
+    from.style.pointerEvents='none';
+
+    setTimeout(()=>{
+      from.classList.add('hidden');
+      from.style.opacity=''; from.style.transform=''; from.style.pointerEvents='';
+      to.classList.remove('hidden');
+      to.classList.add('entering');
+      setTimeout(()=>to.classList.remove('entering'),450);
+      window.scrollTo({top:0,behavior:'smooth'});
+      // Re-observe reveals in new panel
+      document.querySelectorAll('#'+mode+'-panel .reveal, #'+mode+'-panel .reveal-l, #'+mode+'-panel .reveal-r').forEach(el=>{
+        el.classList.remove('in');
+        revObs.observe(el);
+      });
+      if(mode==='brand'){brandCalc();trafficCalc();}
+    },320);
+  }
+
+  function scrollToSection(clipperId,brandId){
+    const id=currentMode==='clipper'?clipperId:brandId;
+    const el=document.getElementById(id);
+    if(el)el.scrollIntoView({behavior:'smooth'});
+  }
+
+  /* ── Scroll reveal ── */
+  const revObs=new IntersectionObserver(entries=>{
+    entries.forEach(e=>{if(e.isIntersecting)e.target.classList.add('in');});
+  },{threshold:.07});
+  document.querySelectorAll('.reveal,.reveal-l,.reveal-r').forEach(el=>revObs.observe(el));
+
+  /* ── Counter animation ── */
+  function animCount(el,target,prefix=''){
+    let start=0;const dur=1400;const t0=performance.now();
+    (function step(now){
+      const p=Math.min((now-t0)/dur,1);
+      const e=1-Math.pow(1-p,3);
+      el.textContent=prefix+Math.round(e*target).toLocaleString('en-IN');
+      if(p<1)requestAnimationFrame(step);
+    })(performance.now());
+  }
+  const statObs=new IntersectionObserver(entries=>{
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        e.target.querySelectorAll('[data-count]').forEach(el=>animCount(el,+el.dataset.count,el.dataset.prefix||''));
+        statObs.unobserve(e.target);
+      }
+    });
+  },{threshold:.5});
+  document.querySelectorAll('.hero-stats').forEach(el=>statObs.observe(el));
+
+  /* ── Clipper Calculator ── */
+  let cpm=30;
+  function setTier(rate,btn){cpm=rate;document.querySelectorAll('.pill').forEach(b=>b.classList.remove('on'));btn.classList.add('on');calcUpdate();}
+  function fmt(n){if(n>=10000000)return(n/10000000).toFixed(1)+'Cr';if(n>=100000)return(n/100000).toFixed(1)+'L';return n.toLocaleString('en-IN');}
+  function rs(n){return'₹'+n.toLocaleString('en-IN');}
+  function calcUpdate(){
+    const clips=+document.getElementById('sl-clips').value;
+    const views=+document.getElementById('sl-views').value;
+    const total=clips*views; const earn=Math.round((total/1000)*cpm);
+    document.getElementById('c-clips').textContent=clips+' clips';
+    document.getElementById('c-views').textContent=fmt(views);
+    document.getElementById('r-earn').textContent=rs(earn);
+    document.getElementById('r-sub').textContent='from '+fmt(total)+' total views';
+    document.getElementById('bd-clips').textContent=clips;
+    document.getElementById('bd-avv').textContent=fmt(views);
+    document.getElementById('bd-total').textContent=fmt(total);
+    document.getElementById('bd-cpm').textContent='₹'+cpm;
+    document.getElementById('bd-earn').textContent=rs(earn);
+  }
+
+  /* ── Revenue Tracker ── */
+  function trackerUpdate(){
+    const views=+document.getElementById('tr-slider').value;
+    const price=+document.getElementById('tr-price').value||8000;
+    const clicks=Math.round(views*.01); const sales=Math.round(clicks*.01);
+    const brandR=sales*price; const cgCut=Math.round(brandR*.30);
+    const clipPay=Math.round((views/1000)*30); const margin=Math.max(cgCut-clipPay,0);
+    document.getElementById('tr-v-lbl').textContent=fmt(views);
+    document.getElementById('tr-views').textContent=fmt(views);
+    document.getElementById('tr-clicks').textContent=fmt(clicks);
+    document.getElementById('tr-sales').textContent=sales;
+    document.getElementById('tr-brand-rev').textContent=rs(brandR);
+    document.getElementById('tr-cg-cut').textContent=rs(cgCut);
+    document.getElementById('tr-clipper-pay').textContent=rs(clipPay);
+    document.getElementById('tr-margin').textContent=rs(margin);
+    document.getElementById('tr-you').textContent=rs(clipPay);
+  }
+
+  /* ── Brand Objective Toggle ── */
+  let currentObj='sales';
+  function setObj(obj,btn){
+    currentObj=obj;
+    document.querySelectorAll('.obj-btn').forEach(b=>b.classList.toggle('active',b===btn));
+    document.getElementById('obj-slider').classList.toggle('traffic',obj==='traffic');
+    document.getElementById('panel-sales').classList.toggle('active',obj==='sales');
+    document.getElementById('panel-traffic').classList.toggle('active',obj==='traffic');
+  }
+
+  /* ── Brand Sales Calculator ── */
+  function brandCalc(){
+    const budget=+document.getElementById('b-budget').value||50000;
+    const price=+document.getElementById('b-price').value||8000;
+    const bcpm=+document.getElementById('b-cpm').value||30;
+    const fee=Math.round(budget*.20);
+    const pool=budget-fee;
+    const views=Math.round((pool/bcpm)*1000);
+    const clicks=Math.round(views*.01);
+    const sales=Math.round(clicks*.01);
+    const revenue=sales*price;
+    const roi=budget>0?Math.round((revenue/budget-1)*100):0;
+    const cps=sales>0?Math.round(budget/sales):0;
+    document.getElementById('bs-revenue').textContent=rs(revenue);
+    document.getElementById('bs-roi-sub').textContent=roi>0?'ROI: +'+roi+'% on your budget':'ROI: calculating...';
+    document.getElementById('bs-fee').textContent=rs(fee);
+    document.getElementById('bs-pool').textContent=rs(pool);
+    document.getElementById('bs-views').textContent=fmt(views);
+    document.getElementById('bs-sales').textContent=sales.toLocaleString('en-IN');
+    document.getElementById('bs-clicks').textContent=fmt(clicks);
+    document.getElementById('bs-sales2').textContent=sales.toLocaleString('en-IN');
+    document.getElementById('bs-rev2').textContent=rs(revenue);
+    document.getElementById('bs-cost').textContent=rs(budget);
+    document.getElementById('bs-roival').textContent=(roi>0?'+':'')+roi+'%';
+    document.getElementById('bs-cps').textContent=cps>0?rs(cps):'—';
+  }
+
+  /* ── Brand Traffic Calculator ── */
+  function trafficCalc(){
+    const budget=+document.getElementById('t-budget').value||50000;
+    const bcpm=+document.getElementById('t-cpm').value||30;
+    const ctr=(+document.getElementById('t-ctr').value||1)/100;
+    const fee=Math.round(budget*.20);
+    const pool=budget-fee;
+    const views=Math.round((pool/bcpm)*1000);
+    const visitors=Math.round(views*ctr);
+    const cpv=visitors>0?(budget/visitors).toFixed(2):0;
+    const gads=Math.round(visitors*50);
+    document.getElementById('t-ctr-lbl').textContent=(ctr*100).toFixed(1)+'%';
+    document.getElementById('bt-visitors').textContent=fmt(visitors);
+    document.getElementById('bt-cpv-sub').textContent='₹'+cpv+' cost per visitor';
+    document.getElementById('bt-fee').textContent=rs(fee);
+    document.getElementById('bt-pool').textContent=rs(pool);
+    document.getElementById('bt-views').textContent=fmt(views);
+    document.getElementById('bt-cpv').textContent='₹'+cpv;
+    document.getElementById('bt-views2').textContent=fmt(views);
+    document.getElementById('bt-vis2').textContent=fmt(visitors);
+    document.getElementById('bt-cpv2').textContent='₹'+cpv;
+    document.getElementById('bt-gads').textContent=rs(gads);
+    document.getElementById('bt-cost').textContent=rs(budget);
+  }
+
+  /* ── FAQ ── */
+  function toggleFaq(el){el.parentElement.classList.toggle('open');}
+
+  /* Init */
+  calcUpdate();trackerUpdate();brandCalc();trafficCalc();
+</script>
+</body>
+</html>
