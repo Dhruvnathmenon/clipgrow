@@ -104,8 +104,8 @@
     .mode-panel.entering { animation:panelIn .4s cubic-bezier(.4,0,.2,1) forwards; }
 
     /* ─── TICKER ─── */
-    .ticker-wrap { overflow:hidden; background:var(--neon); padding:0; height:34px; display:flex; align-items:center; }
-    .ticker-track { display:flex; align-items:center; animation:ticker 22s linear infinite; white-space:nowrap; height:100%; }
+    .ticker-wrap { overflow:hidden; background:var(--neon); padding:0.5rem 0; display:flex; align-items:center; }
+    .ticker-track { display:flex; align-items:center; animation:ticker 22s linear infinite; white-space:nowrap; }
     .ticker-track:hover { animation-play-state:paused; }
     .ticker-item { display:inline-flex; align-items:center; gap:1.2rem; padding:0 2rem; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.78rem; letter-spacing:.8px; text-transform:uppercase; color:#060E06; line-height:1; }
     .ticker-sep { width:5px; height:5px; background:#060E06; border-radius:50%; flex-shrink:0; }
@@ -417,10 +417,17 @@
       .obj-btn { padding:.5rem 1rem; font-size:.78rem; }
       footer { padding:1.8rem 1.2rem; }
     }
+    @media (max-width:768px) {
+      .nav-brand { gap: 0.6rem; }
+      .logo { font-size: 1.35rem; }
+      .mt-btn { padding: .3rem .7rem; font-size: .7rem; }
+    }
     @media (max-width:400px) {
       nav { padding:.75rem 1rem; }
       .flow { grid-template-columns:1fr 1fr; gap:.55rem; }
       .br-grid { grid-template-columns:1fr; }
+      .logo { font-size: 1.2rem; }
+      .mt-btn { padding: .25rem .5rem; font-size: .65rem; }
     }
   </style>
 </head>
@@ -717,10 +724,10 @@
       <div class="hero-kicker"><span class="live-pip"></span>For Brands — An Offer You Can't Refuse</div>
       <h1 class="hero-title">
         <span class="word" style="animation-delay:.1s">Only pay</span><br>
-        <span class="word c-neon" style="animation-delay:.25s">when you</span>
-        <span class="word c-neon" style="animation-delay:.38s">get paid.</span>
+        <span class="word c-neon" style="animation-delay:.25s">for</span>
+        <span class="word c-neon" style="animation-delay:.38s">results.</span>
       </h1>
-      <p class="hero-sub">We run short-form video campaigns across dozens of creators for your brand. You set the objective. You set the budget. You only pay when the results are real — zero upfront, zero risk.</p>
+      <p class="hero-sub">We run short-form video campaigns across dozens of creators for your brand. <span class="kw">Your marketing budget will be used only for verified views.</span> Zero upfront, zero risk.</p>
       <div class="hero-tags">
         <span class="tag">No Upfront Cost</span><span class="tag">Performance Based</span><span class="tag">We Handle Distribution</span><span class="tag">Guidelines Verified</span><span class="tag">20% Management Fee</span>
       </div>
