@@ -53,11 +53,12 @@
       border-bottom:1px solid var(--border); transition:padding .3s;
     }
     nav.scrolled { padding:.65rem 2rem; }
-    .nav-brand { display:flex; align-items:center; gap:1rem; flex-shrink:0; }
+    .nav-brand { display:flex; align-items:center; gap:1rem; flex-shrink:0; margin-left: 35px; }
     .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.55rem; color:var(--white); text-decoration:none; letter-spacing:-.8px; display:flex; align-items:center; gap:.45rem; }
     .logo-pulse { width:9px; height:9px; background:var(--neon); border-radius:50%; box-shadow:0 0 12px var(--neon); animation:pulse-ring 2s ease-in-out infinite; flex-shrink:0; }
     @keyframes pulse-ring { 0%,100%{box-shadow:0 0 0 0 rgba(61,255,122,.6)} 50%{box-shadow:0 0 0 7px rgba(61,255,122,0)} }
     .logo .lg { color:var(--neon); }
+    .nav-watermark { position:absolute; left:2rem; top:50%; transform:translateY(-50%); height:24px; width:auto; filter:grayscale(100%) opacity(0.3); z-index:10; pointer-events:none; }
 
     /* Mode toggle pill */
     .mode-toggle {
@@ -429,6 +430,8 @@
       .nav-brand { justify-content: center; width: 100%; position: relative; gap: 0; }
       nav .mode-toggle { display: none; }
       .hamburger { position: absolute; right: 1.2rem; display: flex; }
+      .nav-watermark { left: 1.2rem; }
+      .nav-brand { margin-left: 0; }
       .logo { font-size: 1.35rem; }
       
       .mobile-toggle-wrap { display: block; position: relative; width: 100%; height: 40px; padding: 0; margin-top: 73px; margin-bottom: 20px; }
@@ -462,6 +465,7 @@
 
 <!-- NAV -->
 <nav id="main-nav">
+  <img src="watermark.png" alt="CG" class="nav-watermark">
   <div class="nav-brand">
     <a href="index.html" class="logo"><span class="logo-pulse"></span>Clip<span class="lg">Grow</span></a>
     <div class="mode-toggle">
