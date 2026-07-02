@@ -287,13 +287,13 @@
     .tr-note strong { color:var(--muted-l); }
 
     /* ─── TERMS ─── */
-    .terms-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-top:2rem; }
-    .term { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1rem,2.5vw,1.3rem) clamp(1rem,2.5vw,1.4rem); display:flex; gap:.9rem; align-items:flex-start; box-shadow:0 2px 12px rgba(0,0,0,.3); transition:all .3s; }
+    .terms-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:1.2rem; margin-top:2rem; }
+    .term { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1.2rem,2.5vw,1.4rem); display:flex; flex-direction:column; gap:.7rem; align-items:flex-start; box-shadow:0 2px 12px rgba(0,0,0,.3); transition:all .3s; }
     .term.ok { border-left:3px solid var(--neon); }
     .term.no { border-left:3px solid var(--red); }
     .term.ok:hover { border-color:var(--neon); box-shadow:0 6px 24px rgba(0,0,0,.4),0 0 0 1px var(--neon); }
     .term.no:hover { border-left-color:var(--red); border-color:var(--red); }
-    .t-badge { font-size:.61rem; font-weight:700; letter-spacing:.8px; text-transform:uppercase; padding:.17rem .46rem; border-radius:3px; min-width:44px; text-align:center; margin-top:.1rem; white-space:nowrap; }
+    .t-badge { font-size:.61rem; font-weight:700; letter-spacing:.8px; text-transform:uppercase; padding:.2rem .5rem; border-radius:3px; text-align:center; white-space:nowrap; flex-shrink:0; line-height:1; }
     .t-badge.r { background:rgba(61,255,122,.12); color:var(--neon); }
     .t-badge.v { background:rgba(255,77,77,.12); color:var(--red); }
     .term h4 { font-size:clamp(.81rem,2vw,.9rem); font-weight:700; color:var(--white); margin-bottom:.22rem; }
@@ -421,10 +421,16 @@
       .nav-brand { gap: 0.6rem; }
       .logo { font-size: 1.35rem; }
       .mt-btn { padding: .3rem .7rem; font-size: .7rem; }
+      .terms-grid, .brand-calc-grid, .tr-controls, .offer-grid { grid-template-columns: 1fr; }
+      .steps, .tiers, .flow { grid-template-columns: 1fr 1fr; }
+      .br-main { margin-bottom: 1rem; }
+    }
+    @media (max-width:500px) {
+      .steps, .tiers { grid-template-columns: 1fr; }
     }
     @media (max-width:400px) {
       nav { padding:.75rem 1rem; }
-      .flow { grid-template-columns:1fr 1fr; gap:.55rem; }
+      .flow { gap:.55rem; }
       .br-grid { grid-template-columns:1fr; }
       .logo { font-size: 1.2rem; }
       .mt-btn { padding: .25rem .5rem; font-size: .65rem; }
