@@ -161,12 +161,7 @@
     .btn-ghost { display:inline-flex; align-items:center; gap:.5rem; background:transparent; color:var(--muted-l); padding:.9rem 2rem; border-radius:6px; font-weight:600; font-size:.95rem; text-decoration:none; border:1px solid var(--border-s); cursor:none; font-family:'Space Grotesk',sans-serif; transition:all .25s; }
     .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
     
-    @keyframes shimmer { 0%, 40% { left: -150%; } 100% { left: 150%; } }
-    .btn-primary::before, .btn-nav::before {
-      content:''; position:absolute; top:0; left:-150%; width:100%; height:100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
-      transform: skewX(-20deg); animation: shimmer 4s infinite; pointer-events: none;
-    }
+
 
     .stat-pill { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:.9rem 1.4rem; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,.4); transition:transform .3s,box-shadow .3s; animation:float-drift 4s ease-in-out infinite; }
     .stat-pill:nth-child(2){animation-delay:.7s} .stat-pill:nth-child(3){animation-delay:1.4s} .stat-pill:nth-child(4){animation-delay:2.1s} .stat-pill:nth-child(5){animation-delay:2.8s}
