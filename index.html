@@ -628,29 +628,6 @@
     </div>
   </section>
 
-  <!-- Revenue Tracker -->
-  <section id="tracker">
-    <div class="container">
-      <div class="sec-eyebrow reveal">The Full Picture</div>
-      <h2 class="sec-title reveal delay-1">How the money flows.</h2>
-      <p class="sec-sub reveal delay-2">See exactly how views translate into revenue — for the brand, ClipGrow, and you.</p>
-      <div class="tr-controls reveal">
-        <div><label class="tr-lbl">Total views your clips generate this month</label><div class="s-row" style="margin-bottom:.4rem"><span class="s-hint">10K</span><span class="s-cur" id="tr-v-lbl">1,00,000</span><span class="s-hint">50L</span></div><input type="range" id="tr-slider" min="10000" max="5000000" step="10000" value="100000" oninput="trackerUpdate()"></div>
-        <div><label class="tr-lbl">Course / product price (₹)</label><input type="number" class="num-input" id="tr-price" value="8000" min="100" step="100" oninput="trackerUpdate()"></div>
-      </div>
-      <div class="flow reveal">
-        <div class="flow-c"><div class="fl">Views Generated</div><div class="fv" id="tr-views">1,00,000</div></div>
-        <div class="flow-c"><div class="fl">Link Clicks (1%)</div><div class="fv" id="tr-clicks">1,000</div></div>
-        <div class="flow-c"><div class="fl">Sales (1% of clicks)</div><div class="fv" id="tr-sales">10</div></div>
-        <div class="flow-c"><div class="fl">Brand Revenue</div><div class="fv" id="tr-brand-rev">₹80,000</div></div>
-        <div class="flow-c hi"><div class="fl">ClipGrow Cut (30%)</div><div class="fv" id="tr-cg-cut">₹24,000</div></div>
-        <div class="flow-c hi"><div class="fl">Clippers Paid (₹30 CPM)</div><div class="fv" id="tr-clipper-pay">₹3,000</div></div>
-        <div class="flow-c hi"><div class="fl">Agency Margin</div><div class="fv" id="tr-margin">₹21,000</div></div>
-        <div class="flow-c hi"><div class="fl">Your Earnings</div><div class="fv" id="tr-you">₹3,000</div></div>
-      </div>
-      <div class="tr-note reveal"><strong>Conversion assumptions:</strong> 1% of viewers click the brand link → 1% of those buy = 0.01% overall. Conservative for a warm short-form video audience. Brand pays ClipGrow 30% of attributed revenue. Clippers earn based on monthly verified view tier.</div>
-    </div>
-  </section>
 
   <!-- Terms -->
   <section id="rules" style="background:var(--bg-mid)">
@@ -1091,23 +1068,6 @@
     document.getElementById('bd-earn').textContent=rs(earn);
   }
 
-  /* ── Revenue Tracker ── */
-  function trackerUpdate(){
-    const views=+document.getElementById('tr-slider').value;
-    const price=+document.getElementById('tr-price').value||8000;
-    const clicks=Math.round(views*.01); const sales=Math.round(clicks*.01);
-    const brandR=sales*price; const cgCut=Math.round(brandR*.30);
-    const clipPay=Math.round((views/1000)*30); const margin=Math.max(cgCut-clipPay,0);
-    document.getElementById('tr-v-lbl').textContent=fmt(views);
-    document.getElementById('tr-views').textContent=fmt(views);
-    document.getElementById('tr-clicks').textContent=fmt(clicks);
-    document.getElementById('tr-sales').textContent=sales;
-    document.getElementById('tr-brand-rev').textContent=rs(brandR);
-    document.getElementById('tr-cg-cut').textContent=rs(cgCut);
-    document.getElementById('tr-clipper-pay').textContent=rs(clipPay);
-    document.getElementById('tr-margin').textContent=rs(margin);
-    document.getElementById('tr-you').textContent=rs(clipPay);
-  }
 
   /* ── Brand Objective Toggle ── */
   let currentObj='sales';
@@ -1175,7 +1135,7 @@
   function toggleFaq(el){el.parentElement.classList.toggle('open');}
 
   /* Init */
-  calcUpdate();trackerUpdate();brandCalc();trafficCalc();
+  calcUpdate();brandCalc();trafficCalc();
 </script>
 </body>
 </html>
