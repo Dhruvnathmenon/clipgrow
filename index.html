@@ -463,11 +463,8 @@
     </div>
   </div>
   <ul class="nav-links" id="nav-links">
-    <li><a href="#" onclick="scrollToSection('why','how-brand')">About</a></li>
     <li><a href="#" onclick="scrollToSection('how','how-brand')">How it Works</a></li>
-    <li><a href="#" onclick="scrollToSection('earnings','brand-calc-sec')">Earnings</a></li>
     <li><a href="#" onclick="scrollToSection('faq','brand-faq')">FAQ</a></li>
-    <li><a href="#" onclick="return false;" style="cursor:default; opacity:0.6;">Leaderboard (Soon)</a></li>
     <li><a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-nav" target="_blank" rel="noopener">Join Free</a></li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
@@ -557,6 +554,62 @@
           <div class="why-card reveal delay-3"><div class="wc-bar"></div><div><h4>ClipGrow</h4><p>Kerala's first clipping agency. We manage campaigns, verify quality, share all brand resources, and handle payouts. Aligned with everyone's success.</p></div></div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- The Math -->
+  <section id="math" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Potential Earnings</div>
+      <h2 class="sec-title reveal delay-1">The Math (No Bullshit).</h2>
+      <p class="sec-sub reveal delay-2">We don't have fake screenshots. Here is exactly what you <em>would</em> earn based on real view counts at our starting ₹30 CPM rate.</p>
+      
+      <div class="math-grid reveal delay-3" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1.5rem; margin-top:3rem;">
+        
+        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 1</div>
+          <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The "Okay" Clip</h4>
+          <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem; line-height:1.5;">You find a decent hook, add some basic captions, and the algorithm pushes it a little bit.</p>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-s); padding-top:1rem; margin-bottom:0.5rem;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Total Views</span>
+            <span style="color:var(--white); font-weight:700;">50,000</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Your Payout</span>
+            <span style="color:var(--neon); font-weight:700; font-size:1.2rem;">₹1,500</span>
+          </div>
+        </div>
+
+        <div class="math-card" style="background:var(--card); border:1px solid var(--neon); padding:2rem; border-radius:12px; box-shadow:0 0 20px rgba(61,255,122,0.05); position:relative; overflow:hidden; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--neon);"></div>
+          <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 2</div>
+          <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The Solid Hit</h4>
+          <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem; line-height:1.5;">Great hook, perfect pacing, clean edits. People watch it twice. It hits the explore page.</p>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-s); padding-top:1rem; margin-bottom:0.5rem;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Total Views</span>
+            <span style="color:var(--white); font-weight:700;">250,000</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Your Payout</span>
+            <span style="color:var(--neon); font-weight:700; font-size:1.2rem;">₹7,500</span>
+          </div>
+        </div>
+
+        <div class="math-card" style="background:var(--card); border:1px solid var(--border); padding:2rem; border-radius:12px; transition:transform 0.3s; cursor:default;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:0.8rem; color:var(--neon); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Example 3</div>
+          <h4 style="font-size:1.1rem; margin-bottom:0.5rem; color:var(--white);">The Viral Banger</h4>
+          <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem; line-height:1.5;">You nail the trend. The clip gets shared everywhere and blows up for a whole week.</p>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-s); padding-top:1rem; margin-bottom:0.5rem;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Total Views</span>
+            <span style="color:var(--white); font-weight:700;">1,000,000</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="color:var(--muted-l); font-size:0.85rem;">Your Payout</span>
+            <span style="color:var(--neon); font-weight:700; font-size:1.2rem;">₹30,000</span>
+          </div>
+        </div>
+      </div>
+      <div class="tr-note reveal" style="text-align:center; margin-top:2rem;"><strong>Note:</strong> Payouts are completely uncapped. If you drop 5 clips a month that hit 200k views each, you get paid for 1M views.</div>
     </div>
   </section>
 
