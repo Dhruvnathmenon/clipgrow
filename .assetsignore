@@ -1,0 +1,17 @@
+.git
+.git/**
+node_modules
+src
+.wrangler
+.dev.vars*
+.env*
+wrangler.jsonc
+wrangler.toml
+package.json
+package-lock.json
+schema.sql
+migrations
+.assetsignore
+.gitignore
+remove_blue.py
+*.md

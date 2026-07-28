@@ -238,6 +238,32 @@
     .camp-btn { display:block; text-align:center; background:var(--neon); color:#060E06; padding:.7rem; border-radius:6px; font-weight:800; font-size:.85rem; text-decoration:none; font-family:'Space Grotesk',sans-serif; transition:all .2s; box-shadow:0 2px 14px var(--glow-s); }
     .camp-btn:hover { background:var(--white); box-shadow:0 4px 24px var(--glow-s); }
 
+    /* ─── LIVE CAMPAIGNS (from admin dashboard) ─── */
+    .camp-loading { grid-column:1/-1; text-align:center; padding:2.5rem; color:var(--muted-l); font-size:.88rem; font-style:italic; }
+    .camp-card.live { cursor:pointer; }
+    .camp-budget-bar { height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); margin-bottom:.4rem; }
+    .camp-budget-fill { height:100%; background:var(--neon); box-shadow:0 0 10px var(--glow-s); transition:width .5s ease; }
+    .camp-budget-lbl { font-size:.68rem; color:var(--muted); margin-bottom:.9rem; }
+    .camp-expand { display:flex; align-items:center; justify-content:center; gap:.4rem; font-size:.73rem; color:var(--muted-l); font-weight:600; padding-top:.85rem; border-top:1px solid var(--border); text-transform:uppercase; letter-spacing:.7px; }
+    .camp-card.open .camp-expand .chev { transform:rotate(180deg); }
+    .chev { transition:transform .3s; display:inline-block; }
+    .camp-detail { display:none; border-top:1px solid var(--border); margin-top:1rem; padding-top:1rem; }
+    .camp-card.open .camp-detail { display:block; animation:fadeIn .35s ease; }
+    .cd-group { margin-bottom:1.2rem; }
+    .cd-group:last-child { margin-bottom:0; }
+    .cd-title { font-size:.63rem; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; color:var(--neon); margin-bottom:.6rem; }
+    .cd-row { display:flex; gap:.7rem; padding:.35rem 0; font-size:.79rem; line-height:1.6; border-bottom:1px solid rgba(26,44,26,.5); }
+    .cd-row:last-child { border-bottom:none; }
+    .cd-k { color:var(--muted); min-width:112px; flex-shrink:0; }
+    .cd-v { color:var(--text); word-break:break-word; }
+    .cd-v a { color:var(--neon); text-decoration:none; }
+    .cd-v a:hover { text-decoration:underline; }
+    .cd-list { list-style:none; display:flex; flex-direction:column; gap:.5rem; counter-reset:step; }
+    .cd-list li { font-size:.78rem; color:var(--muted-l); line-height:1.65; padding-left:1.6rem; position:relative; }
+    .cd-list.numbered li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:.05rem; width:16px; height:16px; background:var(--neon); color:#060E06; border-radius:3px; font-size:.6rem; font-weight:900; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; }
+    .cd-list.bulleted li::before { content:'—'; position:absolute; left:0; color:var(--neon); }
+    .cd-terms li { font-size:.73rem; color:var(--muted); line-height:1.7; }
+
     /* ─── EARNINGS TIERS ─── */
     .tiers { display:grid; grid-template-columns:repeat(4,1fr); gap:1.2rem; margin-top:clamp(1.8rem,4vw,2.5rem); }
     .tier { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1.4rem,3vw,2rem) clamp(1.1rem,2.5vw,1.5rem); text-align:center; transition:all .35s; box-shadow:0 2px 14px rgba(0,0,0,.35); }
@@ -602,23 +628,8 @@
       <div class="sec-eyebrow reveal">Live Now</div>
       <h2 class="sec-title reveal delay-1">Active Campaigns</h2>
       <p class="sec-sub reveal delay-2">All brand resources — source videos, style guides, caption templates — shared in the community before you start.</p>
-      <div class="camp-grid">
-        <div class="camp-card reveal delay-1">
-          <div class="camp-head"><div class="live-tag"><span class="live-pip2"></span>Active</div><h3>E-Commerce Mastery Course</h3><p>Indian ecommerce training — ₹8,000 course</p></div>
-          <div class="camp-body">
-            <div class="camp-nums"><div class="cn"><div class="cn-v">₹30–₹50</div><div class="cn-l">CPM (tier-based)</div></div><div class="cn"><div class="cn-v">Monthly</div><div class="cn-l">Payout</div></div><div class="cn"><div class="cn-v">Reels / Shorts</div><div class="cn-l">Platform</div></div></div>
-            <div class="camp-note">Accepting clippers now. All brand guidelines, source videos and caption templates provided. Verification in 24–48 hrs.</div>
-            <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="camp-btn" target="_blank" rel="noopener">Join Community to Apply</a>
-          </div>
-        </div>
-        <div class="camp-card reveal delay-2" style="opacity:.38;pointer-events:none">
-          <div class="camp-head"><div class="live-tag" style="color:var(--muted)">Coming Soon</div><h3>Campaign Slot 2</h3><p>New brand partnership — details dropping soon</p></div>
-          <div class="camp-body">
-            <div class="camp-nums"><div class="cn"><div class="cn-v" style="color:var(--muted-l)">TBA</div><div class="cn-l">CPM Rate</div></div><div class="cn"><div class="cn-v" style="color:var(--muted-l)">Monthly</div><div class="cn-l">Payout</div></div><div class="cn"><div class="cn-v" style="color:var(--muted-l)">Shorts</div><div class="cn-l">Platform</div></div></div>
-            <div class="camp-note">Join the community to get first access when this goes live.</div>
-            <span class="camp-btn" style="background:var(--border);cursor:default;box-shadow:none">Coming Soon</span>
-          </div>
-        </div>
+      <div class="camp-grid" id="camp-grid">
+        <div class="camp-loading">Loading live campaigns…</div>
       </div>
     </div>
   </section>
@@ -994,7 +1005,6 @@
   <div class="foot-links">
     <a href="#" onclick="setMode('clipper')">For Clippers</a>
     <a href="#" onclick="setMode('brand')">For Brands</a>
-    <a href="tracker.html">Leaderboard</a>
     <a href="#" onclick="setMode('clipper');setTimeout(()=>document.getElementById('faq').scrollIntoView({behavior:'smooth'}),500)">FAQ</a>
     <a href="https://wa.me/918086555528" target="_blank">Contact</a>
   </div>
@@ -1186,6 +1196,106 @@
 
   /* ── FAQ ── */
   function toggleFaq(el){el.parentElement.classList.toggle('open');}
+
+  /* ── Live Campaigns (created from blueprints in the admin dashboard) ── */
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function linkify(v){
+    const s=esc(v);
+    return /^https?:\/\//i.test(v.trim()) ? `<a href="${s}" target="_blank" rel="noopener">${s}</a>` : s;
+  }
+  function cdRow(label,value){
+    if(!value) return '';
+    return `<div class="cd-row"><span class="cd-k">${label}</span><span class="cd-v">${linkify(value)}</span></div>`;
+  }
+  const STATUS_LABEL={active:'Active',budget_full:'Budget Full',completed:'Campaign Over'};
+
+  function campaignCard(c){
+    const b=c.blueprint||{};
+    const pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
+    const open=c.status==='active';
+
+    const details=[
+      cdRow('Objective',b.objective),
+      cdRow('CTA',b.cta),
+      cdRow('Socials',b.socials),
+      cdRow('Platforms',b.platforms),
+      cdRow('Tags',b.tags)
+    ].join('');
+
+    const payout=[
+      cdRow('Payout Model',b.model_note),
+      cdRow('Commission',b.commission_rate),
+      b.min_payout?cdRow('Min Payout','₹'+Number(b.min_payout).toLocaleString('en-IN')):'',
+      b.max_payout?cdRow('Max Payout','₹'+Number(b.max_payout).toLocaleString('en-IN')):'',
+      b.max_payout_per_channel?cdRow('Max / Channel','₹'+Number(b.max_payout_per_channel).toLocaleString('en-IN')):''
+    ].join('');
+
+    const resources=[
+      cdRow('Guidelines',b.guidelines),
+      cdRow('Footage',b.footage),
+      cdRow('Demo Video',b.demo_video)
+    ].join('');
+
+    const extra=(b.extra_fields||[]).map(f=>cdRow(esc(f.label),f.value)).join('');
+    const steps=(b.approval_steps||[]).map(s=>`<li>${esc(s)}</li>`).join('');
+    const terms=(b.terms||[]).map(t=>`<li>${esc(t)}</li>`).join('');
+
+    return `
+      <div class="camp-card live reveal${c.status==='completed'?' done':''}" style="${c.status==='completed'?'opacity:.5':''}" onclick="toggleCampaignCard(this)">
+        <div class="camp-head">
+          <div class="live-tag" style="${open?'':'color:var(--muted)'}">${open?'<span class="live-pip2"></span>':''}${STATUS_LABEL[c.status]||c.status}</div>
+          <h3>${esc(c.name)}</h3>
+          ${c.description?`<p>${esc(c.description)}</p>`:''}
+        </div>
+        <div class="camp-body">
+          <div class="camp-nums">
+            <div class="cn"><div class="cn-v">₹${Number(c.cpm||0).toLocaleString('en-IN')}</div><div class="cn-l">CPM / 1k views</div></div>
+            <div class="cn"><div class="cn-v">₹${Number(c.budget||0).toLocaleString('en-IN')}</div><div class="cn-l">Total Budget</div></div>
+            <div class="cn"><div class="cn-v">₹${Number(c.remaining||0).toLocaleString('en-IN')}</div><div class="cn-l">Still Available</div></div>
+          </div>
+          <div class="camp-budget-bar"><div class="camp-budget-fill" style="width:${pct}%"></div></div>
+          <div class="camp-budget-lbl">₹${Number(c.spent||0).toLocaleString('en-IN')} of ₹${Number(c.budget||0).toLocaleString('en-IN')} allocated to clippers</div>
+
+          <div class="camp-detail">
+            ${details?`<div class="cd-group"><div class="cd-title">Campaign</div>${details}</div>`:''}
+            ${payout?`<div class="cd-group"><div class="cd-title">Payout Terms</div>${payout}</div>`:''}
+            ${resources?`<div class="cd-group"><div class="cd-title">Resources</div>${resources}</div>`:''}
+            ${extra?`<div class="cd-group"><div class="cd-title">More Details</div>${extra}</div>`:''}
+            ${steps?`<div class="cd-group"><div class="cd-title">Approval Process</div><ul class="cd-list numbered">${steps}</ul></div>`:''}
+            ${terms?`<div class="cd-group"><div class="cd-title">Terms &amp; Liability</div><ul class="cd-list bulleted cd-terms">${terms}</ul></div>`:''}
+            <div style="margin-top:1.2rem" onclick="event.stopPropagation()">
+              ${open
+                ? `<a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="camp-btn" target="_blank" rel="noopener">Join Community to Apply</a>`
+                : `<span class="camp-btn" style="background:var(--border);color:var(--muted-l);cursor:default;box-shadow:none">${c.status==='budget_full'?'Budget Fully Allocated':'Campaign Closed'}</span>`}
+            </div>
+          </div>
+
+          <div class="camp-expand">Tap for full details <span class="chev">▾</span></div>
+        </div>
+      </div>`;
+  }
+
+  function toggleCampaignCard(el){ el.classList.toggle('open'); }
+
+  async function loadLiveCampaigns(){
+    const grid=document.getElementById('camp-grid');
+    if(!grid) return;
+    try{
+      const res=await fetch('/api/public/campaigns');
+      if(!res.ok) throw new Error();
+      const {campaigns}=await res.json();
+      const visible=(campaigns||[]).filter(c=>c.status!=='completed');
+      if(!visible.length){
+        grid.innerHTML='<div class="camp-loading">No live campaigns right now — join the community to hear first when the next one drops.</div>';
+        return;
+      }
+      grid.innerHTML=visible.map(campaignCard).join('');
+      grid.querySelectorAll('.reveal').forEach(el=>revObs.observe(el));
+    }catch{
+      grid.innerHTML='<div class="camp-loading">Couldn\'t load campaigns right now. Please refresh.</div>';
+    }
+  }
+  loadLiveCampaigns();
 
   /* Init */
   calcUpdate();brandCalc();trafficCalc();

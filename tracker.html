@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipGrow — Live Leaderboard</title>
+  <meta name="description" content="ClipGrow Live Leaderboard. See the top earning clippers this month." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #080D08; --bg-mid: #0B120B; --card: #0F170F; --card-h: #141E14;
+      --border: #1A2C1A; --border-s: #223322; --neon: #3DFF7A; --neon-d: #2CC760;
+      --glow: rgba(61,255,122,.12); --glow-s: rgba(61,255,122,.22);
+      --white: #F0F5F0; --text: #C4D4C4; --muted: #566056; --muted-l: #849484;
+      --red: #FF4D4D; --gold: #FFD700; --silver: #C0C0C0; --bronze: #CD7F32;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.65; overflow-x: hidden; cursor: none; }
+    h1,h2,h3,h4 { font-family: 'Space Grotesk', sans-serif; line-height: 1.05; }
+
+    #cursor-dot, #cursor-ring { position: fixed; border-radius: 50%; pointer-events: none; z-index: 9999; transform: translate(-50%, -50%); transition: opacity .3s; }
+    #cursor-dot { width: 6px; height: 6px; background: var(--neon); box-shadow: 0 0 12px var(--neon); }
+    #cursor-ring { width: 32px; height: 32px; border: 1.5px solid rgba(61,255,122,.5); transition: width .25s, height .25s, border-color .25s; }
+    body:has(a:hover) #cursor-ring, body:has(button:hover) #cursor-ring { width: 48px; height: 48px; border-color: var(--neon); }
+    @media (hover: none) { #cursor-dot, #cursor-ring { display: none; } body { cursor: auto; } }
+
+    nav { position: fixed; top: 0; width: 100%; z-index: 1000; padding: 1rem 2.5rem; display: flex; justify-content: space-between; align-items: center; background: rgba(8,13,8,.85); backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); transition: padding .3s; }
+    nav.scrolled { padding: .75rem 2.5rem; }
+    .logo { font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.35rem; color: var(--white); text-decoration: none; letter-spacing: -.5px; display: flex; align-items: center; gap: .5rem; }
+    .logo-pulse { width: 8px; height: 8px; background: var(--neon); border-radius: 50%; box-shadow: 0 0 10px var(--neon); animation: pulse-ring 2s ease-in-out infinite; }
+    @keyframes pulse-ring { 0%,100% { box-shadow: 0 0 0 0 rgba(61,255,122,.6); } 50% { box-shadow: 0 0 0 6px rgba(61,255,122,0); } }
+    .logo span { color: var(--neon); }
+
+    .nav-links { display: flex; gap: 2rem; list-style: none; align-items: center; }
+    .nav-links a { color: var(--muted-l); text-decoration: none; font-size: .84rem; font-weight: 500; transition: color .2s; position: relative; }
+    .nav-links a::after { content: ''; position: absolute; bottom: -3px; left: 0; width: 0; height: 1px; background: var(--neon); transition: width .25s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--white); }
+    .nav-links a:hover::after, .nav-links a.active::after { width: 100%; }
+    .btn-nav { background: var(--neon) !important; color: #060E06 !important; padding: .45rem 1.2rem; border-radius: 6px; font-weight: 800 !important; font-size: .82rem !important; box-shadow: 0 0 16px var(--glow-s); transition: all .2s !important; }
+    .btn-nav:hover { background: var(--white) !important; transform: translateY(-1px); }
+    .btn-nav::after { display: none !important; }
+
+    .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 4px; }
+    .hamburger span { width: 22px; height: 2px; background: var(--white); border-radius: 2px; transition: .3s; display: block; }
+    #nav-links.nav-open { display: flex !important; flex-direction: column; position: fixed; top: 57px; left: 0; right: 0; z-index: 999; background: rgba(8,13,8,.98); backdrop-filter: blur(20px); padding: 1.5rem 1.8rem 2rem; gap: 1.2rem; border-bottom: 1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,.6); }
+
+    .ticker-wrap { position: relative; overflow: hidden; background: var(--neon); padding: .5rem 0; }
+    .ticker-track { display: flex; gap: 0; animation: ticker 22s linear infinite; white-space: nowrap; }
+    .ticker-track:hover { animation-play-state: paused; }
+    .ticker-item { display: inline-flex; align-items: center; gap: 1.2rem; padding: 0 2rem; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .8rem; letter-spacing: .8px; text-transform: uppercase; color: #060E06; }
+    .ticker-sep { width: 5px; height: 5px; background: #060E06; border-radius: 50%; flex-shrink: 0; }
+    @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    #tracker-hero { padding: clamp(6rem,12vw,9rem) clamp(1rem,5vw,2rem) clamp(3rem,6vw,4rem); text-align: center; position: relative; overflow: hidden; }
+    .hero-glow { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); width: min(700px, 130vw); height: min(500px, 90vw); background: radial-gradient(ellipse, rgba(61,255,122,.08) 0%, transparent 65%); pointer-events: none; z-index: 0; }
+
+    .sec-eyebrow { display: inline-flex; align-items: center; gap: .6rem; font-size: .68rem; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: var(--neon); margin-bottom: .9rem; position: relative; z-index: 1; }
+    .sec-eyebrow::before { content: ''; display: block; width: 20px; height: 1px; background: var(--neon); }
+    .sec-title { font-size: clamp(2.2rem, 5vw, 4rem); font-weight: 900; color: var(--white); letter-spacing: -1.2px; margin-bottom: .9rem; line-height: 1; position: relative; z-index: 1; }
+    .sec-title span { color: var(--neon); text-shadow: 0 0 40px rgba(61,255,122,.3); }
+    .sec-sub { font-size: clamp(.9rem,2vw,1.1rem); color: var(--muted-l); max-width: 600px; margin: 0 auto; line-height: 1.8; position: relative; z-index: 1;}
+
+    .hero-stats { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 3rem; position: relative; z-index: 1; }
+    .stat-pill { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 2rem; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,.4); min-width: 180px; }
+    .sp-val { font-size: 1.8rem; font-weight: 900; color: var(--neon); font-family: 'Space Grotesk', sans-serif; text-shadow: 0 0 20px var(--glow-s); line-height: 1; }
+    .sp-lbl { font-size: .7rem; color: var(--muted); font-weight: 600; margin-top: .4rem; letter-spacing: .5px; text-transform: uppercase; }
+
+    #leaderboard, #campaigns-sec { padding: 0 clamp(1rem,4vw,2rem) 4rem; position: relative; z-index: 1; }
+    .container { max-width: 1000px; margin: 0 auto; }
+
+    .lb-wrapper { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+    .lb-header { display: grid; grid-template-columns: 80px 2fr 1fr 1.5fr 1.5fr; background: var(--card-h); padding: 1rem; border-bottom: 1px solid var(--border); font-size: 0.75rem; font-weight: 700; color: var(--muted-l); text-transform: uppercase; letter-spacing: 1px; }
+    .lb-row { display: grid; grid-template-columns: 80px 2fr 1fr 1.5fr 1.5fr; padding: 1.2rem 1rem; border-bottom: 1px solid var(--border); align-items: center; transition: background 0.2s; }
+    .lb-row:hover { background: rgba(61,255,122,.03); }
+    .lb-row:last-child { border-bottom: none; }
+
+    .rank { font-family: 'Space Grotesk', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--muted); }
+    .rank-1 { color: var(--gold); text-shadow: 0 0 10px rgba(255,215,0,0.4); }
+    .rank-2 { color: var(--silver); text-shadow: 0 0 10px rgba(192,192,192,0.4); }
+    .rank-3 { color: var(--bronze); text-shadow: 0 0 10px rgba(205,127,50,0.4); }
+
+    .handle { font-weight: 700; color: var(--white); font-size: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .ig-handle { font-size: 0.75rem; color: var(--muted-l); font-weight: 500; }
+    .crown { font-size: 1rem; }
+    .views { font-family: 'Space Grotesk', sans-serif; font-size: 1.1rem; font-weight: 800; color: var(--white); }
+    .earnings { font-family: 'Space Grotesk', sans-serif; font-size: 1.2rem; font-weight: 900; color: var(--neon); }
+
+    .loading-state { text-align: center; padding: 4rem; color: var(--muted-l); font-style: italic; }
+
+    .camp-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.3rem; margin-bottom: 1rem; }
+    .camp-card:last-child { margin-bottom: 0; }
+    .camp-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+    .camp-name { font-weight: 700; color: var(--white); font-size: 1rem; }
+    .camp-meta { font-size: 0.78rem; color: var(--muted-l); margin-top: 0.25rem; }
+    .badge { font-size: 0.66rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase; }
+    .badge.active { background: rgba(61,255,122,.12); color: var(--neon); }
+    .badge.budget_full { background: rgba(255,215,0,.12); color: var(--gold); }
+    .badge.closed { background: rgba(255,77,77,.12); color: var(--red); }
+    .progress { width: 100%; height: 6px; background: var(--bg-mid); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-s); margin-top: 0.8rem; }
+    .progress-fill { height: 100%; background: var(--neon); }
+    .progress-lbl { font-size: 0.72rem; color: var(--muted); margin-top: 0.4rem; }
+
+    footer { background: #040804; border-top: 1px solid var(--border); padding: clamp(1.8rem,4vw,2.5rem); text-align: center; }
+    .foot-logo { font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.1rem; color: var(--white); margin-bottom: .6rem; display: flex; align-items: center; justify-content: center; gap: .45rem; }
+    .foot-logo span { color: var(--neon); }
+    .foot-dot { width: 6px; height: 6px; background: var(--neon); border-radius: 50%; box-shadow: 0 0 8px var(--neon); }
+    .foot-links { display: flex; gap: clamp(.8rem,2vw,1.8rem); justify-content: center; margin: .9rem 0; flex-wrap: wrap; }
+    .foot-links a { font-size: .78rem; color: var(--muted); text-decoration: none; transition: color .2s; }
+    .foot-links a:hover { color: var(--neon); }
+    .foot-note { font-size: .71rem; color: var(--muted); margin-top: .4rem; line-height: 1.7; }
+
+    @media (max-width: 768px) {
+      nav { padding: .9rem 1.5rem; }
+      .nav-links { display: none; }
+      .hamburger { display: flex; }
+      .lb-header { display: none; }
+      .lb-row { grid-template-columns: 40px 1fr; grid-template-rows: auto auto auto; gap: 0.5rem; padding: 1.5rem 1rem; }
+      .rank { grid-row: 1 / 4; align-self: start; }
+      .handle { grid-column: 2; font-size: 1.1rem; }
+      .views, .earnings { grid-column: 2; display: inline-block; font-size: 1rem; }
+      .views::before { content: 'Views: '; color: var(--muted); font-size: 0.8rem; font-weight: 500; font-family: 'Inter', sans-serif; }
+      .earnings::before { content: 'Earnings: '; color: var(--muted); font-size: 0.8rem; font-weight: 500; font-family: 'Inter', sans-serif; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="cursor-dot"></div>
+<div id="cursor-ring"></div>
+
+<nav id="main-nav">
+  <a href="index.html" class="logo"><span class="logo-pulse"></span>Clip<span>Grow</span></a>
+  <ul class="nav-links" id="nav-links">
+    <li><a href="index.html#why">About</a></li>
+    <li><a href="index.html#how">How it Works</a></li>
+    <li><a href="tracker.html" class="active">Leaderboard</a></li>
+    <li><a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-nav" target="_blank" rel="noopener">Join Free</a></li>
+  </ul>
+  <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
+</nav>
+
+<div class="ticker-wrap" style="margin-top:57px">
+  <div class="ticker-track" id="ticker">
+    <span class="ticker-item">Live Leaderboard <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Verified Instagram Views <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Live Leaderboard <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Verified Instagram Views <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
+    <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
+  </div>
+</div>
+
+<section id="tracker-hero">
+  <div class="hero-glow"></div>
+  <div class="sec-eyebrow">Live From Instagram</div>
+  <h1 class="sec-title">Top <span>Clippers</span></h1>
+  <p class="sec-sub">Views are pulled directly from each clipper's connected Instagram account. Every clip, every view, every rupee — public.</p>
+
+  <div class="hero-stats">
+    <div class="stat-pill"><div class="sp-val" id="stat-views">0</div><div class="sp-lbl">Total Views Generated</div></div>
+    <div class="stat-pill"><div class="sp-val" id="stat-earnings">₹0</div><div class="sp-lbl">Total Earnings Distributed</div></div>
+    <div class="stat-pill"><div class="sp-val" id="stat-clippers">0</div><div class="sp-lbl">Active Clippers</div></div>
+  </div>
+</section>
+
+<section id="leaderboard">
+  <div class="container">
+    <div class="lb-wrapper">
+      <div class="lb-header">
+        <div>Rank</div><div>Clipper</div><div>Videos</div><div>Verified Views</div><div>Earnings</div>
+      </div>
+      <div id="lb-body"><div class="loading-state">Fetching live leaderboard data...</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="campaigns-sec">
+  <div class="container">
+    <div class="sec-eyebrow" style="justify-content:center; display:inline-flex">Campaigns</div>
+    <h2 class="sec-title" style="font-size:clamp(1.6rem,3.5vw,2.4rem); text-align:center">Where the budget's going</h2>
+    <div style="margin-top:2rem" id="campaigns-body"><div class="loading-state">Loading campaigns...</div></div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot-logo"><span class="foot-dot"></span>Clip<span>Grow</span></div>
+  <div class="foot-links">
+    <a href="index.html#why">About</a>
+    <a href="index.html#how">How it Works</a>
+    <a href="tracker.html">Leaderboard</a>
+    <a href="index.html#faq">FAQ</a>
+  </div>
+  <p class="foot-note">© 2026 ClipGrow — Kerala's First Performance Clipping Agency. All rights reserved.</p>
+  <p class="foot-note">Monthly UPI payouts &nbsp;·&nbsp; Verified views only &nbsp;·&nbsp; Free to join &nbsp;·&nbsp; All resources provided</p>
+</footer>
+
+<script>
+  function fmt(n) { return Number(n).toLocaleString('en-IN'); }
+  function rs(n) { return '₹' + Number(n).toLocaleString('en-IN'); }
+
+  function animCount(el, target, prefix = '') {
+    const current = parseInt(el.textContent.replace(/[^0-9]/g, '')) || 0;
+    if (current === target) return;
+    const start = current, dur = 1000, startTime = performance.now();
+    function step(now) {
+      const p = Math.min((now - startTime) / dur, 1);
+      const ease = 1 - Math.pow(1 - p, 3);
+      el.textContent = prefix + Math.round(start + (target - start) * ease).toLocaleString('en-IN');
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  async function loadLeaderboard() {
+    const tbody = document.getElementById('lb-body');
+    try {
+      const res = await fetch('/api/public/leaderboard');
+      const { leaderboard } = await res.json();
+      renderLeaderboard(leaderboard || []);
+    } catch {
+      tbody.innerHTML = '<div class="loading-state">Could not load the leaderboard right now.</div>';
+    }
+  }
+
+  function renderLeaderboard(entries) {
+    const tbody = document.getElementById('lb-body');
+    if (!entries.length) {
+      tbody.innerHTML = '<div class="loading-state">No clippers have joined the leaderboard yet.</div>';
+      document.getElementById('stat-views').textContent = '0';
+      document.getElementById('stat-earnings').textContent = '₹0';
+      document.getElementById('stat-clippers').textContent = '0';
+      return;
+    }
+
+    let totalViews = 0, totalEarnings = 0;
+    tbody.innerHTML = '';
+    entries.forEach((entry, index) => {
+      const rank = index + 1;
+      totalViews += entry.total_views;
+      totalEarnings += entry.total_earnings;
+
+      let rankClass = '', crown = '';
+      if (rank === 1) { rankClass = 'rank-1'; crown = '👑'; }
+      else if (rank === 2) { rankClass = 'rank-2'; crown = '🥈'; }
+      else if (rank === 3) { rankClass = 'rank-3'; crown = '🥉'; }
+
+      const row = document.createElement('div');
+      row.className = 'lb-row';
+      row.innerHTML = `
+        <div class="rank ${rankClass}">#${rank}</div>
+        <div class="handle">${entry.display_name || entry.username} ${crown ? `<span class="crown">${crown}</span>` : ''}
+          ${entry.ig_username ? `<span class="ig-handle">@${entry.ig_username}</span>` : ''}
+        </div>
+        <div>${entry.video_count}</div>
+        <div class="views">${fmt(entry.total_views)}</div>
+        <div class="earnings">${rs(entry.total_earnings)}</div>
+      `;
+      tbody.appendChild(row);
+    });
+
+    animCount(document.getElementById('stat-views'), totalViews);
+    animCount(document.getElementById('stat-earnings'), totalEarnings, '₹');
+    animCount(document.getElementById('stat-clippers'), entries.length);
+  }
+
+  async function loadCampaigns() {
+    const el = document.getElementById('campaigns-body');
+    try {
+      const res = await fetch('/api/public/campaigns');
+      const { campaigns } = await res.json();
+      if (!campaigns.length) { el.innerHTML = '<div class="loading-state">No campaigns yet.</div>'; return; }
+      el.innerHTML = campaigns.map(c => {
+        const pct = c.budget > 0 ? Math.min(100, Math.round((c.spent / c.budget) * 100)) : 0;
+        return `
+        <div class="camp-card">
+          <div class="camp-top">
+            <div>
+              <div class="camp-name">${c.name}</div>
+              <div class="camp-meta">${rs(c.cpm)} / 1,000 views</div>
+            </div>
+            <span class="badge ${c.status}">${c.status.replace('_',' ')}</span>
+          </div>
+          <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <div class="progress-lbl">${rs(c.spent)} of ${rs(c.budget)} budget allocated</div>
+        </div>
+      `;
+      }).join('');
+    } catch {
+      el.innerHTML = '<div class="loading-state">Could not load campaigns right now.</div>';
+    }
+  }
+
+  loadLeaderboard();
+  loadCampaigns();
+
+  const dot = document.getElementById('cursor-dot');
+  const ring = document.getElementById('cursor-ring');
+  let mx = 0, my = 0, rx = 0, ry = 0;
+  document.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+  function animCursor() {
+    dot.style.left = mx + 'px'; dot.style.top = my + 'px';
+    rx += (mx - rx) * .12; ry += (my - ry) * .12;
+    ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+    requestAnimationFrame(animCursor);
+  }
+  animCursor();
+
+  const nav = document.getElementById('main-nav');
+  window.addEventListener('scroll', () => { nav.classList.toggle('scrolled', window.scrollY > 60); }, { passive: true });
+
+  const navLinks = document.getElementById('nav-links');
+  const burger = document.getElementById('hamburger');
+  window.toggleMenu = function() {
+    const open = navLinks.classList.contains('nav-open');
+    navLinks.classList.toggle('nav-open', !open);
+    burger.querySelectorAll('span').forEach((s, i) => {
+      if (!open) {
+        if (i === 0) s.style.transform = 'translateY(7px) rotate(45deg)';
+        if (i === 1) s.style.opacity = '0';
+        if (i === 2) s.style.transform = 'translateY(-7px) rotate(-45deg)';
+      } else { s.style.transform = ''; s.style.opacity = ''; }
+    });
+  }
+</script>
+</body>
+</html>

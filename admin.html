@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ClipGrow — Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg:#080D08; --bg-mid:#0B120B; --card:#0F170F; --card-h:#141E14;
+      --border:#1A2C1A; --border-s:#223322; --neon:#3DFF7A; --glow-s:rgba(61,255,122,.22);
+      --white:#F0F5F0; --text:#C4D4C4; --muted:#566056; --muted-l:#849484;
+      --red:#FF4D4D; --gold:#FFD700; --blue:#4DA6FF;
+    }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; padding:1.5rem 1.2rem 4rem; }
+    h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; color:var(--white); }
+    .container { max-width:1180px; margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; padding-bottom:1rem; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:1rem; }
+    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.4rem; color:var(--white); }
+    .logo span { color:var(--neon); }
+
+    .btn { background:var(--neon); color:#060E06; padding:.6rem 1.2rem; border-radius:6px; font-weight:800; font-family:'Space Grotesk',sans-serif; border:none; cursor:pointer; font-size:.82rem; transition:all .2s; }
+    .btn:hover { background:var(--white); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-ghost { background:transparent; color:var(--muted-l); border:1px solid var(--border-s); }
+    .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
+    .btn-danger { background:transparent; color:var(--red); border:1px solid var(--red); }
+    .btn-danger:hover { background:var(--red); color:#fff; }
+    .btn-warn { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+    .btn-warn:hover { background:var(--gold); color:#0A0A00; }
+    .btn-sm { padding:.32rem .68rem; font-size:.73rem; }
+
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.9rem; margin-bottom:1.5rem; }
+    .stat { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.05rem; text-align:center; }
+    .stat-val { font-size:1.3rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
+    .stat-val.w { color:var(--white); } .stat-val.g { color:var(--gold); } .stat-val.r { color:var(--red); }
+    .stat-lbl { font-size:.62rem; color:var(--muted); text-transform:uppercase; margin-top:.3rem; letter-spacing:.5px; }
+
+    .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.4rem; overflow-x:auto; }
+    .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.84rem; cursor:pointer; white-space:nowrap; }
+    .tab:hover { color:var(--white); }
+    .tab.on { color:var(--neon); border-bottom-color:var(--neon); }
+    .view { display:none; } .view.on { display:block; }
+
+    .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:1.3rem; }
+    .panel-title { font-size:1rem; margin-bottom:1.1rem; color:var(--neon); font-family:'Space Grotesk',sans-serif; }
+    label { display:block; font-size:.74rem; font-weight:600; color:var(--muted-l); margin-bottom:.35rem; }
+    .form-control { width:100%; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:6px; padding:.62rem .85rem; color:var(--white); font-family:'Inter',sans-serif; outline:none; font-size:.87rem; }
+    .form-control:focus { border-color:var(--neon); }
+    textarea.form-control { min-height:85px; resize:vertical; font-size:.83rem; }
+    select.form-control { cursor:pointer; }
+    .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.9rem; align-items:end; }
+
+    table { width:100%; border-collapse:collapse; }
+    th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.68rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
+    td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.84rem; vertical-align:middle; }
+    .table-wrap { overflow-x:auto; }
+    .handle { font-weight:700; color:var(--white); }
+    .muted { color:var(--muted); }
+    .money { color:var(--neon); font-weight:700; font-family:'Space Grotesk',sans-serif; }
+    .gold { color:var(--gold); font-weight:700; font-family:'Space Grotesk',sans-serif; }
+    .empty { text-align:center; color:var(--muted-l); padding:2.2rem; font-style:italic; }
+    .actions { display:flex; gap:.35rem; flex-wrap:wrap; }
+
+    .badge { font-size:.62rem; font-weight:700; padding:.2rem .5rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; display:inline-block; }
+    .badge.active, .badge.connected { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.disabled, .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.budget_full, .badge.paused, .badge.needs_reauth { background:rgba(255,215,0,.12); color:var(--gold); }
+    .badge.model, .badge.neutral { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
+
+    .progress { width:120px; height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); }
+    .progress-fill { height:100%; background:var(--neon); }
+    .progress-lbl { font-size:.68rem; color:var(--muted); margin-top:.25rem; }
+
+    .drop { border:2px dashed var(--border-s); border-radius:12px; padding:2.2rem 1.5rem; text-align:center; transition:all .25s; cursor:pointer; background:var(--bg-mid); }
+    .drop:hover, .drop.over { border-color:var(--neon); background:rgba(61,255,122,.04); }
+    .drop-icon { font-size:1.8rem; display:block; margin-bottom:.5rem; }
+    .drop-title { color:var(--white); font-weight:700; font-family:'Space Grotesk',sans-serif; margin-bottom:.25rem; }
+    .drop-hint { font-size:.78rem; color:var(--muted); }
+
+    .expand { display:none; background:var(--bg-mid); }
+    .expand.open { display:table-row; }
+    .expand td { padding:1.1rem; }
+    .sub-h { font-size:.66rem; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:var(--neon); margin:1rem 0 .5rem; }
+    .sub-h:first-child { margin-top:0; }
+    .row-click { cursor:pointer; }
+    .row-click:hover { background:rgba(61,255,122,.03); }
+
+    .alert { border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem; font-size:.82rem; border:1px solid; }
+    .alert.warn { background:rgba(255,215,0,.07); border-color:rgba(255,215,0,.4); color:var(--gold); }
+    .alert.info { background:rgba(77,166,255,.07); border-color:rgba(77,166,255,.35); color:var(--blue); }
+
+    #auth-overlay { position:fixed; inset:0; background:rgba(8,13,8,.96); display:flex; align-items:center; justify-content:center; z-index:9999; }
+    .auth-box { background:var(--card); border:1px solid var(--border); padding:2.8rem; border-radius:12px; text-align:center; width:100%; max-width:390px; }
+
+    #modal-back { position:fixed; inset:0; background:rgba(4,8,4,.85); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9000; padding:2rem 1rem; overflow-y:auto; }
+    #modal-back.open { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:800px; box-shadow:0 20px 70px rgba(0,0,0,.7); }
+    .modal-head { padding:1.3rem 1.6rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:1rem; position:sticky; top:0; background:var(--card); border-radius:14px 14px 0 0; z-index:2; }
+    .modal-body { padding:1.4rem 1.6rem; }
+    .modal-foot { padding:1.1rem 1.6rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.7rem; position:sticky; bottom:0; background:var(--card); border-radius:0 0 14px 14px; }
+    .fieldset { margin-bottom:1.5rem; }
+    .fs-title { font-size:.67rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--neon); margin-bottom:.8rem; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:.9rem; }
+    .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.9rem; }
+    .fld { margin-bottom:.9rem; }
+    .req { color:var(--neon); }
+    .missing { border-color:var(--gold) !important; }
+    .note { font-size:.72rem; color:var(--muted); margin-top:.3rem; }
+    .close-x { background:none; border:none; color:var(--muted-l); font-size:1.4rem; cursor:pointer; }
+    .close-x:hover { color:var(--white); }
+    .banner { background:rgba(255,215,0,.08); border:1px solid rgba(255,215,0,.35); color:var(--gold); padding:.7rem 1rem; border-radius:8px; font-size:.79rem; margin-bottom:1.2rem; }
+
+    .toast { position:fixed; bottom:1.5rem; right:1.5rem; background:var(--card); border:1px solid var(--neon); color:var(--white); padding:.9rem 1.2rem; border-radius:8px; font-size:.84rem; z-index:10000; box-shadow:0 8px 32px rgba(0,0,0,.5); display:none; max-width:360px; }
+    .toast.err { border-color:var(--red); }
+    @media (max-width:700px){ .grid-2,.grid-3{grid-template-columns:1fr} body{padding:1rem .8rem 3rem} .panel{padding:1.2rem} }
+  </style>
+</head>
+<body>
+
+  <div id="auth-overlay">
+    <div class="auth-box">
+      <h2 style="margin-bottom:1.4rem">Admin Access</h2>
+      <input type="password" id="admin-pass" class="form-control" placeholder="Enter password" style="margin-bottom:1rem" onkeydown="if(event.key==='Enter')login()" />
+      <button class="btn" style="width:100%" onclick="login()">Login</button>
+      <p id="auth-error" style="color:var(--red); margin-top:1rem; display:none; font-size:.83rem">Incorrect password</p>
+    </div>
+  </div>
+
+  <div class="container">
+    <header>
+      <div class="logo">Clip<span>Grow</span> Admin</div>
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="runSync()">Sync Views Now</button>
+        <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="stats" id="overview"></div>
+    <div id="health"></div>
+
+    <div class="tabs">
+      <button class="tab on" data-v="campaigns" onclick="showView('campaigns',this)">Campaigns</button>
+      <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
+      <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
+    </div>
+
+    <!-- CAMPAIGNS -->
+    <div class="view on" id="v-campaigns">
+      <div class="panel">
+        <h2 class="panel-title">New Campaign from Blueprint</h2>
+        <div class="drop" id="drop" onclick="document.getElementById('bp-file').click()">
+          <span class="drop-icon">📄</span>
+          <div class="drop-title">Upload campaign blueprint</div>
+          <div class="drop-hint">Click or drag a <strong>.docx</strong> blueprint — every field is extracted for review before anything is created.</div>
+        </div>
+        <input type="file" id="bp-file" accept=".docx" style="display:none" onchange="handleFile(this.files[0])" />
+        <div style="margin-top:.9rem; text-align:center">
+          <button class="btn btn-ghost btn-sm" onclick="openModal(blankDraft(),'create')">or create one manually</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">All Campaigns</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Model</th><th>CPM</th><th>Budget</th><th>Spent</th><th>Clippers</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="campaigns-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- CLIPPERS -->
+    <div class="view" id="v-clippers">
+      <div class="panel">
+        <h2 class="panel-title">Create Clipper Login</h2>
+        <form id="clipper-form" class="form-grid">
+          <div><label>Username</label><input type="text" id="cl-username" class="form-control" required autocomplete="off" /></div>
+          <div><label>Password</label><input type="text" id="cl-password" class="form-control" required autocomplete="off" /></div>
+          <div><label>Display Name</label><input type="text" id="cl-display" class="form-control" /></div>
+          <button type="submit" class="btn">Create Clipper</button>
+        </form>
+        <p class="note">Share these credentials with the clipper directly — the password is only shown here, never stored in readable form.</p>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">All Clippers</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Paid</th><th>Outstanding</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="clippers-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- PAYMENTS -->
+    <div class="view" id="v-payments">
+      <div class="panel">
+        <h2 class="panel-title">Record a Payment</h2>
+        <form id="pay-form" class="form-grid">
+          <div><label>Clipper <span class="req">*</span></label><select id="p-clipper" class="form-control" required></select></div>
+          <div><label>Campaign (optional)</label><select id="p-campaign" class="form-control"><option value="">General / all</option></select></div>
+          <div><label>Amount ₹ <span class="req">*</span></label><input type="number" id="p-amount" class="form-control" min="1" required /></div>
+          <div><label>Method</label><input type="text" id="p-method" class="form-control" value="UPI" /></div>
+          <div><label>Reference</label><input type="text" id="p-reference" class="form-control" placeholder="Txn ID" /></div>
+          <div><label>Date</label><input type="date" id="p-date" class="form-control" /></div>
+          <button type="submit" class="btn">Record Payment</button>
+        </form>
+        <p class="note" id="pay-hint"></p>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Payment History</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
+          <tbody id="payments-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campaign modal -->
+  <div id="modal-back">
+    <div class="modal">
+      <div class="modal-head">
+        <div><h3 id="modal-title">Review Campaign</h3><div class="note" id="modal-sub"></div></div>
+        <button class="close-x" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="banner" id="modal-banner" style="display:none"></div>
+        <div class="fieldset">
+          <div class="fs-title">Core — shown on the public tile</div>
+          <div class="fld"><label>Campaign / Client Name <span class="req">*</span></label><input class="form-control" id="f-name" /></div>
+          <div class="grid-3">
+            <div class="fld"><label>CPM — ₹ per 1,000 views <span class="req">*</span></label><input type="number" class="form-control" id="f-cpm" min="1" /></div>
+            <div class="fld"><label>Total Budget ₹ <span class="req">*</span></label><input type="number" class="form-control" id="f-budget" min="1" /></div>
+            <div class="fld"><label>Model</label><input class="form-control" id="f-model" placeholder="cpm / affiliate" /></div>
+          </div>
+          <div class="fld"><label>Short Description</label><input class="form-control" id="f-description" /></div>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Campaign Details</div>
+          <div class="grid-2">
+            <div class="fld"><label>Client Socials</label><input class="form-control" id="f-socials" /></div>
+            <div class="fld"><label>Platforms</label><input class="form-control" id="f-platforms" /></div>
+          </div>
+          <div class="fld"><label>Objective</label><input class="form-control" id="f-objective" /></div>
+          <div class="grid-2">
+            <div class="fld"><label>CTA</label><input class="form-control" id="f-cta" /></div>
+            <div class="fld"><label>Tags</label><input class="form-control" id="f-tags" /></div>
+          </div>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Payout Terms</div>
+          <div class="grid-3">
+            <div class="fld"><label>Min Payout ₹</label><input type="number" class="form-control" id="f-min_payout" /></div>
+            <div class="fld"><label>Max Payout ₹</label><input type="number" class="form-control" id="f-max_payout" /></div>
+            <div class="fld"><label>Max / Channel ₹</label><input type="number" class="form-control" id="f-max_payout_per_channel" /></div>
+          </div>
+          <div class="grid-2">
+            <div class="fld"><label>Commission Rate</label><input class="form-control" id="f-commission_rate" /></div>
+            <div class="fld"><label>Payout Model Note</label><input class="form-control" id="f-model_note" /></div>
+          </div>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Resources for Clippers</div>
+          <div class="fld"><label>Brand Guidelines</label><input class="form-control" id="f-guidelines" /></div>
+          <div class="fld"><label>Footage / Raw Assets</label><input class="form-control" id="f-footage" /></div>
+          <div class="fld"><label>Demo Video</label><input class="form-control" id="f-demo_video" /></div>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Approval Process</div>
+          <textarea class="form-control" id="f-approval_steps" placeholder="One step per line"></textarea>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Terms &amp; Liability</div>
+          <textarea class="form-control" id="f-terms" style="min-height:130px" placeholder="One clause per line"></textarea>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" id="modal-save" onclick="saveModal()">Confirm &amp; Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let modalMode='create', modalId=null;
+    let CLIPPERS=[], CAMPAIGNS=[];
+    const TEXT_FIELDS=['name','description','model','socials','platforms','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
+    const NUM_FIELDS=['cpm','budget','min_payout','max_payout','max_payout_per_channel'];
+
+    const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
+    const num=n=>Number(n||0).toLocaleString('en-IN');
+    const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+
+    function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',4500);}
+
+    async function api(path,opts={}){
+      const isForm=opts.body instanceof FormData;
+      const res=await fetch(path,{...opts,headers:isForm?(opts.headers||{}):{'Content-Type':'application/json',...(opts.headers||{})}});
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(body.error||'Request failed');
+      return body;
+    }
+
+    window.login=async function(){
+      try{
+        await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:document.getElementById('admin-pass').value})});
+        document.getElementById('auth-overlay').style.display='none';
+        loadAll();
+      }catch{ document.getElementById('auth-error').style.display='block'; }
+    };
+    window.logout=async function(){ await api('/api/admin/logout',{method:'POST'}).catch(()=>{}); location.reload(); };
+
+    window.showView=function(name,btn){
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+      document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
+      if(name==='payments') loadPayments();
+    };
+
+    window.runSync=async function(){
+      toast('Syncing views from Instagram…');
+      try{
+        const r=await api('/api/admin/sync',{method:'POST'});
+        toast(r.errors && r.errors.length ? `Synced ${r.campaigns} campaign(s), ${r.errors.length} issue(s)` : `Synced ${r.campaigns} campaign(s)`, r.errors && r.errors.length>0);
+        loadAll();
+      }catch(e){ toast(e.message,true); }
+    };
+
+    /* ---------- overview ---------- */
+    async function loadOverview(){
+      const {overview:o}=await api('/api/admin/overview');
+      document.getElementById('overview').innerHTML=`
+        <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
+        <div class="stat"><div class="stat-val w">${num(o.active_campaigns)}</div><div class="stat-lbl">Active Campaigns</div></div>
+        <div class="stat"><div class="stat-val">${money(o.total_earned)}</div><div class="stat-lbl">Total Earned</div></div>
+        <div class="stat"><div class="stat-val w">${money(o.total_paid)}</div><div class="stat-lbl">Total Paid</div></div>
+        <div class="stat"><div class="stat-val g">${money(o.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>`;
+      const issues=[];
+      if(o.accounts_needing_reauth>0) issues.push(`${o.accounts_needing_reauth} Instagram account(s) need reconnecting by their clipper`);
+      if(o.submissions_with_errors>0) issues.push(`${o.submissions_with_errors} video(s) failed to sync views`);
+      document.getElementById('health').innerHTML = issues.length
+        ? `<div class="alert warn"><strong>Needs attention:</strong> ${issues.join(' · ')}</div>` : '';
+    }
+
+    /* ---------- blueprint upload ---------- */
+    const drop=document.getElementById('drop');
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+    ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+    drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) handleFile(f);});
+
+    window.handleFile=async function(file){
+      if(!file) return;
+      if(!/\.docx$/i.test(file.name)) return toast('Please pick a Word .docx blueprint',true);
+      toast('Reading blueprint…');
+      const fd=new FormData(); fd.append('file',file);
+      try{
+        const {draft}=await api('/api/admin/campaigns/parse',{method:'POST',body:fd});
+        openModal(draft,'create',null,file.name);
+      }catch(e){ toast(e.message,true); }
+      finally{ document.getElementById('bp-file').value=''; }
+    };
+
+    window.blankDraft=function(){
+      const d={approval_steps:[],terms:[],extra_fields:[]};
+      TEXT_FIELDS.forEach(k=>d[k]=''); NUM_FIELDS.forEach(k=>d[k]=null);
+      return d;
+    };
+
+    window.openModal=function(draft,mode,id,filename){
+      modalMode=mode; modalId=id||null;
+      TEXT_FIELDS.forEach(k=>{const el=document.getElementById('f-'+k); if(el) el.value=draft[k]||'';});
+      NUM_FIELDS.forEach(k=>{const el=document.getElementById('f-'+k); if(el) el.value=(draft[k]==null?'':draft[k]);});
+      document.getElementById('f-approval_steps').value=(draft.approval_steps||[]).join('\n');
+      document.getElementById('f-terms').value=(draft.terms||[]).join('\n');
+      const missing=[];
+      ['name','cpm','budget'].forEach(k=>{
+        const el=document.getElementById('f-'+k); const empty=!el.value;
+        el.classList.toggle('missing',empty);
+        if(empty) missing.push(k==='cpm'?'CPM':k==='budget'?'Budget':'Name');
+      });
+      const banner=document.getElementById('modal-banner');
+      if(mode==='create'&&missing.length){
+        banner.style.display='block';
+        banner.innerHTML=`The blueprint didn't contain: <strong>${missing.join(', ')}</strong>. Fill these in before confirming — the rest can stay blank.`;
+      } else banner.style.display='none';
+      document.getElementById('modal-title').textContent=mode==='create'?'Review Campaign':'Edit Campaign';
+      document.getElementById('modal-sub').textContent=filename?('Extracted from '+filename):(draft.title||'');
+      document.getElementById('modal-save').textContent=mode==='create'?'Confirm & Create':'Save Changes';
+      document.getElementById('modal-back').classList.add('open');
+    };
+    window.closeModal=function(){document.getElementById('modal-back').classList.remove('open');};
+    document.getElementById('modal-back').addEventListener('click',e=>{if(e.target.id==='modal-back')closeModal();});
+
+    window.saveModal=async function(){
+      const p={};
+      TEXT_FIELDS.forEach(k=>p[k]=document.getElementById('f-'+k).value.trim());
+      NUM_FIELDS.forEach(k=>{const v=document.getElementById('f-'+k).value; p[k]=v===''?null:Number(v);});
+      const lines=id=>document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
+      p.approval_steps=lines('f-approval_steps'); p.terms=lines('f-terms');
+      if(!p.name) return toast('Campaign name is required',true);
+      if(!p.cpm||p.cpm<=0) return toast('CPM must be greater than 0',true);
+      if(!p.budget||p.budget<=0) return toast('Budget must be greater than 0',true);
+      const btn=document.getElementById('modal-save'); btn.disabled=true;
+      try{
+        if(modalMode==='create'){ await api('/api/admin/campaigns',{method:'POST',body:JSON.stringify(p)}); toast('Campaign created and live'); }
+        else { await api('/api/admin/campaigns/'+modalId,{method:'PATCH',body:JSON.stringify(p)}); toast('Campaign updated'); }
+        closeModal(); loadAll();
+      }catch(e){ toast(e.message,true); } finally{ btn.disabled=false; }
+    };
+
+    /* ---------- campaigns ---------- */
+    async function loadCampaigns(){
+      const {campaigns}=await api('/api/admin/campaigns');
+      CAMPAIGNS=campaigns;
+      const tb=document.getElementById('campaigns-body');
+      if(!campaigns.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No campaigns yet — upload a blueprint above.</td></tr>'; return; }
+      tb.innerHTML=campaigns.map(c=>{
+        const pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
+        return `<tr class="row-click" onclick="toggleCampaign(${c.id})">
+          <td class="handle">${esc(c.name)}</td>
+          <td>${c.model?`<span class="badge model">${esc(c.model)}</span>`:'<span class="muted">—</span>'}</td>
+          <td>${money(c.cpm)}</td><td>${money(c.budget)}</td>
+          <td><div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-lbl">${money(c.spent)}</div></td>
+          <td>${num(c.participants)}</td>
+          <td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td>
+          <td onclick="event.stopPropagation()"><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="editCampaign(${c.id})">Edit</button>
+            ${c.status!=='completed'
+              ? `<button class="btn btn-warn btn-sm" onclick="setCampaignStatus(${c.id},'completed')">Mark Over</button>`
+              : `<button class="btn btn-ghost btn-sm" onclick="setCampaignStatus(${c.id},'active')">Reopen</button>`}
+            <button class="btn btn-danger btn-sm" onclick="deleteCampaign(${c.id})">Delete</button>
+          </div></td>
+        </tr>
+        <tr class="expand" id="cx-${c.id}"><td colspan="8"><div id="cxb-${c.id}">Loading…</div></td></tr>`;
+      }).join('');
+      fillPaymentSelects();
+    }
+
+    window.toggleCampaign=async function(id){
+      const row=document.getElementById('cx-'+id);
+      const opening=!row.classList.contains('open');
+      document.querySelectorAll('.expand.open').forEach(e=>e.classList.remove('open'));
+      if(!opening) return;
+      row.classList.add('open');
+      const box=document.getElementById('cxb-'+id);
+      try{
+        const [{participants},{submissions}]=await Promise.all([
+          api('/api/admin/campaigns/'+id+'/participants'),
+          api('/api/admin/campaigns/'+id)
+        ]);
+        box.innerHTML=`
+          <div class="sub-h">Participants (${participants.length})</div>
+          ${participants.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th><th>Earned</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${participants.map(p=>`<tr>
+              <td class="handle">${esc(p.display_name||p.username)}</td>
+              <td>${p.account_username
+                  ? `@${esc(p.account_username)} <span class="badge ${p.account_status}">${esc((p.account_status||'').replace('_',' '))}</span>`
+                  : '<span class="muted">not connected</span>'}</td>
+              <td>${num(p.videos)}</td><td>${num(p.views)}</td><td class="money">${money(p.earned)}</td>
+              <td><span class="badge ${p.status}">${p.status}</span></td>
+              <td><div class="actions">
+                ${p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
+                ${p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
+                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
+                                     :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
+              </div></td></tr>`).join('')}</tbody></table></div>`
+            :'<p class="muted">No clippers have joined yet.</p>'}
+
+          <div class="sub-h">Videos (${submissions.length})</div>
+          ${submissions.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>${submissions.map(s=>`<tr>
+              <td class="handle">${esc(s.username)}</td>
+              <td class="muted">${s.account_username?'@'+esc(s.account_username):'—'}</td>
+              <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+              <td>${num(s.views)}</td><td class="money">${money(s.earning)}</td>
+              <td>${s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+                    :s.sync_error?`<span class="badge needs_reauth">${esc(s.sync_error)}</span>`
+                    :'<span class="badge active">ok</span>'}</td>
+              <td><div class="actions">
+                ${s.status==='active'
+                  ?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
+                  :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
+                <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>
+              </div></td></tr>`).join('')}</tbody></table></div>`
+            :'<p class="muted">No videos submitted yet.</p>'}`;
+      }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
+    };
+
+    window.setPart=async function(id,status){
+      let note='';
+      if(status==='kicked'||status==='paused'){
+        note=prompt(status==='kicked'?'Reason for removing (shown to the clipper):':'Reason for pausing (shown to the clipper):')||'';
+      }
+      try{ await api('/api/admin/participations/'+id,{method:'PATCH',body:JSON.stringify({status,note})});
+        toast('Participant updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.setSub=async function(id,status){
+      try{ await api('/api/admin/submissions/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Video updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.delSub=async function(id){
+      if(!confirm('Delete this video permanently? Its earnings will be removed and the budget freed.')) return;
+      try{ await api('/api/admin/submissions/'+id,{method:'DELETE'}); toast('Video deleted'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.editCampaign=async function(id){
+      try{
+        const {campaign}=await api('/api/admin/campaigns/'+id);
+        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,model:campaign.model},'edit',id);
+      }catch(e){ toast(e.message,true); }
+    };
+    window.setCampaignStatus=async function(id,status){
+      try{ await api('/api/admin/campaigns/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Campaign updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.deleteCampaign=async function(id){
+      if(!confirm('Delete this campaign permanently?')) return;
+      try{ await api('/api/admin/campaigns/'+id,{method:'DELETE'}); toast('Campaign deleted'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    /* ---------- clippers ---------- */
+    async function loadClippers(){
+      const {clippers}=await api('/api/admin/clippers');
+      CLIPPERS=clippers;
+      const tb=document.getElementById('clippers-body');
+      if(!clippers.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No clippers yet.</td></tr>'; return; }
+      tb.innerHTML=clippers.map(c=>`
+        <tr class="row-click" onclick="toggleClipper(${c.id})">
+          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
+          <td>${num(c.campaigns)}</td>
+          <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}</td>
+          <td class="money">${money(c.money.earned)}</td>
+          <td>${money(c.money.paid)}</td>
+          <td class="gold">${money(c.money.outstanding)}</td>
+          <td><span class="badge ${c.status}">${c.status}</span></td>
+          <td onclick="event.stopPropagation()"><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="resetPassword(${c.id})">Reset Pass</button>
+            <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
+          </div></td>
+        </tr>
+        <tr class="expand" id="ux-${c.id}"><td colspan="8"><div id="uxb-${c.id}">Loading…</div></td></tr>`).join('');
+      fillPaymentSelects();
+    }
+
+    window.toggleClipper=async function(id){
+      const row=document.getElementById('ux-'+id);
+      const opening=!row.classList.contains('open');
+      document.querySelectorAll('.expand.open').forEach(e=>e.classList.remove('open'));
+      if(!opening) return;
+      row.classList.add('open');
+      const box=document.getElementById('uxb-'+id);
+      try{
+        const d=await api('/api/admin/clippers/'+id);
+        box.innerHTML=`
+          <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
+          ${d.accounts.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Handle</th><th>Type</th><th>Status</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
+            <tbody>${d.accounts.map(a=>`<tr>
+              <td class="handle">@${esc(a.username)}</td>
+              <td class="muted">${esc(a.account_type||'—')}</td>
+              <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
+              <td class="muted">${when(a.connected_at)}</td>
+              <td class="muted">${when(a.expires_at)}</td>
+              <td><button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id})">Disconnect</button></td>
+            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No Instagram accounts connected.</p>'}
+
+          <div class="sub-h">Campaigns (${d.participations.length})</div>
+          ${d.participations.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Campaign</th><th>Account</th><th>Status</th><th>Note</th><th></th></tr></thead>
+            <tbody>${d.participations.map(p=>`<tr>
+              <td>${esc(p.campaign_name)}</td>
+              <td class="muted">${p.account_username?'@'+esc(p.account_username):'—'}</td>
+              <td><span class="badge ${p.status}">${p.status}</span></td>
+              <td class="muted">${esc(p.status_note||'')}</td>
+              <td><div class="actions">
+                ${p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
+                ${p.status!=='active'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Activate</button>`:''}
+                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`:''}
+              </div></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Not in any campaign yet.</p>'}
+
+          <div class="sub-h">Payments (${d.payments.length}) — ${money(d.money.paid)} paid of ${money(d.money.earned)} earned</div>
+          ${d.payments.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
+            <tbody>${d.payments.map(p=>`<tr>
+              <td>${when(p.paid_at)}</td><td>${esc(p.campaign_name||'General')}</td>
+              <td class="muted">${esc(p.method||'—')}</td><td class="muted">${esc(p.reference||'—')}</td>
+              <td class="money">${money(p.amount)}</td>
+              <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id})">Delete</button></td>
+            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No payments recorded.</p>'}`;
+      }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
+    };
+
+    window.setClipper=async function(id,status){
+      try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Clipper updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.resetPassword=async function(id){
+      const pw=prompt('New password for this clipper (min 6 characters) — copy it before closing:');
+      if(!pw) return;
+      try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({password:pw})}); toast('Password changed — share it with the clipper'); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.deleteClipper=async function(id){
+      if(!confirm('Delete this clipper permanently?')) return;
+      try{ await api('/api/admin/clippers/'+id,{method:'DELETE'}); toast('Clipper deleted'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.revokeAccount=async function(id){
+      if(!confirm('Disconnect this Instagram account? View tracking stops until the clipper reconnects.')) return;
+      try{ await api('/api/admin/accounts/'+id,{method:'DELETE'}); toast('Account disconnected'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    document.getElementById('clipper-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      try{
+        const r=await api('/api/admin/clippers',{method:'POST',body:JSON.stringify({
+          username:document.getElementById('cl-username').value,
+          password:document.getElementById('cl-password').value,
+          display_name:document.getElementById('cl-display').value.trim()
+        })});
+        toast('Clipper "'+r.username+'" created — share the login now');
+        e.target.reset(); loadAll();
+      }catch(e2){ toast(e2.message,true); }
+    });
+
+    /* ---------- payments ---------- */
+    function fillPaymentSelects(){
+      const cs=document.getElementById('p-clipper');
+      if(cs && CLIPPERS.length){
+        const cur=cs.value;
+        cs.innerHTML='<option value="">Select clipper…</option>'+CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} — ${money(c.money.outstanding)} outstanding</option>`).join('');
+        cs.value=cur;
+      }
+      const cam=document.getElementById('p-campaign');
+      if(cam && CAMPAIGNS.length){
+        const cur=cam.value;
+        cam.innerHTML='<option value="">General / all</option>'+CAMPAIGNS.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        cam.value=cur;
+      }
+    }
+    document.getElementById('p-clipper').addEventListener('change',e=>{
+      const c=CLIPPERS.find(x=>String(x.id)===e.target.value);
+      document.getElementById('pay-hint').textContent=c?`${c.display_name} has earned ${money(c.money.earned)}, received ${money(c.money.paid)}, outstanding ${money(c.money.outstanding)}.`:'';
+    });
+
+    async function loadPayments(){
+      try{
+        const {payments}=await api('/api/admin/payments');
+        const tb=document.getElementById('payments-body');
+        tb.innerHTML=payments.length?payments.map(p=>`<tr>
+          <td>${when(p.paid_at)}</td><td class="handle">${esc(p.username)}</td>
+          <td>${esc(p.campaign_name||'General')}</td><td class="muted">${esc(p.method||'—')}</td>
+          <td class="muted">${esc(p.reference||'—')}</td><td class="money">${money(p.amount)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id})">Delete</button></td>
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">No payments recorded yet.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    }
+    window.delPayment=async function(id){
+      if(!confirm('Delete this payment record? The clipper\'s outstanding balance will go back up.')) return;
+      try{ await api('/api/admin/payments/'+id,{method:'DELETE'}); toast('Payment deleted'); loadAll(); loadPayments(); }
+      catch(e){ toast(e.message,true); }
+    };
+    document.getElementById('pay-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const dateVal=document.getElementById('p-date').value;
+      try{
+        await api('/api/admin/payments',{method:'POST',body:JSON.stringify({
+          clipper_id:Number(document.getElementById('p-clipper').value),
+          campaign_id:document.getElementById('p-campaign').value?Number(document.getElementById('p-campaign').value):null,
+          amount:Number(document.getElementById('p-amount').value),
+          method:document.getElementById('p-method').value.trim(),
+          reference:document.getElementById('p-reference').value.trim(),
+          paid_at:dateVal?new Date(dateVal).getTime():undefined
+        })});
+        toast('Payment recorded');
+        document.getElementById('p-amount').value=''; document.getElementById('p-reference').value='';
+        loadAll(); loadPayments();
+      }catch(e2){ toast(e2.message,true); }
+    });
+
+    function loadAll(){ loadOverview(); loadCampaigns(); loadClippers(); }
+    api('/api/admin/overview').then(()=>{ document.getElementById('auth-overlay').style.display='none'; loadAll(); }).catch(()=>{});
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clipgrow",
+  "compatibility_date": "2026-07-02",
+  "observability": {
+    "enabled": true
+  },
+  "main": "src/worker.js",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clipgrow",
+      "database_id": "5d78f12c-23f6-4abb-83f6-2574a7ea60b1"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+}
