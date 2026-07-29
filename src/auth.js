@@ -94,7 +94,7 @@ export function clearCookieHeader(name) {
   return `${name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 export async function createSessionCookie(role, sub, secret) {
   const exp = Date.now() + SESSION_TTL_SECONDS * 1000;

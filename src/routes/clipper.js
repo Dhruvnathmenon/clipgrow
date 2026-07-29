@@ -21,6 +21,7 @@ const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
  */
 function clipState(s) {
   if (s.status === 'disqualified') return 'disqualified';
+  if (s.status === 'paused') return 'paused';   // admin froze monetisation
   if (s.sync_error) return 'issue';
   if (!s.last_synced_at) return 'verified';
   return 'tracking';
@@ -247,7 +248,7 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/submissions' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
-              s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at,
+              s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
               c.name AS campaign_name, c.id AS campaign_id, c.cpm,
               a.username AS account_username, a.platform
        FROM submissions s
@@ -268,6 +269,7 @@ export async function handleClipper(request, env, url) {
         earning: s.earning,
         cpm: s.cpm,
         state: clipState(s),
+        source: s.source || 'manual',
         has_thumb: !!(s.thumbnail_key || s.thumbnail_url),
         thumb: `/api/media/thumb/${s.id}`,
         created_at: s.created_at,

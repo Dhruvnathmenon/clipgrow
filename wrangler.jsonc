@@ -8,11 +8,24 @@
   "main": "src/worker.js",
   "assets": {
     "directory": ".",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    // The Worker must see every request before a static file is served, so it
+    // can gate /dashboard and /tracker behind a login server-side.
+    "run_worker_first": true
   },
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "vars": {
+    // Not secret -- it's visible in the OAuth redirect URL anyway.
+    // The matching IG_CLIENT_SECRET is set separately via `wrangler secret put`.
+    "IG_CLIENT_ID": "27584781754476534",
+    // Pinned so the authorize step and the token-exchange step send a
+    // byte-identical redirect_uri. Instagram compares the two and rejects the
+    // exchange on any mismatch ("Error validating verification code"). Must
+    // exactly equal the Redirect URI registered in the Meta app.
+    "IG_REDIRECT_URI": "https://clipgrow.in/api/auth/instagram/callback"
+  },
   "d1_databases": [
     {
       "binding": "DB",

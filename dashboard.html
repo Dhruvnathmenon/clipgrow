@@ -202,6 +202,15 @@
     #refresh-btn[disabled] { opacity:.45; cursor:not-allowed; }
     @media (max-width:640px){ .clips-head { flex-direction:column; } .refresh-wrap { text-align:left; } }
 
+    .auto-note { background:rgba(61,255,122,.06); border:1px solid rgba(61,255,122,.25); border-radius:9px; padding:.85rem 1rem; font-size:.8rem; color:var(--muted-l); line-height:1.6; margin-bottom:.9rem; }
+    .auto-note strong { color:var(--neon); }
+
+    /* Clips the admin has switched off: visible, but clearly not earning */
+    .clip-off { opacity:.55; filter:grayscale(1); }
+    .clip-off:hover { opacity:.8; }
+    .clip-note { font-size:.7rem; color:var(--gold); line-height:1.45; margin:.4rem 0 .1rem; }
+    .badge.paused { background:rgba(255,215,0,.14); color:var(--gold); }
+
     /* Instagram tester-request inline form */
     .tester-req-row { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
     .tester-req-row input { flex:1; min-width:180px; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.55rem .75rem; color:var(--white); font-size:.85rem; }
@@ -329,8 +338,8 @@
       <div class="page-head clips-head">
         <div><h1>My Clips</h1><p>Views are pulled straight from Instagram — no manual reporting</p></div>
         <div class="refresh-wrap">
-          <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="manualRefresh()">↻ Refresh views</button>
-          <div class="note" id="refresh-note">Updates automatically every 6 hours</div>
+          <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Refresh views</button>
+          <div class="note refresh-note">Updates automatically every 6 hours</div>
         </div>
       </div>
       <div class="plat-row" id="plat-row"></div>
@@ -547,28 +556,28 @@
         if(p.status==='paused') action+=alertBox('warn','Paused',p.note||'You cannot submit new clips right now.','Clips you already posted keep tracking and earning.');
         const a=p.account;
         if(!a){
+          // Connect is ALWAYS reachable. An account that is already an approved
+          // tester must never be blocked by our own queue -- and if it isn't a
+          // tester yet, Instagram returns a typed NOT_A_TESTER error that tells
+          // the clipper exactly what to do. The request form below is a helper
+          // for getting on the admin's list, not a gate.
           const t=p.tester;
-          if(!t || t.status==='rejected'){
-            action+=`<div class="alert warn">
-              <div class="alert-t">Instagram not connected</div>
-              <div>Before you can connect, ClipGrow needs to add your Instagram account as a tester on our app — that's a one-time step per account.</div>
-              <div class="alert-fix">${t&&t.status==='rejected'?'Your last request wasn\'t approved'+(t.note?': '+esc(t.note):'')+'. Check the username and try again.':'It must be a Professional account (Creator or Business) — personal accounts cannot report views.'}</div>
-              <div class="tester-req-row">
-                <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
-                <button class="btn btn-sm" onclick="requestTesterAccess(${c.id})">Request Instagram Access</button>
-              </div>
-            </div>`;
-          } else if(t.status==='requested'){
-            action+=alertBox('info','Waiting on ClipGrow',`We're adding @${esc(t.ig_username)} as a tester on our Instagram app.`,
-              'This is usually quick — check back shortly, or ask the ClipGrow admin.');
-          } else if(t.status==='invited'){
-            action+=alertBox('warn','Accept the tester invite',`ClipGrow sent @${esc(t.ig_username)} a tester invite — you need to accept it before connecting.`,
-              'On Instagram: Settings and privacy → Apps and websites → Tester invites → Accept. Then come back here.');
-          } else if(t.status==='confirmed'){
-            action+=alertBox('warn','Instagram not connected','This campaign needs its own Instagram account connected before you can post.',
-              'It must be a Professional account (Creator or Business) — personal accounts cannot report views.',
-              `<button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button>`);
-          }
+          let note='It must be a Professional account (Creator or Business) — personal accounts cannot report views.';
+          if(t&&t.status==='requested') note=`Access requested for @${esc(t.ig_username)} — ClipGrow is adding you as a tester. Already approved? Connect now.`;
+          else if(t&&t.status==='invited') note=`Invite sent to @${esc(t.ig_username)}. Accept it in Instagram → Settings and privacy → Apps and websites → Tester invites, then connect.`;
+          else if(t&&t.status==='confirmed') note=`@${esc(t.ig_username)} is approved — connect it now.`;
+          else if(t&&t.status==='rejected') note=`Your access request wasn't approved${t.note?': '+esc(t.note):''}. Check the username and request again.`;
+
+          action+=`<div class="alert warn">
+            <div class="alert-t">Instagram not connected</div>
+            <div>Connect the Instagram account you'll post this campaign's clips from.</div>
+            <div class="alert-fix">${note}</div>
+            <div style="margin-top:.85rem"><button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button></div>
+            ${(!t||t.status==='rejected')?`<div class="tester-req-row">
+              <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
+              <button class="btn btn-ghost btn-sm" onclick="requestTesterAccess(${c.id})">Not a tester yet? Request access</button>
+            </div>`:''}
+          </div>`;
         } else if(a.status==='needs_reauth'||a.status==='revoked'){
           action+=alertBox('bad','Instagram connection needs attention',`We can no longer read views from @${a.username}.`,'Reconnect the same account — your earnings are safe.',
             `<a class="btn btn-warn" href="/api/auth/instagram/start?campaign_id=${c.id}">Reconnect @${esc(a.username)}</a>`);
@@ -576,10 +585,17 @@
           action+=`<div class="acct"><span class="badge connected">✓ Verified</span>Posting from <strong style="color:var(--white)">@${esc(a.username)}</strong>
             <span class="chip">${esc(a.account_type||'professional')}</span></div>`;
           if(p.status==='active'&&c.status==='active'){
-            action+=`<div class="submit-row">
-              <input type="url" id="d-url" placeholder="Paste your Instagram Reel link" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
-              <button class="btn" id="d-btn" onclick="submitClip(${c.id},'d-url')">Verify &amp; Add Clip</button></div>
-              <p class="muted" style="font-size:.73rem;margin-top:.45rem">We check the link really belongs to @${esc(a.username)} before adding it.</p>`;
+            action+=`<div class="auto-note">
+              <strong>New Reels are added automatically.</strong> Anything you post on @${esc(a.username)} from now on shows up here on its own — you don't need to do anything.
+              <div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
+                <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Check for new clips &amp; views</button>
+                <div class="note refresh-note">Updates automatically every 6 hours</div>
+              </div>
+            </div>
+            <div class="submit-row">
+              <input type="url" id="d-url" placeholder="Paste a link to add an older Reel" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
+              <button class="btn" id="d-btn" onclick="submitClip(${c.id},'d-url')">Add Clip</button></div>
+              <p class="muted" style="font-size:.73rem;margin-top:.45rem">Only needed for Reels posted before you connected @${esc(a.username)}. We check the link really belongs to that account.</p>`;
           } else if(c.status==='budget_full'){
             action+=alertBox('info','Budget fully allocated','New clips can no longer earn on this campaign.','Your existing clips keep their earnings.');
           }
@@ -642,32 +658,36 @@
     /* ── manual refresh (rate-capped server-side; UI just mirrors the cooldown) ── */
     let NEXT_REFRESH_AT=0, refreshTimer=null;
 
+    // Refresh controls appear in more than one place (Clips tab, campaign
+    // detail), so drive them all off a class rather than a single id.
     function paintRefresh(){
-      const btn=document.getElementById('refresh-btn'), note=document.getElementById('refresh-note');
-      if(!btn) return;
+      const btns=document.querySelectorAll('.refresh-btn'), notes=document.querySelectorAll('.refresh-note');
+      if(!btns.length) return;
       const left=NEXT_REFRESH_AT-Date.now();
       if(left>0){
-        btn.disabled=true;
         const s=Math.ceil(left/1000);
-        note.textContent=`Next refresh in ${s>=60?Math.ceil(s/60)+'m':s+'s'}`;
+        const txt=`Next refresh in ${s>=60?Math.ceil(s/60)+'m':s+'s'}`;
+        btns.forEach(b=>b.disabled=true);
+        notes.forEach(n=>n.textContent=txt);
         if(!refreshTimer) refreshTimer=setInterval(paintRefresh,1000);
       }else{
-        btn.disabled=false;
-        note.textContent='Updates automatically every 6 hours';
+        btns.forEach(b=>b.disabled=false);
+        notes.forEach(n=>n.textContent='Updates automatically every 6 hours');
         if(refreshTimer){ clearInterval(refreshTimer); refreshTimer=null; }
       }
     }
 
     window.manualRefresh=async function(){
-      const btn=document.getElementById('refresh-btn'), note=document.getElementById('refresh-note');
-      btn.disabled=true; note.textContent='Fetching latest views…';
+      document.querySelectorAll('.refresh-btn').forEach(b=>b.disabled=true);
+      document.querySelectorAll('.refresh-note').forEach(n=>n.textContent='Fetching latest views…');
       try{
         const r=await api('/api/clipper/refresh',{method:'POST'});
         NEXT_REFRESH_AT=Date.now()+(r.cooldown_ms||300000);
         await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
         renderClips();
-        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read`
-                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}`, !!r.failed);
+        const found=r.imported?` · ${r.imported} new clip${r.imported===1?'':'s'} found`:'';
+        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read${found}`
+                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}${found}`, !!r.failed);
       }catch(e){
         // 429 carries retry_in_ms so the countdown stays honest.
         if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;
@@ -687,12 +707,14 @@
     }
     window.setPlat=function(p){ platFilter=p; renderClips(); };
 
-    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified'};
+    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',paused:'Not monetised'};
     function clipCard(c){
       const thumb=c.has_thumb
         ? `<img src="${c.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
         : placeholderHTML();
-      return `<div class="clip">
+      // Paused/disqualified clips stay visible but read as clearly inactive.
+      const off=c.state==='paused'||c.state==='disqualified';
+      return `<div class="clip${off?' clip-off':''}">
         <div class="clip-media">${thumb}
           <span class="clip-state"><span class="badge ${c.state}">${STATE_LABEL[c.state]||c.state}</span></span>
           <span class="clip-plat">${platIcon(c.platform)}</span>
@@ -703,6 +725,8 @@
             <div class="clip-v">${num(c.views)}<small>views</small></div>
             <div class="clip-e">${money(c.earning)}<small>earned</small></div>
           </div>
+          ${c.state==='paused'?'<div class="clip-note">Paused by ClipGrow — not earning while under review.</div>':''}
+          ${c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
           <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on Instagram ↗</a>
         </div></div>`;
     }

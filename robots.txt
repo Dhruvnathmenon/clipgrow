@@ -1,9 +1,12 @@
 User-agent: *
 Allow: /
+Disallow: /clipper
 Disallow: /login
 Disallow: /login.html
 Disallow: /dashboard
 Disallow: /dashboard.html
+Disallow: /tracker
+Disallow: /tracker.html
 Disallow: /admin
 Disallow: /admin.html
 Disallow: /api/

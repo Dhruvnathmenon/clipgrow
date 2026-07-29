@@ -2,10 +2,11 @@ const AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
 const TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
 const GRAPH_BASE = 'https://graph.instagram.com';
 
-// Scopes for "Instagram API with Instagram Login". Meta renames these
-// occasionally -- override with the IG_SCOPES var if your app lists different
-// strings on its Instagram product page.
-const DEFAULT_SCOPES = 'instagram_business_basic,instagram_business_manage_insights';
+// Scopes for "Instagram API with Instagram Login". Must match the permissions
+// enabled on the app's Instagram product page -- Meta's own generated embed URL
+// requests exactly these five, so we mirror it to avoid any grant mismatch.
+// Override with the IG_SCOPES var if the app's permission set changes.
+const DEFAULT_SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights';
 
 // Instagram accounts must be Professional to expose insights at all.
 const PROFESSIONAL_TYPES = new Set(['BUSINESS', 'MEDIA_CREATOR', 'CREATOR']);
@@ -90,12 +91,35 @@ export const IG_ERRORS = {
   UNKNOWN: (msg) => new IgError('UNKNOWN', msg || 'Something went wrong talking to Instagram.', 'Try again — if it keeps happening, tell the ClipGrow admin.', { retryable: true })
 };
 
-// Maps a Meta Graph error payload onto one of our typed errors.
+// Maps a Meta error payload onto one of our typed errors.
+//
+// Two different shapes exist. The Graph API (graph.instagram.com) nests details
+// under `error: { message, code, error_subcode }`. The OAuth token endpoint
+// (api.instagram.com/oauth/access_token) instead returns them at the top level
+// as `error_type` / `code` / `error_message`. Reading only the Graph shape made
+// every token-exchange failure collapse into a blank UNKNOWN, hiding the real
+// reason (bad client secret, redirect_uri mismatch, reused code, ...).
 function classify(status, body) {
   const e = (body && body.error) || {};
-  const code = e.code;
+  const code = e.code != null ? e.code : (body && body.code);
   const sub = e.error_subcode;
-  const msg = e.message || '';
+  const msg = e.message || (body && (body.error_message || body.error_description)) || '';
+  const type = (body && body.error_type) || '';
+
+  // OAuth token-endpoint failures only carry a message/type, no numeric Graph
+  // code -- surface that message verbatim so it is actually diagnosable.
+  if (!e.code && (body && (body.error_message || body.error_type))) {
+    if (/tester|development mode|not been granted|does not have access/i.test(msg)) return IG_ERRORS.NOT_A_TESTER();
+    if (/redirect_uri|redirect uri/i.test(msg)) {
+      return new IgError('REDIRECT_MISMATCH', 'Instagram rejected the connection: ' + msg,
+        'The ClipGrow admin needs to confirm the redirect URL in the Meta app matches https://clipgrow.in/api/auth/instagram/callback exactly.');
+    }
+    if (/client_secret|client secret|invalid client|invalid_client/i.test(msg)) {
+      return new IgError('BAD_SECRET', 'Instagram rejected the app credentials.',
+        'The ClipGrow admin needs to re-check the Instagram App Secret saved in the Worker settings.');
+    }
+    return IG_ERRORS.UNKNOWN(type ? `${type}: ${msg}` : msg);
+  }
 
   if (code === 4 || code === 17 || code === 32 || code === 613 || status === 429) return IG_ERRORS.RATE_LIMITED();
   if (code === 190) {
@@ -150,26 +174,63 @@ function sleep(ms) {
 }
 
 export function getAuthorizeUrl(env, redirectUri, state) {
-  const url = new URL(AUTHORIZE_URL);
-  url.searchParams.set('client_id', env.IG_CLIENT_ID);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', env.IG_SCOPES || DEFAULT_SCOPES);
-  url.searchParams.set('state', state);
-  return url.toString();
+  // Byte-match Meta's own generated embed URL: redirect_uri is sent RAW
+  // (NOT percent-encoded). Instagram binds the auth code to the redirect_uri
+  // string exactly as received here; the token exchange then sends the same raw
+  // value. (URLSearchParams percent-encodes it, which made Instagram bind to
+  // the encoded form and reject the token exchange -- verified via the /_try
+  // probe: both slash and no-slash decoded forms were rejected.)
+  const scope = env.IG_SCOPES || DEFAULT_SCOPES;
+  const q =
+    'force_reauth=true' +
+    '&client_id=' + env.IG_CLIENT_ID +
+    '&redirect_uri=' + redirectUri +
+    '&response_type=code' +
+    '&scope=' + encodeURIComponent(scope) +
+    '&state=' + encodeURIComponent(state);
+  return AUTHORIZE_URL + '?' + q;
 }
 
-export async function exchangeCodeForToken(env, code, redirectUri) {
+async function postTokenExchange(env, code, redirectUri) {
   const form = new URLSearchParams();
   form.set('client_id', env.IG_CLIENT_ID);
   form.set('client_secret', env.IG_CLIENT_SECRET);
   form.set('grant_type', 'authorization_code');
   form.set('redirect_uri', redirectUri);
   form.set('code', code);
-  const res = await fetch(TOKEN_URL, { method: 'POST', body: form });
+  let res;
+  try {
+    res = await fetch(TOKEN_URL, { method: 'POST', body: form });
+  } catch {
+    throw IG_ERRORS.NETWORK();
+  }
   const payload = await res.json().catch(() => null);
-  if (!res.ok) throw classify(res.status, payload);
-  return payload;
+  return { ok: res.ok, status: res.status, payload };
+}
+
+export async function exchangeCodeForToken(env, code, redirectUri) {
+  // Instagram validates redirect_uri against the REGISTERED value, which the
+  // App Dashboard may silently store with a trailing slash. A failed exchange
+  // does not consume the code, so if the exact URI is rejected we retry the
+  // same code with the slash toggled -- whichever form was registered wins.
+  const withSlash = redirectUri.endsWith('/') ? redirectUri : redirectUri + '/';
+  const withoutSlash = redirectUri.replace(/\/+$/, '');
+  const variants = [redirectUri, redirectUri === withoutSlash ? withSlash : withoutSlash];
+
+  let last = null;
+  for (const variant of variants) {
+    const r = await postTokenExchange(env, code, variant);
+    if (r.ok) {
+      console.log('IG token exchange OK with redirect_uri=[' + variant + ']');
+      return r.payload;
+    }
+    console.error('IG token exchange failed', r.status, 'redirect_uri=[' + variant + ']', JSON.stringify(r.payload));
+    last = r;
+    // Only worth retrying the other variant on a redirect_uri complaint.
+    const msg = (r.payload && (r.payload.error_message || (r.payload.error && r.payload.error.message))) || '';
+    if (!/redirect_uri/i.test(msg)) break;
+  }
+  throw classify(last.status, last.payload);
 }
 
 export async function exchangeForLongLivedToken(env, shortToken) {
@@ -219,7 +280,7 @@ function normalizePermalink(u) {
 export async function findMediaByUrl(igUserId, accessToken, permalinkUrl) {
   const target = normalizePermalink(permalinkUrl);
   let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
-  url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp');
+  url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp,thumbnail_url,media_url,caption');
   url.searchParams.set('limit', '100');
   url.searchParams.set('access_token', accessToken);
 
@@ -232,6 +293,39 @@ export async function findMediaByUrl(igUserId, accessToken, permalinkUrl) {
     url = new URL(next);
   }
   return null;
+}
+
+/**
+ * Lists an account's media newest-first, stopping as soon as it reaches
+ * anything posted at or before `sinceTs`.
+ *
+ * Backs auto-import. The `sinceTs` floor is what stops a clipper connecting an
+ * account with an old viral Reel and instantly claiming the whole budget --
+ * only genuinely new posts are picked up automatically.
+ */
+export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxPages = 3 } = {}) {
+  let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
+  url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp,thumbnail_url,media_url');
+  url.searchParams.set('limit', '50');
+  url.searchParams.set('access_token', accessToken);
+
+  const out = [];
+  for (let page = 0; page < maxPages; page++) {
+    const body = await igFetch(url.toString());
+    const items = (body && body.data) || [];
+    let hitOld = false;
+    for (const m of items) {
+      const ts = m.timestamp ? Date.parse(m.timestamp) : 0;
+      if (ts && ts <= sinceTs) { hitOld = true; continue; }
+      out.push(m);
+    }
+    // Results are newest-first, so the first old item means we're done.
+    if (hitOld) break;
+    const next = body && body.paging && body.paging.next;
+    if (!next) break;
+    url = new URL(next);
+  }
+  return out;
 }
 
 export function isVideoMedia(media) {

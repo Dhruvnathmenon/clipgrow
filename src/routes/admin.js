@@ -197,7 +197,7 @@ export async function handleAdmin(request, env, url) {
     const campaign = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!campaign) return err('Not found', 404);
     const { results: submissions } = await env.DB.prepare(
-      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
+      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at, s.source,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
@@ -323,8 +323,11 @@ export async function handleAdmin(request, env, url) {
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM submissions WHERE id = ?').bind(params.id).run();
     } else {
+      // 'paused' = temporarily not monetised (under review, off-guidelines).
+      // 'disqualified' = permanently rejected. Both earn nothing and hand their
+      // share of the budget back; only 'active' accrues.
       const { status } = await readJson(request);
-      if (!['active', 'disqualified'].includes(status)) return err('Invalid status');
+      if (!['active', 'paused', 'disqualified'].includes(status)) return err('Invalid status');
       await env.DB.prepare('UPDATE submissions SET status = ? WHERE id = ?').bind(status, params.id).run();
     }
     await reallocateCampaign(env.DB, sub.campaign_id);

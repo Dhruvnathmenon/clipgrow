@@ -1,4 +1,4 @@
-import { fetchMediaViews, refreshLongLivedToken, IgError } from './instagram.js';
+import { fetchMediaViews, refreshLongLivedToken, listRecentMedia, isVideoMedia, IgError } from './instagram.js';
 
 const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -68,6 +68,134 @@ export async function syncSubmissionViews(db, campaignId) {
 }
 
 /**
+ * Pulls newly-posted Reels from every connected account into its campaign.
+ *
+ * Each campaign is worked from its own dedicated account, so anything new on
+ * that account belongs to that campaign -- the clipper posts to Instagram and
+ * the clip appears here on its own, no link pasting.
+ *
+ * Guardrails:
+ *  - only media posted strictly after `connected_at` (no back-dating an old
+ *    viral Reel into a campaign for an instant payout)
+ *  - Reels/video only (photos carry no view metric)
+ *  - skips ig_media_ids already recorded, so re-runs never double-count
+ *  - skips paused/kicked participations and finished campaigns
+ *
+ * @param clipperId optional -- restrict to one clipper (manual refresh).
+ */
+export async function autoImportClips(db, clipperId = null) {
+  const { results } = await db.prepare(
+    `SELECT a.id AS account_id, a.external_id, a.access_token, a.connected_at,
+            p.clipper_id, p.campaign_id
+     FROM social_accounts a
+     JOIN participations p ON p.account_id = a.id
+     JOIN campaigns c ON c.id = p.campaign_id
+     WHERE a.platform = 'instagram' AND a.status = 'connected' AND a.access_token IS NOT NULL
+       AND p.status = 'active' AND c.status != 'completed'
+       ${clipperId ? 'AND p.clipper_id = ?' : ''}`
+  ).bind(...(clipperId ? [clipperId] : [])).all();
+
+  const campaigns = new Set();
+  let imported = 0;
+
+  for (const row of results || []) {
+    try {
+      const media = await listRecentMedia(row.external_id, row.access_token, { sinceTs: row.connected_at || 0 });
+      for (const m of media) {
+        if (!isVideoMedia(m)) continue;
+        const seen = await db.prepare('SELECT id FROM submissions WHERE ig_media_id = ?').bind(m.id).first();
+        if (seen) continue;
+        await db.prepare(
+          `INSERT INTO submissions
+             (clipper_id, campaign_id, account_id, ig_media_id, permalink, views, earning, status,
+              media_product_type, thumbnail_url, posted_at, created_at, source)
+           VALUES (?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, 'auto')`
+        ).bind(
+          row.clipper_id, row.campaign_id, row.account_id, m.id, m.permalink || '',
+          m.media_product_type || m.media_type || null,
+          m.thumbnail_url || m.media_url || null,
+          m.timestamp ? Date.parse(m.timestamp) : Date.now(),
+          Date.now()
+        ).run();
+        campaigns.add(row.campaign_id);
+        imported++;
+      }
+    } catch (e) {
+      // One unreachable account must never stop the rest importing.
+      const code = e.code || 'UNKNOWN';
+      if (e instanceof IgError && e.needsReauth) {
+        await markAccount(db, row.account_id, { status: 'needs_reauth', code });
+      }
+    }
+  }
+
+  return { imported, campaigns: [...campaigns] };
+}
+
+/**
+ * Syncs only one clipper's clips, then reallocates every campaign they touched.
+ *
+ * Backs the manual refresh button. Capped at MANUAL_SYNC_MAX_CLIPS so a clipper
+ * with a huge back catalogue can't burn the app's Instagram rate limit in one
+ * click -- the 6-hourly cron still covers anything beyond the cap.
+ */
+export const MANUAL_SYNC_MAX_CLIPS = 40;
+
+export async function syncClipperViews(db, clipperId) {
+  // Pick up anything newly posted before reading view counts, so a brand-new
+  // Reel lands with real numbers on the very first refresh.
+  let autoImported = 0;
+  try {
+    const res = await autoImportClips(db, clipperId);
+    autoImported = res.imported;
+  } catch { /* import failures must not block the view sync */ }
+
+  const { results } = await db.prepare(
+    `SELECT s.id, s.ig_media_id, s.campaign_id, a.id AS account_id, a.access_token, a.status AS account_status
+     FROM submissions s
+     LEFT JOIN social_accounts a ON a.id = s.account_id
+     WHERE s.clipper_id = ? AND s.status = 'active'
+     ORDER BY s.created_at DESC
+     LIMIT ?`
+  ).bind(clipperId, MANUAL_SYNC_MAX_CLIPS).all();
+
+  const campaigns = new Set();
+  let synced = 0, failed = 0;
+
+  for (const sub of results || []) {
+    campaigns.add(sub.campaign_id);
+    if (!sub.access_token || sub.account_status === 'revoked') {
+      await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ?').bind('NO_ACCOUNT', sub.id).run();
+      failed++;
+      continue;
+    }
+    try {
+      const views = await fetchMediaViews(sub.ig_media_id, sub.access_token);
+      await db.prepare('UPDATE submissions SET views = ?, last_synced_at = ?, sync_error = NULL WHERE id = ?')
+        .bind(views, Date.now(), sub.id).run();
+      if (sub.account_status !== 'connected') await markAccount(db, sub.account_id, { status: 'connected', code: null });
+      synced++;
+    } catch (e) {
+      const code = e.code || 'UNKNOWN';
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+        .bind(code, Date.now(), sub.id).run();
+      if (e instanceof IgError && e.needsReauth && sub.account_id) {
+        await markAccount(db, sub.account_id, { status: 'needs_reauth', code });
+      }
+      failed++;
+    }
+  }
+
+  // Allocation is campaign-wide, so refreshing one clipper can shift others'
+  // positions in the same budget -- recompute each affected campaign in full.
+  for (const campaignId of campaigns) {
+    await allocateCampaignEarnings(db, campaignId);
+  }
+
+  return { synced, failed, clips: (results || []).length, imported: autoImported };
+}
+
+/**
  * First-come-first-served budget allocation, oldest submission first.
  *
  * Only 'active' submissions from participations that are not 'kicked' earn.
@@ -93,7 +221,8 @@ export async function allocateCampaignEarnings(db, campaignId) {
   for (const sub of submissions || []) {
     let allocated;
     if (sub.sub_status !== 'active') {
-      // Disqualified by an admin: earns nothing and hands its budget back.
+      // Paused (under review) or disqualified by an admin: earns nothing and
+      // hands its share of the budget back to the pool.
       allocated = 0;
     } else if (sub.part_status === 'kicked') {
       // Removed from the campaign: earnings freeze at what they had already
@@ -119,11 +248,19 @@ export async function allocateCampaignEarnings(db, campaignId) {
 }
 
 export async function syncAllCampaigns(db) {
-  const summary = { campaigns: 0, errors: [] };
+  const summary = { campaigns: 0, imported: 0, errors: [] };
   try {
     await refreshExpiringTokens(db);
   } catch (e) {
     summary.errors.push(`token refresh: ${e.message}`);
+  }
+
+  // Import first so new posts get view counts in this same pass.
+  try {
+    const res = await autoImportClips(db);
+    summary.imported = res.imported;
+  } catch (e) {
+    summary.errors.push(`auto-import: ${e.message}`);
   }
 
   const { results: campaigns } = await db

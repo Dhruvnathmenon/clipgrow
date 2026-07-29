@@ -488,18 +488,22 @@
 
           <div class="sub-h">Videos (${submissions.length})</div>
           ${submissions.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Added</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
             <tbody>${submissions.map(s=>`<tr>
               <td class="handle">${esc(s.username)}</td>
               <td class="muted">${s.account_username?'@'+esc(s.account_username):'—'}</td>
               <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+              <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
               <td>${num(s.views)}</td><td class="money">${money(s.earning)}</td>
               <td>${s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+                    :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
                     :s.sync_error?`<span class="badge needs_reauth">${esc(s.sync_error)}</span>`
                     :'<span class="badge active">ok</span>'}</td>
               <td><div class="actions">
-                ${s.status==='active'
-                  ?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
+                ${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
+                ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
+                ${s.status!=='disqualified'
+                  ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
                   :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
                 <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>
               </div></td></tr>`).join('')}</tbody></table></div>`

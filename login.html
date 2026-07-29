@@ -58,7 +58,7 @@
           body: JSON.stringify({ username, password })
         });
         if (!res.ok) throw new Error();
-        location.href = 'dashboard.html';
+        location.href = '/dashboard';
       } catch {
         errorEl.style.display = 'block';
       }
