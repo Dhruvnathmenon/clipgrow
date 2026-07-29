@@ -246,6 +246,7 @@
           <div class="grid-3">
             <div class="fld"><label>CPM — ₹ per 1,000 views <span class="req">*</span></label><input type="number" class="form-control" id="f-cpm" min="1" /></div>
             <div class="fld"><label>Total Budget ₹ <span class="req">*</span></label><input type="number" class="form-control" id="f-budget" min="1" /></div>
+            <div class="fld"><label>Minimum views to earn</label><input type="number" class="form-control" id="f-min_views" min="0" value="1000" placeholder="1000" /></div>
             <div class="fld"><label>Model</label><input class="form-control" id="f-model" placeholder="cpm / affiliate" /></div>
           </div>
           <div class="fld"><label>Short Description</label><input class="form-control" id="f-description" /></div>
@@ -302,7 +303,7 @@
     let modalMode='create', modalId=null;
     let CLIPPERS=[], CAMPAIGNS=[];
     const TEXT_FIELDS=['name','description','model','socials','platforms','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
-    const NUM_FIELDS=['cpm','budget','min_payout','max_payout','max_payout_per_channel'];
+    const NUM_FIELDS=['cpm','budget','min_views','min_payout','max_payout','max_payout_per_channel'];
 
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
     const num=n=>Number(n||0).toLocaleString('en-IN');
@@ -382,6 +383,7 @@
     window.blankDraft=function(){
       const d={approval_steps:[],terms:[],extra_fields:[]};
       TEXT_FIELDS.forEach(k=>d[k]=''); NUM_FIELDS.forEach(k=>d[k]=null);
+      d.min_views=1000;   // house default; admin can override per campaign
       return d;
     };
 
@@ -532,7 +534,7 @@
     window.editCampaign=async function(id){
       try{
         const {campaign}=await api('/api/admin/campaigns/'+id);
-        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,model:campaign.model},'edit',id);
+        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model},'edit',id);
       }catch(e){ toast(e.message,true); }
     };
     window.setCampaignStatus=async function(id,status){

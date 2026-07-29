@@ -92,6 +92,7 @@ export function publicCampaign(row, spent) {
     name: row.name,
     description: row.description,
     cpm: row.cpm,
+    min_views: row.min_views == null ? 0 : row.min_views,
     budget: row.budget,
     spent: spent ?? 0,
     remaining: Math.max(0, budget - (spent ?? 0)),

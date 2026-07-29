@@ -168,10 +168,12 @@ export async function handleAdmin(request, env, url) {
     const budget = Number(payload.budget) || 0;
     if (cpm <= 0) return err('CPM must be greater than 0');
     if (budget <= 0) return err('Budget must be greater than 0');
+    // Views a clip must reach before it earns anything. Defaults to 1,000.
+    const minViews = payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : 1000;
     const res = await env.DB.prepare(
-      `INSERT INTO campaigns (name, description, cpm, budget, status, model, blueprint_json, created_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
-    ).bind(name, payload.description || '', cpm, budget, payload.model || '', JSON.stringify(pickBlueprint(payload)), now()).run();
+      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`
+    ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '', JSON.stringify(pickBlueprint(payload)), now()).run();
     return json({ ok: true, id: res.meta.last_row_id }, 201);
   }
 
@@ -213,18 +215,21 @@ export async function handleAdmin(request, env, url) {
     if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) return err('Invalid status');
     const merged = { ...JSON.parse(existing.blueprint_json || '{}'), ...pickBlueprint(payload) };
     await env.DB.prepare(
-      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, status = ?, model = ?, blueprint_json = ? WHERE id = ?`
+      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ? WHERE id = ?`
     ).bind(
       payload.name != null ? String(payload.name).trim() || existing.name : existing.name,
       payload.description != null ? payload.description : existing.description,
       payload.cpm != null ? Number(payload.cpm) || existing.cpm : existing.cpm,
       payload.budget != null ? Number(payload.budget) || existing.budget : existing.budget,
+      payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : existing.min_views,
       payload.status || existing.status,
       payload.model != null ? payload.model : existing.model,
       JSON.stringify(merged), params.id
     ).run();
-    // CPM or budget changes re-price every submission in this campaign.
-    if (payload.cpm != null || payload.budget != null) await reallocateCampaign(env.DB, params.id);
+    // CPM, budget or threshold changes re-price every submission in this campaign.
+    if (payload.cpm != null || payload.budget != null || payload.min_views != null) {
+      await reallocateCampaign(env.DB, params.id);
+    }
     return json({ ok: true });
   }
 

@@ -209,7 +209,10 @@
     .clip-off { opacity:.55; filter:grayscale(1); }
     .clip-off:hover { opacity:.8; }
     .clip-note { font-size:.7rem; color:var(--gold); line-height:1.45; margin:.4rem 0 .1rem; }
+    .clip-note.min { color:var(--muted-l); }
+    .clip-note.min small { color:var(--muted); }
     .badge.paused { background:rgba(255,215,0,.14); color:var(--gold); }
+    .badge.below_min { background:rgba(255,255,255,.08); color:var(--muted-l); }
 
     /* Instagram tester-request inline form */
     .tester-req-row { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
@@ -250,6 +253,7 @@
     .ig-substeps { margin:.5rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--muted); line-height:1.85; }
     .ig-warn { background:rgba(255,215,0,.07); border:1px solid rgba(255,215,0,.35); border-radius:8px; padding:.7rem .85rem; font-size:.78rem; color:var(--gold); line-height:1.6; margin-top:.9rem; }
     .ig-foot { padding:1.1rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:.8rem; flex-wrap:wrap; }
+    .ig-checks { display:flex; flex-direction:column; gap:.5rem; }
     .ig-check { display:flex; align-items:center; gap:.5rem; font-size:.8rem; color:var(--muted-l); cursor:pointer; user-select:none; }
     .ig-check input { width:15px; height:15px; accent-color:var(--neon); cursor:pointer; }
 
@@ -395,21 +399,37 @@
         <div class="ig-step">
           <div class="ig-num">3</div>
           <div>
-            <div class="ig-step-t">Log into that account in this browser</div>
-            <div class="ig-step-d">Instagram will connect whichever account is logged in when you continue. If a different Instagram account is currently logged in on this device, log out of it first and log into the right one.</div>
+            <div class="ig-step-t">Accept the ClipGrow tester invite first</div>
+            <div class="ig-step-d">This step is required — without it Instagram shows an error instead of the approval screen. Easiest on a computer:</div>
+            <ol class="ig-substeps">
+              <li>Open <strong style="color:var(--muted-l)">instagram.com</strong> and log in as this account</li>
+              <li>Profile icon → <strong style="color:var(--muted-l)">Edit profile</strong> (or the settings gear)</li>
+              <li>Go to <strong style="color:var(--muted-l)">Apps and websites</strong> → <strong style="color:var(--muted-l)">Tester invites</strong></li>
+              <li><strong style="color:var(--muted-l)">Accept</strong> the ClipGrow invite</li>
+            </ol>
+            <div class="ig-step-d" style="margin-top:.4rem">No invite showing? Ask the ClipGrow admin to send one to your handle, then check again.</div>
           </div>
         </div>
         <div class="ig-step">
           <div class="ig-num">4</div>
           <div>
+            <div class="ig-step-t">Log into that account in this browser</div>
+            <div class="ig-step-d">Instagram will connect whichever account is logged in when you continue. If a different Instagram account is currently logged in on this device, log out of it first and log into the right one.</div>
+          </div>
+        </div>
+        <div class="ig-step">
+          <div class="ig-num">5</div>
+          <div>
             <div class="ig-step-t">Approve every permission Instagram asks for</div>
             <div class="ig-step-d">You'll land on an Instagram screen listing what ClipGrow can access. Leave everything checked — if any permission is unchecked, view tracking won't work and you'll need to reconnect.</div>
           </div>
         </div>
-        <div class="ig-warn">If your app isn't in the ClipGrow tester list yet, Instagram will show an error instead of the approval screen. Tell the ClipGrow admin your Instagram username so they can add you.</div>
       </div>
       <div class="ig-foot">
-        <label class="ig-check"><input type="checkbox" id="ig-confirm" onchange="toggleIgContinue(this.checked)">This is the right account, and it's Professional</label>
+        <div class="ig-checks">
+          <label class="ig-check"><input type="checkbox" id="ig-confirm" onchange="toggleIgContinue()">This is the right account, and it's Professional</label>
+          <label class="ig-check"><input type="checkbox" id="ig-tester" onchange="toggleIgContinue()">I've accepted the ClipGrow tester invite on Instagram</label>
+        </div>
         <div style="display:flex;gap:.6rem">
           <button class="btn btn-ghost btn-sm" onclick="closeConnectGuide()">Cancel</button>
           <a class="btn btn-sm" id="ig-continue" style="opacity:.5;pointer-events:none" href="#">Continue to Instagram</a>
@@ -607,6 +627,7 @@
         <div class="page-head"><h1>${esc(c.name)}</h1><p>${esc(c.description||b.objective||'')}</p></div>
         <div class="stats">
           <div class="stat"><div class="stat-val">${money(c.cpm)}</div><div class="stat-lbl">Per 1,000 views</div></div>
+          ${c.min_views?`<div class="stat"><div class="stat-val w">${num(c.min_views)}</div><div class="stat-lbl">Min views to earn</div></div>`:''}
           <div class="stat"><div class="stat-val w">${money(c.budget)}</div><div class="stat-lbl">Total Budget</div></div>
           <div class="stat"><div class="stat-val g">${money(c.remaining)}</div><div class="stat-lbl">Still Available</div></div>
           ${p?`<div class="stat"><div class="stat-val">${money(c.my_stats.earned)}</div><div class="stat-lbl">My Earnings</div></div>`:''}
@@ -707,7 +728,7 @@
     }
     window.setPlat=function(p){ platFilter=p; renderClips(); };
 
-    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',paused:'Not monetised'};
+    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',paused:'Not monetised',below_min:'Below minimum'};
     function clipCard(c){
       const thumb=c.has_thumb
         ? `<img src="${c.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
@@ -727,6 +748,7 @@
           </div>
           ${c.state==='paused'?'<div class="clip-note">Paused by ClipGrow — not earning while under review.</div>':''}
           ${c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
+          ${c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
           <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on Instagram ↗</a>
         </div></div>`;
     }
@@ -833,7 +855,8 @@
     /* ── Instagram connect guide ── */
     window.openConnectGuide=function(campaignId,campaignName){
       document.getElementById('ig-camp-name').textContent='For '+campaignName;
-      const cb=document.getElementById('ig-confirm'); cb.checked=false;
+      document.getElementById('ig-confirm').checked=false;
+      document.getElementById('ig-tester').checked=false;
       const go=document.getElementById('ig-continue');
       go.style.opacity='.5'; go.style.pointerEvents='none';
       go.href='/api/auth/instagram/start?campaign_id='+campaignId;
@@ -852,10 +875,14 @@
         openCampaign(campaignId);
       }catch(e){ toast(e.message,true); }
     };
-    window.toggleIgContinue=function(checked){
+    // Both confirmations are required: wrong account type and an unaccepted
+    // tester invite are the two things that make Instagram reject the connect,
+    // so make the clipper check them off before they can start.
+    window.toggleIgContinue=function(){
+      const ok=document.getElementById('ig-confirm').checked && document.getElementById('ig-tester').checked;
       const go=document.getElementById('ig-continue');
-      go.style.opacity=checked?'1':'.5';
-      go.style.pointerEvents=checked?'auto':'none';
+      go.style.opacity=ok?'1':'.5';
+      go.style.pointerEvents=ok?'auto':'none';
     };
 
     /* ── init ── */

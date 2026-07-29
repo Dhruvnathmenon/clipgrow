@@ -215,6 +215,7 @@ export async function allocateCampaignEarnings(db, campaignId) {
   ).bind(campaignId).all();
 
   const cpm = campaign.cpm || 0;
+  const minViews = campaign.min_views == null ? 0 : campaign.min_views;
   let remaining = campaign.budget || 0;
   const updates = [];
 
@@ -229,7 +230,11 @@ export async function allocateCampaignEarnings(db, campaignId) {
       // accrued. The money is still owed, so it still consumes budget.
       allocated = Math.min(sub.earning || 0, remaining);
       remaining -= allocated;
+    } else if (sub.views < minViews) {
+      // Under the campaign's minimum: tracked and shown, but earns nothing yet.
+      allocated = 0;
     } else {
+      // Threshold cleared -- earns on the FULL view count, not just the excess.
       const naive = Math.floor((sub.views / 1000) * cpm);
       allocated = Math.max(0, Math.min(naive, remaining));
       remaining -= allocated;

@@ -24,6 +24,8 @@ function clipState(s) {
   if (s.status === 'paused') return 'paused';   // admin froze monetisation
   if (s.sync_error) return 'issue';
   if (!s.last_synced_at) return 'verified';
+  // Synced, but hasn't reached the campaign's minimum views to start earning.
+  if (s.min_views && s.views < s.min_views) return 'below_min';
   return 'tracking';
 }
 
@@ -249,7 +251,7 @@ export async function handleClipper(request, env, url) {
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
               s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
-              c.name AS campaign_name, c.id AS campaign_id, c.cpm,
+              c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views,
               a.username AS account_username, a.platform
        FROM submissions s
        JOIN campaigns c ON c.id = s.campaign_id
@@ -268,6 +270,8 @@ export async function handleClipper(request, env, url) {
         views: s.views,
         earning: s.earning,
         cpm: s.cpm,
+        min_views: s.min_views || 0,
+        views_needed: Math.max(0, (s.min_views || 0) - s.views),
         state: clipState(s),
         source: s.source || 'manual',
         has_thumb: !!(s.thumbnail_key || s.thumbnail_url),
