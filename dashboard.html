@@ -4,396 +4,848 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>ClipGrow — My Dashboard</title>
+  <title>ClipGrow — Clipper Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
     :root {
-      --bg:#080D08; --bg-mid:#0B120B; --card:#0F170F; --border:#1A2C1A; --border-s:#223322;
-      --neon:#3DFF7A; --glow:rgba(61,255,122,.12); --glow-s:rgba(61,255,122,.22);
+      --bg:#080D08; --bg-mid:#0B120B; --card:#0F170F; --card-h:#141E14;
+      --border:#1A2C1A; --border-s:#223322; --neon:#3DFF7A; --neon-d:#2CC760;
+      --glow:rgba(61,255,122,.12); --glow-s:rgba(61,255,122,.22);
       --white:#F0F5F0; --text:#C4D4C4; --muted:#566056; --muted-l:#849484;
-      --red:#FF4D4D; --gold:#FFD700; --blue:#4DA6FF;
+      --red:#FF4D4D; --gold:#FFD700; --blue:#4DA6FF; --sidebar:248px;
     }
-    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.65; padding:1.5rem 1.2rem 4rem; }
-    h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; color:var(--white); }
-    .container { max-width:960px; margin:0 auto; }
-    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; padding-bottom:1rem; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:1rem; }
-    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.35rem; color:var(--white); text-decoration:none; }
-    .logo span { color:var(--neon); }
-    .who { font-size:.82rem; color:var(--muted-l); }
-    .who strong { color:var(--white); }
-    .btn { background:var(--neon); color:#060E06; padding:.65rem 1.2rem; border-radius:6px; font-weight:800; font-family:'Space Grotesk',sans-serif; border:none; cursor:pointer; font-size:.83rem; text-decoration:none; display:inline-block; transition:all .2s; }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+    h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; color:var(--white); line-height:1.15; }
+    a { color:inherit; }
+
+    /* ───────── SIDEBAR ───────── */
+    .sidebar {
+      position:fixed; left:0; top:0; bottom:0; width:var(--sidebar);
+      background:var(--bg-mid); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; padding:1.4rem 0 1rem; z-index:100;
+    }
+    .sb-logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.3rem; color:var(--white); text-decoration:none; padding:0 1.4rem 1.3rem; display:flex; align-items:center; gap:.5rem; }
+    .sb-logo span { color:var(--neon); }
+    .sb-pulse { width:8px; height:8px; background:var(--neon); border-radius:50%; box-shadow:0 0 10px var(--neon); animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(61,255,122,.6)} 50%{box-shadow:0 0 0 6px rgba(61,255,122,0)} }
+
+    .sb-nav { flex:1; display:flex; flex-direction:column; gap:.15rem; padding:0 .7rem; }
+    .sb-item {
+      display:flex; align-items:center; gap:.75rem; padding:.68rem .8rem; border-radius:8px;
+      background:none; border:none; width:100%; text-align:left; cursor:pointer;
+      color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:.87rem;
+      transition:all .18s;
+    }
+    .sb-item:hover { background:var(--card); color:var(--white); }
+    .sb-item.on { background:var(--card-h); color:var(--neon); }
+    .sb-item.on .sb-ic { color:var(--neon); }
+    .sb-ic { width:17px; height:17px; flex-shrink:0; color:var(--muted); transition:color .18s; }
+    .sb-item:hover .sb-ic { color:var(--white); }
+    .sb-count { margin-left:auto; font-size:.7rem; background:var(--border); color:var(--muted-l); padding:.1rem .42rem; border-radius:20px; font-weight:700; }
+    .sb-item.on .sb-count { background:rgba(61,255,122,.15); color:var(--neon); }
+
+    /* Clipper identity watermark + streak */
+    .sb-foot { padding:0 .7rem; }
+    .wm {
+      background:linear-gradient(150deg, rgba(61,255,122,.09) 0%, var(--card) 60%);
+      border:1px solid var(--border-s); border-radius:11px; padding:.9rem .85rem; position:relative; overflow:hidden;
+    }
+    .wm::after {
+      content:'CLIPPER'; position:absolute; right:-6px; bottom:-9px;
+      font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:2.1rem;
+      color:rgba(61,255,122,.055); letter-spacing:-1px; pointer-events:none; line-height:1;
+    }
+    .wm-top { display:flex; align-items:center; gap:.55rem; position:relative; z-index:1; }
+    .wm-av { width:30px; height:30px; border-radius:8px; background:var(--neon); color:#060E06; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:.9rem; flex-shrink:0; }
+    .wm-name { font-weight:700; color:var(--white); font-size:.83rem; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .wm-role { font-size:.6rem; color:var(--neon); font-weight:700; letter-spacing:1.3px; text-transform:uppercase; }
+    .wm-streak { display:flex; align-items:center; gap:.4rem; margin-top:.7rem; padding-top:.6rem; border-top:1px solid var(--border); position:relative; z-index:1; }
+    .flame { font-size:.95rem; filter:grayscale(1) opacity(.45); }
+    .flame.lit { filter:none; animation:flicker 2.4s ease-in-out infinite; }
+    @keyframes flicker { 0%,100%{transform:scale(1)} 50%{transform:scale(1.14)} }
+    .streak-n { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:.92rem; }
+    .streak-l { font-size:.66rem; color:var(--muted); }
+    .sb-out { display:block; width:100%; margin-top:.6rem; padding:.5rem; background:none; border:1px solid var(--border-s); border-radius:7px; color:var(--muted); font-size:.75rem; cursor:pointer; font-family:'Inter',sans-serif; }
+    .sb-out:hover { border-color:var(--red); color:var(--red); }
+
+    /* ───────── MAIN ───────── */
+    .main { margin-left:var(--sidebar); padding:1.8rem 2rem 4rem; min-height:100vh; }
+    .page-head { margin-bottom:1.6rem; }
+    .page-head h1 { font-size:1.75rem; font-weight:800; letter-spacing:-.7px; }
+    .page-head p { color:var(--muted-l); font-size:.87rem; margin-top:.15rem; }
+    .view { display:none; } .view.on { display:block; }
+
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:.9rem; margin-bottom:1.6rem; }
+    .stat { background:var(--card); border:1px solid var(--border); border-radius:11px; padding:1.1rem 1.2rem; }
+    .stat-val { font-size:1.5rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
+    .stat-val.w { color:var(--white); } .stat-val.g { color:var(--gold); }
+    .stat-lbl { font-size:.66rem; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-top:.3rem; }
+
+    .sec-title { font-size:.72rem; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; color:var(--neon); margin:1.8rem 0 .9rem; display:flex; align-items:center; gap:.55rem; }
+    .sec-title::before { content:''; width:15px; height:1px; background:var(--neon); }
+    .sec-title:first-child { margin-top:0; }
+
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.3rem; margin-bottom:1rem; }
+    .card.click { cursor:pointer; transition:all .22s; }
+    .card.click:hover { border-color:var(--neon); transform:translateY(-2px); box-shadow:0 10px 30px rgba(0,0,0,.4); }
+    .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; }
+    .card-name { font-weight:700; color:var(--white); font-size:1rem; font-family:'Space Grotesk',sans-serif; }
+    .card-meta { font-size:.77rem; color:var(--muted-l); margin-top:.2rem; }
+
+    .badge { font-size:.62rem; font-weight:700; padding:.22rem .55rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; display:inline-flex; align-items:center; gap:.3rem; }
+    .badge.active, .badge.connected, .badge.tracking { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.verified { background:rgba(77,166,255,.12); color:var(--blue); }
+    .badge.budget_full, .badge.paused, .badge.needs_reauth, .badge.issue { background:rgba(255,215,0,.12); color:var(--gold); }
+    .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.joined, .badge.locked { background:transparent; border:1px solid var(--border-s); color:var(--muted); }
+
+    .bar { height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); margin:.75rem 0 .35rem; }
+    .bar-fill { height:100%; background:var(--neon); box-shadow:0 0 8px var(--glow-s); transition:width .5s; }
+    .bar-lbl { font-size:.7rem; color:var(--muted); }
+
+    .minirow { display:flex; gap:1.5rem; flex-wrap:wrap; padding-top:.85rem; margin-top:.85rem; border-top:1px solid var(--border); }
+    .mini { font-size:.7rem; color:var(--muted); }
+    .mini b { display:block; font-size:1rem; color:var(--white); font-family:'Space Grotesk',sans-serif; font-weight:800; }
+    .mini b.green { color:var(--neon); }
+
+    .btn { background:var(--neon); color:#060E06; padding:.62rem 1.15rem; border-radius:7px; font-weight:800; font-family:'Space Grotesk',sans-serif; border:none; cursor:pointer; font-size:.82rem; text-decoration:none; display:inline-block; transition:all .2s; }
     .btn:hover { background:var(--white); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-ghost { background:transparent; color:var(--muted-l); border:1px solid var(--border-s); }
     .btn-ghost:hover { border-color:var(--neon); color:var(--neon); background:transparent; }
     .btn-warn { background:var(--gold); color:#0A0A00; }
-    .btn-warn:hover { background:#ffe555; }
-    .btn-sm { padding:.4rem .8rem; font-size:.76rem; }
+    .btn-sm { padding:.38rem .78rem; font-size:.75rem; }
 
-    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.9rem; margin-bottom:1.5rem; }
-    .stat { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.1rem; text-align:center; }
-    .stat-val { font-size:1.35rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
-    .stat-val.dim { color:var(--white); }
-    .stat-val.out { color:var(--gold); }
-    .stat-lbl { font-size:.63rem; color:var(--muted); text-transform:uppercase; margin-top:.3rem; letter-spacing:.5px; }
+    .alert { border-radius:9px; padding:.9rem 1.05rem; margin:.9rem 0; font-size:.83rem; line-height:1.6; border:1px solid; }
+    .alert-t { font-weight:700; margin-bottom:.2rem; }
+    .alert-fix { font-size:.77rem; opacity:.9; margin-top:.4rem; padding-top:.4rem; border-top:1px dashed currentColor; }
+    .alert.warn { background:rgba(255,215,0,.06); border-color:rgba(255,215,0,.4); color:var(--gold); }
+    .alert.bad { background:rgba(255,77,77,.06); border-color:rgba(255,77,77,.4); color:var(--red); }
+    .alert.info { background:rgba(77,166,255,.06); border-color:rgba(77,166,255,.35); color:var(--blue); }
+    .alert.ok { background:rgba(61,255,122,.06); border-color:rgba(61,255,122,.35); color:var(--neon); }
+    .alert .btn { margin-top:.65rem; }
 
-    .tabs { display:flex; gap:.4rem; border-bottom:1px solid var(--border); margin-bottom:1.5rem; overflow-x:auto; }
-    .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.85rem; cursor:pointer; white-space:nowrap; }
-    .tab:hover { color:var(--white); }
-    .tab.on { color:var(--neon); border-bottom-color:var(--neon); }
-    .view { display:none; }
-    .view.on { display:block; }
-
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.4rem; margin-bottom:1.1rem; }
-    .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:.9rem; }
-    .card-name { font-weight:700; color:var(--white); font-size:1.02rem; font-family:'Space Grotesk',sans-serif; }
-    .card-meta { font-size:.77rem; color:var(--muted-l); margin-top:.2rem; }
-    .badge { font-size:.63rem; font-weight:700; padding:.22rem .55rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; display:inline-block; }
-    .badge.active { background:rgba(61,255,122,.12); color:var(--neon); }
-    .badge.budget_full { background:rgba(255,215,0,.12); color:var(--gold); }
-    .badge.completed, .badge.kicked { background:rgba(255,77,77,.12); color:var(--red); }
-    .badge.paused { background:rgba(255,215,0,.12); color:var(--gold); }
-    .badge.joined { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
-
-    .minirow { display:flex; gap:1.4rem; flex-wrap:wrap; padding:.8rem 0; border-top:1px solid var(--border); margin-top:.5rem; }
-    .mini { font-size:.75rem; color:var(--muted); }
-    .mini b { display:block; font-size:.98rem; color:var(--white); font-family:'Space Grotesk',sans-serif; font-weight:800; }
-    .mini b.green { color:var(--neon); }
-
-    /* Alerts — the key UX for Instagram problems */
-    .alert { border-radius:9px; padding:.9rem 1.1rem; margin:.9rem 0; font-size:.83rem; line-height:1.6; border:1px solid; }
-    .alert-title { font-weight:700; margin-bottom:.25rem; display:flex; align-items:center; gap:.45rem; }
-    .alert-fix { font-size:.78rem; opacity:.92; margin-top:.4rem; padding-top:.4rem; border-top:1px dashed currentColor; }
-    .alert.warn { background:rgba(255,215,0,.07); border-color:rgba(255,215,0,.4); color:var(--gold); }
-    .alert.bad { background:rgba(255,77,77,.07); border-color:rgba(255,77,77,.4); color:var(--red); }
-    .alert.info { background:rgba(77,166,255,.07); border-color:rgba(77,166,255,.35); color:var(--blue); }
-    .alert.ok { background:rgba(61,255,122,.07); border-color:rgba(61,255,122,.35); color:var(--neon); }
-    .alert .btn { margin-top:.7rem; }
-
-    .acct { display:flex; align-items:center; gap:.55rem; font-size:.82rem; padding:.6rem .85rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:7px; flex-wrap:wrap; }
-    .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-    .dot.on { background:var(--neon); box-shadow:0 0 8px var(--neon); }
-    .dot.warn { background:var(--gold); box-shadow:0 0 8px var(--gold); }
-    .dot.off { background:var(--muted); }
-
-    .submit-row { display:flex; gap:.6rem; margin-top:.9rem; flex-wrap:wrap; }
-    .submit-row input { flex:1; min-width:210px; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:6px; padding:.65rem .9rem; color:var(--white); font-size:.86rem; outline:none; }
+    .acct { display:flex; align-items:center; gap:.6rem; padding:.65rem .9rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:8px; flex-wrap:wrap; font-size:.83rem; }
+    .submit-row { display:flex; gap:.55rem; margin-top:.9rem; flex-wrap:wrap; }
+    .submit-row input { flex:1; min-width:210px; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:7px; padding:.65rem .9rem; color:var(--white); font-size:.85rem; outline:none; font-family:'Inter',sans-serif; }
     .submit-row input:focus { border-color:var(--neon); }
 
+    /* Platform filter row */
+    .plat-row { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+    .plat {
+      display:inline-flex; align-items:center; gap:.45rem; padding:.48rem .95rem; border-radius:8px;
+      background:var(--card); border:1px solid var(--border-s); color:var(--muted-l);
+      font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:.8rem; cursor:pointer; transition:all .2s;
+    }
+    .plat:hover:not(.lock) { border-color:var(--neon); color:var(--white); }
+    .plat.on { background:var(--neon); border-color:var(--neon); color:#060E06; }
+    .plat.lock { opacity:.42; cursor:not-allowed; }
+    .plat-ic { width:15px; height:15px; }
+    .soon { font-size:.56rem; background:var(--border); color:var(--muted-l); padding:.06rem .3rem; border-radius:3px; letter-spacing:.4px; }
+
+    /* Clips grid */
+    .clips { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:1rem; }
+    .clip { background:var(--card); border:1px solid var(--border); border-radius:11px; overflow:hidden; transition:all .22s; }
+    .clip:hover { border-color:var(--neon); transform:translateY(-3px); box-shadow:0 12px 32px rgba(0,0,0,.45); }
+    .clip-media { position:relative; aspect-ratio:9/16; background:var(--bg-mid); overflow:hidden; display:flex; align-items:center; justify-content:center; }
+    .clip-media img { width:100%; height:100%; object-fit:cover; display:block; }
+    .clip-ph { display:flex; flex-direction:column; align-items:center; gap:.4rem; color:var(--muted); font-size:.68rem; }
+    .clip-ph svg { width:26px; height:26px; opacity:.5; }
+    .clip-state { position:absolute; top:.5rem; left:.5rem; }
+    .clip-plat { position:absolute; top:.5rem; right:.5rem; width:22px; height:22px; border-radius:5px; background:rgba(8,13,8,.82); display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+    .clip-plat svg { width:12px; height:12px; }
+    .clip-body { padding:.7rem .8rem .8rem; }
+    .clip-camp { font-size:.68rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .clip-nums { display:flex; justify-content:space-between; align-items:flex-end; margin-top:.4rem; gap:.5rem; }
+    .clip-v { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:.95rem; line-height:1.1; }
+    .clip-v small { display:block; font-size:.58rem; color:var(--muted); font-weight:500; font-family:'Inter',sans-serif; text-transform:uppercase; letter-spacing:.4px; }
+    .clip-e { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--neon); font-size:.95rem; text-align:right; line-height:1.1; }
+    .clip-e small { display:block; font-size:.58rem; color:var(--muted); font-weight:500; font-family:'Inter',sans-serif; text-transform:uppercase; letter-spacing:.4px; }
+    .clip-link { display:block; text-align:center; margin-top:.6rem; padding:.35rem; border-top:1px solid var(--border); color:var(--muted-l); font-size:.7rem; text-decoration:none; }
+    .clip-link:hover { color:var(--neon); }
+
     table { width:100%; border-collapse:collapse; }
-    th { text-align:left; padding:.65rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.68rem; font-weight:600; text-transform:uppercase; }
-    td { padding:.65rem; border-bottom:1px solid var(--border); font-size:.83rem; }
+    th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.66rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
+    td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.83rem; }
+    .table-wrap { overflow-x:auto; }
     .money { color:var(--neon); font-weight:700; font-family:'Space Grotesk',sans-serif; }
     .muted { color:var(--muted); }
-    .empty { text-align:center; color:var(--muted-l); padding:2.5rem 1rem; font-style:italic; }
+    .empty { text-align:center; color:var(--muted-l); padding:3rem 1rem; font-style:italic; }
     .me-row { background:rgba(61,255,122,.05); }
-    .rank { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--muted); }
-    .table-wrap { overflow-x:auto; }
     .chips { display:flex; gap:.3rem; flex-wrap:wrap; }
-    .chip { font-size:.66rem; padding:.15rem .45rem; border-radius:3px; background:var(--bg-mid); border:1px solid var(--border-s); color:var(--muted-l); }
+    .chip { font-size:.66rem; padding:.18rem .5rem; border-radius:4px; background:var(--bg-mid); border:1px solid var(--border-s); color:var(--muted-l); text-decoration:none; }
+    a.chip:hover { border-color:var(--neon); color:var(--neon); }
 
-    .toast { position:fixed; bottom:1.5rem; right:1.5rem; background:var(--card); border:1px solid var(--neon); color:var(--white); padding:.9rem 1.2rem; border-radius:8px; font-size:.84rem; z-index:10000; box-shadow:0 8px 32px rgba(0,0,0,.5); display:none; max-width:340px; }
+    .back { background:none; border:none; color:var(--muted-l); font-size:.8rem; cursor:pointer; padding:0; margin-bottom:.9rem; font-family:'Inter',sans-serif; }
+    .back:hover { color:var(--neon); }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:.5rem 1.4rem; }
+    .drow { display:flex; gap:.7rem; padding:.42rem 0; font-size:.81rem; border-bottom:1px solid rgba(26,44,26,.55); }
+    .dk { color:var(--muted); min-width:96px; flex-shrink:0; }
+    .dv { color:var(--text); word-break:break-word; }
+    .dv a { color:var(--neon); text-decoration:none; }
+    .steps { list-style:none; counter-reset:s; display:flex; flex-direction:column; gap:.5rem; }
+    .steps li { font-size:.79rem; color:var(--muted-l); padding-left:1.6rem; position:relative; line-height:1.6; }
+    .steps li::before { counter-increment:s; content:counter(s); position:absolute; left:0; top:.05rem; width:16px; height:16px; background:var(--neon); color:#060E06; border-radius:3px; font-size:.6rem; font-weight:900; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; }
+    .terms li { font-size:.74rem; color:var(--muted); line-height:1.7; padding-left:1rem; position:relative; list-style:none; }
+    .terms li::before { content:'—'; position:absolute; left:0; color:var(--neon); }
+    .terms { display:flex; flex-direction:column; gap:.45rem; }
+
+    .toast { position:fixed; bottom:1.4rem; right:1.4rem; background:var(--card); border:1px solid var(--neon); color:var(--white); padding:.9rem 1.15rem; border-radius:9px; font-size:.83rem; z-index:10000; box-shadow:0 10px 34px rgba(0,0,0,.55); display:none; max-width:350px; }
     .toast.err { border-color:var(--red); }
-    @media (max-width:600px){ body{padding:1rem .8rem 3rem} .card{padding:1.1rem} }
+
+    /* Manual refresh */
+    .clips-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; }
+    .refresh-wrap { text-align:right; flex-shrink:0; }
+    .refresh-wrap .note { margin-top:.35rem; font-size:.71rem; }
+    #refresh-btn[disabled] { opacity:.45; cursor:not-allowed; }
+    @media (max-width:640px){ .clips-head { flex-direction:column; } .refresh-wrap { text-align:left; } }
+
+    /* Instagram tester-request inline form */
+    .tester-req-row { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
+    .tester-req-row input { flex:1; min-width:180px; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.55rem .75rem; color:var(--white); font-size:.85rem; }
+    .tester-req-row input:focus { outline:none; border-color:var(--neon); }
+    .tester-req-row .btn { flex-shrink:0; }
+
+    /* Directory ranking + profile popup */
+    .dir-row { cursor:pointer; transition:background .18s; }
+    .dir-row:hover { background:rgba(61,255,122,.05); }
+    .rank-cell { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--muted); width:60px; }
+    .rank-cell.medal { font-size:1.15rem; }
+    #pf-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
+    #pf-back.open { display:flex; }
+    .pf { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:430px; box-shadow:0 20px 60px rgba(0,0,0,.7); overflow:hidden; }
+    .pf-inner { padding:1.5rem; }
+    .pf-head { display:flex; align-items:center; gap:.85rem; }
+    .pf-av { width:48px; height:48px; border-radius:12px; background:var(--neon); color:#060E06; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.35rem; flex-shrink:0; }
+    .pf-name { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:1.1rem; }
+    .pf-rank { font-size:.78rem; color:var(--muted-l); margin-top:.1rem; }
+    .pf-foot { padding:.9rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
+
+    /* Instagram connect guide */
+    #ig-back { position:fixed; inset:0; background:rgba(4,8,4,.86); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9600; padding:2rem 1rem; overflow-y:auto; }
+    #ig-back.open { display:flex; }
+    .ig-modal { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:520px; box-shadow:0 20px 70px rgba(0,0,0,.75); }
+    .ig-head { padding:1.3rem 1.5rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:.7rem; }
+    .ig-head-ic { width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .ig-head-ic svg { width:18px; height:18px; color:#fff; }
+    .ig-head h3 { font-size:1.02rem; }
+    .ig-head .note { margin-top:.1rem; }
+    .ig-body { padding:1.3rem 1.5rem; }
+    .ig-step { display:flex; gap:.85rem; margin-bottom:1.15rem; }
+    .ig-step:last-child { margin-bottom:0; }
+    .ig-num { width:24px; height:24px; border-radius:50%; background:var(--card-h); border:1px solid var(--border-s); color:var(--neon); font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:.75rem; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .ig-step-t { font-weight:700; color:var(--white); font-size:.87rem; margin-bottom:.25rem; }
+    .ig-step-d { font-size:.79rem; color:var(--muted-l); line-height:1.65; }
+    .ig-substeps { margin:.5rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--muted); line-height:1.85; }
+    .ig-warn { background:rgba(255,215,0,.07); border:1px solid rgba(255,215,0,.35); border-radius:8px; padding:.7rem .85rem; font-size:.78rem; color:var(--gold); line-height:1.6; margin-top:.9rem; }
+    .ig-foot { padding:1.1rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:.8rem; flex-wrap:wrap; }
+    .ig-check { display:flex; align-items:center; gap:.5rem; font-size:.8rem; color:var(--muted-l); cursor:pointer; user-select:none; }
+    .ig-check input { width:15px; height:15px; accent-color:var(--neon); cursor:pointer; }
+
+    @media (max-width:860px) {
+      :root { --sidebar:0px; }
+      .sidebar { top:auto; bottom:0; right:0; width:100%; height:auto; flex-direction:row; align-items:center;
+                 border-right:none; border-top:1px solid var(--border); padding:.4rem; gap:.2rem; }
+      .sb-logo, .sb-foot { display:none; }
+      .sb-nav { flex-direction:row; padding:0; gap:.1rem; }
+      .sb-item { flex-direction:column; gap:.2rem; padding:.45rem .3rem; font-size:.62rem; text-align:center; }
+      .sb-count { display:none; }
+      .main { margin-left:0; padding:1.2rem 1rem 6rem; }
+      .detail-grid { grid-template-columns:1fr; }
+      .mob-head { display:flex !important; }
+    }
+    .mob-head { display:none; justify-content:space-between; align-items:center; margin-bottom:1.2rem; padding-bottom:.9rem; border-bottom:1px solid var(--border); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div>
-        <a href="index.html" class="logo">Clip<span>Grow</span></a>
-        <div class="who" id="who">Loading…</div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
-    </header>
 
-    <div class="stats">
-      <div class="stat"><div class="stat-val" id="s-earned">₹0</div><div class="stat-lbl">Total Earned</div></div>
-      <div class="stat"><div class="stat-val dim" id="s-paid">₹0</div><div class="stat-lbl">Received</div></div>
-      <div class="stat"><div class="stat-val out" id="s-out">₹0</div><div class="stat-lbl">Outstanding</div></div>
-      <div class="stat"><div class="stat-val dim" id="s-views">0</div><div class="stat-lbl">Total Views</div></div>
-      <div class="stat"><div class="stat-val dim" id="s-videos">0</div><div class="stat-lbl">Videos</div></div>
+  <aside class="sidebar">
+    <a href="index.html" class="sb-logo"><span class="sb-pulse"></span>Clip<span>Grow</span></a>
+    <nav class="sb-nav">
+      <button class="sb-item on" data-v="home" onclick="go('home',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>Dashboard</button>
+      <button class="sb-item" data-v="campaigns" onclick="go('campaigns',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Campaigns<span class="sb-count" id="n-camp">0</span></button>
+      <button class="sb-item" data-v="clips" onclick="go('clips',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>Clips<span class="sb-count" id="n-clips">0</span></button>
+      <button class="sb-item" data-v="accounts" onclick="go('accounts',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/></svg>Accounts</button>
+      <button class="sb-item" data-v="payments" onclick="go('payments',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Payments</button>
+      <button class="sb-item" data-v="clippers" onclick="go('clippers',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>All Clippers</button>
+    </nav>
+    <div class="sb-foot">
+      <div class="wm">
+        <div class="wm-top">
+          <div class="wm-av" id="wm-av">–</div>
+          <div style="min-width:0">
+            <div class="wm-name" id="wm-name">…</div>
+            <div class="wm-role">Clipper</div>
+          </div>
+        </div>
+        <div class="wm-streak">
+          <span class="flame" id="wm-flame">🔥</span>
+          <span class="streak-n" id="wm-streak">0</span>
+          <span class="streak-l" id="wm-streak-l">day streak</span>
+        </div>
+      </div>
+      <button class="sb-out" onclick="logout()">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="mob-head">
+      <a href="index.html" class="sb-logo" style="padding:0">Clip<span>Grow</span></a>
+      <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
     </div>
 
+    <div id="ro-banner"></div>
     <div id="global-alert"></div>
 
-    <div class="tabs">
-      <button class="tab on" data-view="campaigns" onclick="showView('campaigns',this)">My Campaigns</button>
-      <button class="tab" data-view="videos" onclick="showView('videos',this)">My Videos</button>
-      <button class="tab" data-view="directory" onclick="showView('directory',this)">All Clippers</button>
-      <button class="tab" data-view="payments" onclick="showView('payments',this)">Payments</button>
-    </div>
+    <!-- DASHBOARD -->
+    <section class="view on" id="v-home">
+      <div class="page-head"><h1 id="greet">Welcome back</h1><p>Your clipping at a glance</p></div>
+      <div class="stats" id="home-stats"></div>
+      <div class="sec-title">Active campaigns</div>
+      <div id="home-camps"><div class="empty">Loading…</div></div>
+      <div class="sec-title">Recent clips</div>
+      <div id="home-clips"><div class="empty">Loading…</div></div>
+    </section>
 
-    <div class="view on" id="v-campaigns"><div class="empty">Loading campaigns…</div></div>
-    <div class="view" id="v-videos"><div class="empty">Loading…</div></div>
-    <div class="view" id="v-directory"><div class="empty">Loading…</div></div>
-    <div class="view" id="v-payments"><div class="empty">Loading…</div></div>
+    <!-- CAMPAIGNS -->
+    <section class="view" id="v-campaigns">
+      <div class="page-head"><h1>Campaigns</h1><p>Join a campaign, connect its Instagram account, then post</p></div>
+      <div id="camp-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- CAMPAIGN DETAIL -->
+    <section class="view" id="v-detail"><div id="detail-body"></div></section>
+
+    <!-- CLIPS -->
+    <section class="view" id="v-clips">
+      <div class="page-head clips-head">
+        <div><h1>My Clips</h1><p>Views are pulled straight from Instagram — no manual reporting</p></div>
+        <div class="refresh-wrap">
+          <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="manualRefresh()">↻ Refresh views</button>
+          <div class="note" id="refresh-note">Updates automatically every 6 hours</div>
+        </div>
+      </div>
+      <div class="plat-row" id="plat-row"></div>
+      <div id="clip-grid"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- ACCOUNTS -->
+    <section class="view" id="v-accounts">
+      <div class="page-head"><h1>Connected Accounts</h1><p>Each campaign is worked from its own account, verified once</p></div>
+      <div id="acct-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- PAYMENTS -->
+    <section class="view" id="v-payments">
+      <div class="page-head"><h1>Payments</h1><p>Earnings climb live as views come in</p></div>
+      <div id="pay-body"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- ALL CLIPPERS -->
+    <section class="view" id="v-clippers">
+      <div class="page-head"><h1>All Clippers</h1><p>Views and earnings are shared openly — payment details stay private</p></div>
+      <div id="dir-body"><div class="empty">Loading…</div></div>
+    </section>
+  </main>
+
+  <div id="ig-back" onclick="if(event.target.id==='ig-back')closeConnectGuide()">
+    <div class="ig-modal">
+      <div class="ig-head">
+        <div class="ig-head-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/></svg></div>
+        <div><h3>Connect Instagram</h3><div class="note" id="ig-camp-name"></div></div>
+      </div>
+      <div class="ig-body">
+        <div class="ig-step">
+          <div class="ig-num">1</div>
+          <div>
+            <div class="ig-step-t">Use the account you'll actually post this campaign from</div>
+            <div class="ig-step-d">Each campaign is tied to one Instagram account. Pick the account you plan to post this campaign's clips on — you can connect a different account to a different campaign later.</div>
+          </div>
+        </div>
+        <div class="ig-step">
+          <div class="ig-num">2</div>
+          <div>
+            <div class="ig-step-t">Make sure it's a Professional account</div>
+            <div class="ig-step-d">Instagram only shares view counts for Business or Creator accounts — personal accounts won't work and will be rejected.</div>
+            <ol class="ig-substeps">
+              <li>Open the Instagram app on your phone</li>
+              <li>Go to your profile → tap the menu (☰) → <strong style="color:var(--muted-l)">Settings and privacy</strong></li>
+              <li>Tap <strong style="color:var(--muted-l)">Account type and tools</strong> (or "Account type" on older versions)</li>
+              <li>Tap <strong style="color:var(--muted-l)">Switch to professional account</strong> and choose <strong style="color:var(--muted-l)">Creator</strong> or <strong style="color:var(--muted-l)">Business</strong></li>
+            </ol>
+          </div>
+        </div>
+        <div class="ig-step">
+          <div class="ig-num">3</div>
+          <div>
+            <div class="ig-step-t">Log into that account in this browser</div>
+            <div class="ig-step-d">Instagram will connect whichever account is logged in when you continue. If a different Instagram account is currently logged in on this device, log out of it first and log into the right one.</div>
+          </div>
+        </div>
+        <div class="ig-step">
+          <div class="ig-num">4</div>
+          <div>
+            <div class="ig-step-t">Approve every permission Instagram asks for</div>
+            <div class="ig-step-d">You'll land on an Instagram screen listing what ClipGrow can access. Leave everything checked — if any permission is unchecked, view tracking won't work and you'll need to reconnect.</div>
+          </div>
+        </div>
+        <div class="ig-warn">If your app isn't in the ClipGrow tester list yet, Instagram will show an error instead of the approval screen. Tell the ClipGrow admin your Instagram username so they can add you.</div>
+      </div>
+      <div class="ig-foot">
+        <label class="ig-check"><input type="checkbox" id="ig-confirm" onchange="toggleIgContinue(this.checked)">This is the right account, and it's Professional</label>
+        <div style="display:flex;gap:.6rem">
+          <button class="btn btn-ghost btn-sm" onclick="closeConnectGuide()">Cancel</button>
+          <a class="btn btn-sm" id="ig-continue" style="opacity:.5;pointer-events:none" href="#">Continue to Instagram</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pf-back" onclick="if(event.target.id==='pf-back')closeProfile()">
+    <div class="pf">
+      <div class="pf-inner" id="pf-body"></div>
+      <div class="pf-foot"><button class="btn btn-ghost btn-sm" onclick="closeProfile()">Close</button></div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
 
   <script>
-    const money = n => '₹' + Number(n || 0).toLocaleString('en-IN');
-    const num = n => Number(n || 0).toLocaleString('en-IN');
-    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const when = ts => ts ? new Date(Number(ts)).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
+    const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
+    const num=n=>Number(n||0).toLocaleString('en-IN');
+    const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
 
-    function toast(msg, isErr) {
-      const t = document.getElementById('toast');
-      t.textContent = msg; t.className = 'toast' + (isErr ? ' err' : ''); t.style.display = 'block';
-      clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', 5000);
-    }
+    const PLATFORMS=[
+      {id:'instagram',name:'Reels',live:true,  svg:'<rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/>'},
+      {id:'tiktok',   name:'TikTok',live:false,svg:'<path d="M15 4v8.5a4 4 0 11-3-3.87"/><path d="M15 4c.5 2.5 2 4 4.5 4.2"/>'},
+      {id:'youtube',  name:'Shorts',live:false,svg:'<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/>'},
+      {id:'x',        name:'X',     live:false,svg:'<path d="M4 4l16 16M20 4L4 20"/>'}
+    ];
+    const platIcon=id=>{const p=PLATFORMS.find(x=>x.id===id)||PLATFORMS[0];
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${p.svg}</svg>`;};
 
-    async function api(path, opts = {}) {
-      const res = await fetch(path, { ...opts, headers: { 'Content-Type':'application/json', ...(opts.headers||{}) } });
-      if (res.status === 401) { location.href = 'login.html'; throw new Error('unauthorized'); }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) { const e = new Error(body.error || 'Request failed'); e.fix = body.fix; e.code = body.code; throw e; }
+    let ME=null, CAMPAIGNS=[], CLIPS=[], platFilter='all';
+
+    function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',5200);}
+
+    async function api(path,opts={}){
+      const res=await fetch(path,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});
+      if(res.status===401){location.href='/clipper';throw new Error('unauthorized');}
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok){const e=new Error(body.error||'Request failed');e.fix=body.fix;e.code=body.code;e.needs_reauth=body.needs_reauth;e.retry_in_ms=body.retry_in_ms;throw e;}
       return body;
     }
+    window.logout=async function(){await api('/api/clipper/logout',{method:'POST'}).catch(()=>{});location.href='/clipper';};
 
-    window.logout = async function() {
-      await api('/api/clipper/logout', { method:'POST' }).catch(()=>{});
-      location.href = 'login.html';
+    window.go=function(name,btn){
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+      document.getElementById('v-'+name).classList.add('on');
+      if(btn){document.querySelectorAll('.sb-item').forEach(t=>t.classList.remove('on'));btn.classList.add('on');}
+      window.scrollTo({top:0});
+      if(name==='clips') renderClips();
+      if(name==='accounts') loadAccounts();
+      if(name==='payments') loadPayments();
+      if(name==='clippers') loadDirectory();
     };
 
-    window.showView = function(name, btn) {
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
-      document.getElementById('v-' + name).classList.add('on');
-      btn.classList.add('on');
-      if (name === 'directory') loadDirectory();
-      if (name === 'payments') loadPayments();
-      if (name === 'videos') loadVideos();
-    };
-
-    function alertBox(kind, title, msg, fix, actionHtml) {
-      return `<div class="alert ${kind}">
-        <div class="alert-title">${esc(title)}</div>
-        <div>${esc(msg)}</div>
-        ${fix ? `<div class="alert-fix">${esc(fix)}</div>` : ''}
-        ${actionHtml || ''}
-      </div>`;
+    function alertBox(kind,title,msg,fix,action){
+      return `<div class="alert ${kind}"><div class="alert-t">${esc(title)}</div><div>${esc(msg)}</div>
+        ${fix?`<div class="alert-fix">${esc(fix)}</div>`:''}${action||''}</div>`;
     }
 
-    /* ---------- campaigns ---------- */
-    let CAMPAIGNS = [];
+    /* ── identity + streak ── */
+    async function loadMe(){
+      const d=await api('/api/clipper/me'); ME=d;
+      const name=d.clipper.display_name||d.clipper.username;
+      document.getElementById('wm-name').textContent=name;
+      document.getElementById('wm-av').textContent=name.trim().charAt(0).toUpperCase()||'C';
+      const hour=new Date().getHours();
+      const part=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
+      document.getElementById('greet').textContent=`${part}, ${name}`;
 
-    async function loadMe() {
-      const { clipper, money: m } = await api('/api/clipper/me');
-      document.getElementById('who').innerHTML = 'Signed in as <strong>' + esc(clipper.display_name) + '</strong>';
-      document.getElementById('s-earned').textContent = money(m.earned);
-      document.getElementById('s-paid').textContent = money(m.paid);
-      document.getElementById('s-out').textContent = money(m.outstanding);
-    }
+      if(d.refresh){ NEXT_REFRESH_AT=d.refresh.next_allowed_at||0; paintRefresh(); }
 
-    async function loadCampaigns() {
-      const { campaigns } = await api('/api/clipper/campaigns');
-      CAMPAIGNS = campaigns;
-      const el = document.getElementById('v-campaigns');
-      if (!campaigns.length) { el.innerHTML = '<div class="empty">No campaigns are open right now. Check back soon.</div>'; return; }
-
-      let views = 0, videos = 0;
-      campaigns.forEach(c => { views += c.my_stats.views; videos += c.my_stats.videos; });
-      document.getElementById('s-views').textContent = num(views);
-      document.getElementById('s-videos').textContent = num(videos);
-
-      el.innerHTML = campaigns.map(renderCampaign).join('');
-    }
-
-    function renderCampaign(c) {
-      const p = c.participation;
-      const bp = c.blueprint || {};
-      let inner = '';
-
-      if (!p) {
-        const closed = c.status !== 'active';
-        inner = closed
-          ? alertBox('info', 'Not accepting clippers', c.status === 'budget_full'
-              ? 'This campaign\'s budget is fully allocated.' : 'This campaign is closed.')
-          : `<button class="btn" onclick="joinCampaign(${c.id})">Join This Campaign</button>`;
-      } else if (p.status === 'kicked') {
-        inner = alertBox('bad', 'Removed from this campaign',
-          p.note || 'You have been removed from this campaign by the ClipGrow admin.',
-          'Anything you already earned here is kept and still owed to you.');
-      } else {
-        const acct = p.account;
-        if (p.status === 'paused') {
-          inner += alertBox('warn', 'Paused', p.note || 'Your participation is paused, so you cannot submit new videos right now.',
-            'Videos you already submitted keep tracking views and earning normally.');
-        }
-
-        if (!acct) {
-          inner += alertBox('warn', 'Instagram not connected',
-            'Each campaign needs its own Instagram account connected before you can submit videos.',
-            'The account must be a Professional account (Creator or Business). Personal accounts cannot report views.',
-            `<a class="btn" href="/api/auth/instagram/start?campaign_id=${c.id}">Connect Instagram</a>`);
-        } else if (acct.status === 'needs_reauth') {
-          inner += alertBox('bad', 'Instagram connection expired',
-            'We can no longer read views from @' + acct.username + '.',
-            'Reconnect the same account to resume tracking. Your earnings are safe.',
-            `<a class="btn btn-warn" href="/api/auth/instagram/start?campaign_id=${c.id}">Reconnect @${esc(acct.username)}</a>`);
-        } else if (acct.status === 'revoked') {
-          inner += alertBox('bad', 'Instagram disconnected',
-            'Access to @' + acct.username + ' was removed.',
-            'Reconnect to resume tracking.',
-            `<a class="btn btn-warn" href="/api/auth/instagram/start?campaign_id=${c.id}">Reconnect</a>`);
-        } else {
-          inner += `<div class="acct"><span class="dot on"></span>Posting from <strong style="color:var(--white)">@${esc(acct.username)}</strong>
-            <span class="chip">${esc(acct.account_type || 'professional')}</span></div>`;
-        }
-
-        const canSubmit = acct && acct.status === 'connected' && p.status === 'active' && c.status === 'active';
-        if (canSubmit) {
-          inner += `<div class="submit-row">
-            <input type="url" id="url-${c.id}" placeholder="Paste your Instagram Reel link" onkeydown="if(event.key==='Enter')submitVideo(${c.id})" />
-            <button class="btn" id="sb-${c.id}" onclick="submitVideo(${c.id})">Submit Video</button>
-          </div>`;
-        } else if (acct && acct.status === 'connected' && c.status === 'budget_full') {
-          inner += alertBox('info', 'Budget fully allocated',
-            'This campaign has used its whole budget, so new videos can no longer earn.',
-            'Your existing videos keep their earnings.');
-        }
-
-        inner += `<div class="minirow">
-          <div class="mini"><b>${num(c.my_stats.videos)}</b>my videos</div>
-          <div class="mini"><b>${num(c.my_stats.views)}</b>my views</div>
-          <div class="mini"><b class="green">${money(c.my_stats.earned)}</b>my earnings</div>
-        </div>`;
+      if(d.clipper.read_only){
+        document.getElementById('ro-banner').innerHTML=alertBox('warn','Account disabled — view only',
+          'You can still see everything you have earned and what is outstanding, but you cannot join campaigns, connect accounts or add clips.',
+          'Contact the ClipGrow admin if you think this is a mistake.');
       }
 
-      const resources = [
-        bp.guidelines ? `<a class="chip" href="${esc(bp.guidelines)}" target="_blank" rel="noopener">Brand guidelines ↗</a>` : '',
-        bp.footage ? `<a class="chip" href="${esc(bp.footage)}" target="_blank" rel="noopener">Footage ↗</a>` : '',
-        bp.demo_video ? `<a class="chip" href="${esc(bp.demo_video)}" target="_blank" rel="noopener">Demo video ↗</a>` : ''
-      ].filter(Boolean).join('');
+      const s=d.streak||{current:0,best:0};
+      document.getElementById('wm-streak').textContent=s.current;
+      document.getElementById('wm-flame').className='flame'+(s.current>0?' lit':'');
+      document.getElementById('wm-streak-l').textContent=s.current===0?'no streak yet'
+        :(s.current===1?'day streak':'day streak')+(s.best>s.current?` · best ${s.best}`:'');
 
-      return `<div class="card">
+      document.getElementById('home-stats').innerHTML=`
+        <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Total Earned</div></div>
+        <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Received</div></div>
+        <div class="stat"><div class="stat-val g">${money(d.money.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>
+        <div class="stat"><div class="stat-val w">${num(d.totals.views)}</div><div class="stat-lbl">Total Views</div></div>
+        <div class="stat"><div class="stat-val w">${num(d.totals.clips)}</div><div class="stat-lbl">Clips Posted</div></div>`;
+      document.getElementById('n-clips').textContent=d.totals.clips;
+    }
+
+    /* ── campaigns ── */
+    async function loadCampaigns(){
+      const {campaigns}=await api('/api/clipper/campaigns');
+      CAMPAIGNS=campaigns;
+      const joined=campaigns.filter(c=>c.participation&&c.participation.status!=='kicked');
+      document.getElementById('n-camp').textContent=joined.length;
+
+      document.getElementById('camp-list').innerHTML=campaigns.length
+        ? campaigns.map(campCard).join('') : '<div class="empty">No campaigns are open right now.</div>';
+      document.getElementById('home-camps').innerHTML=joined.length
+        ? joined.map(campCard).join('')
+        : '<div class="card"><p class="muted" style="font-size:.85rem">You haven\'t joined a campaign yet.</p><button class="btn btn-sm" style="margin-top:.7rem" onclick="go(\'campaigns\',document.querySelector(\'[data-v=campaigns]\'))">Browse campaigns</button></div>';
+    }
+
+    function campCard(c){
+      const p=c.participation, pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
+      return `<div class="card click" onclick="openCampaign(${c.id})">
         <div class="card-top">
-          <div>
-            <div class="card-name">${esc(c.name)}</div>
-            <div class="card-meta">${money(c.cpm)} per 1,000 views · ${money(c.remaining)} of ${money(c.budget)} still available</div>
-            ${bp.cta ? `<div class="card-meta">CTA: ${esc(bp.cta)}</div>` : ''}
-          </div>
-          <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+          <div><div class="card-name">${esc(c.name)}</div>
+            <div class="card-meta">${money(c.cpm)} per 1,000 views · ${money(c.remaining)} of ${money(c.budget)} left</div></div>
+          <div style="display:flex;gap:.35rem;flex-wrap:wrap">
             <span class="badge ${c.status}">${c.status.replace('_',' ')}</span>
-            ${p ? `<span class="badge ${p.status === 'active' ? 'joined' : p.status}">${p.status === 'active' ? 'Joined' : p.status}</span>` : ''}
+            ${p?`<span class="badge ${p.status==='active'?'joined':p.status}">${p.status==='active'?'Joined':p.status}</span>`:''}
           </div>
         </div>
-        ${resources ? `<div class="chips" style="margin-bottom:.6rem">${resources}</div>` : ''}
-        ${inner}
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-lbl">${money(c.spent)} allocated to clippers</div>
+        ${p?`<div class="minirow">
+          <div class="mini"><b>${num(c.my_stats.videos)}</b>my clips</div>
+          <div class="mini"><b>${num(c.my_stats.views)}</b>my views</div>
+          <div class="mini"><b class="green">${money(c.my_stats.earned)}</b>my earnings</div>
+        </div>`:''}
       </div>`;
     }
 
-    window.joinCampaign = async function(id) {
-      try {
-        await api('/api/clipper/campaigns/' + id + '/join', { method:'POST' });
+    /* ── campaign detail ── */
+    window.openCampaign=function(id){
+      const c=CAMPAIGNS.find(x=>x.id===id); if(!c) return;
+      const b=c.blueprint||{}, p=c.participation;
+      const row=(k,v)=>v?`<div class="drow"><span class="dk">${k}</span><span class="dv">${/^https?:\/\//i.test(String(v).trim())?`<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>`:esc(v)}</span></div>`:'';
+
+      let action='';
+      if(!p){
+        action=c.status==='active'
+          ? `<button class="btn" onclick="joinCampaign(${c.id})">Join This Campaign</button>`
+          : alertBox('info','Not accepting clippers',c.status==='budget_full'?'The budget is fully allocated.':'This campaign is closed.');
+      } else if(p.status==='kicked'){
+        action=alertBox('bad','Removed from this campaign',p.note||'You were removed by the ClipGrow admin.','Anything you already earned here is kept and still owed to you.');
+      } else {
+        if(p.status==='paused') action+=alertBox('warn','Paused',p.note||'You cannot submit new clips right now.','Clips you already posted keep tracking and earning.');
+        const a=p.account;
+        if(!a){
+          const t=p.tester;
+          if(!t || t.status==='rejected'){
+            action+=`<div class="alert warn">
+              <div class="alert-t">Instagram not connected</div>
+              <div>Before you can connect, ClipGrow needs to add your Instagram account as a tester on our app — that's a one-time step per account.</div>
+              <div class="alert-fix">${t&&t.status==='rejected'?'Your last request wasn\'t approved'+(t.note?': '+esc(t.note):'')+'. Check the username and try again.':'It must be a Professional account (Creator or Business) — personal accounts cannot report views.'}</div>
+              <div class="tester-req-row">
+                <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
+                <button class="btn btn-sm" onclick="requestTesterAccess(${c.id})">Request Instagram Access</button>
+              </div>
+            </div>`;
+          } else if(t.status==='requested'){
+            action+=alertBox('info','Waiting on ClipGrow',`We're adding @${esc(t.ig_username)} as a tester on our Instagram app.`,
+              'This is usually quick — check back shortly, or ask the ClipGrow admin.');
+          } else if(t.status==='invited'){
+            action+=alertBox('warn','Accept the tester invite',`ClipGrow sent @${esc(t.ig_username)} a tester invite — you need to accept it before connecting.`,
+              'On Instagram: Settings and privacy → Apps and websites → Tester invites → Accept. Then come back here.');
+          } else if(t.status==='confirmed'){
+            action+=alertBox('warn','Instagram not connected','This campaign needs its own Instagram account connected before you can post.',
+              'It must be a Professional account (Creator or Business) — personal accounts cannot report views.',
+              `<button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button>`);
+          }
+        } else if(a.status==='needs_reauth'||a.status==='revoked'){
+          action+=alertBox('bad','Instagram connection needs attention',`We can no longer read views from @${a.username}.`,'Reconnect the same account — your earnings are safe.',
+            `<a class="btn btn-warn" href="/api/auth/instagram/start?campaign_id=${c.id}">Reconnect @${esc(a.username)}</a>`);
+        } else {
+          action+=`<div class="acct"><span class="badge connected">✓ Verified</span>Posting from <strong style="color:var(--white)">@${esc(a.username)}</strong>
+            <span class="chip">${esc(a.account_type||'professional')}</span></div>`;
+          if(p.status==='active'&&c.status==='active'){
+            action+=`<div class="submit-row">
+              <input type="url" id="d-url" placeholder="Paste your Instagram Reel link" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
+              <button class="btn" id="d-btn" onclick="submitClip(${c.id},'d-url')">Verify &amp; Add Clip</button></div>
+              <p class="muted" style="font-size:.73rem;margin-top:.45rem">We check the link really belongs to @${esc(a.username)} before adding it.</p>`;
+          } else if(c.status==='budget_full'){
+            action+=alertBox('info','Budget fully allocated','New clips can no longer earn on this campaign.','Your existing clips keep their earnings.');
+          }
+        }
+      }
+
+      document.getElementById('detail-body').innerHTML=`
+        <button class="back" onclick="go('campaigns',document.querySelector('[data-v=campaigns]'))">← Back to campaigns</button>
+        <div class="page-head"><h1>${esc(c.name)}</h1><p>${esc(c.description||b.objective||'')}</p></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-val">${money(c.cpm)}</div><div class="stat-lbl">Per 1,000 views</div></div>
+          <div class="stat"><div class="stat-val w">${money(c.budget)}</div><div class="stat-lbl">Total Budget</div></div>
+          <div class="stat"><div class="stat-val g">${money(c.remaining)}</div><div class="stat-lbl">Still Available</div></div>
+          ${p?`<div class="stat"><div class="stat-val">${money(c.my_stats.earned)}</div><div class="stat-lbl">My Earnings</div></div>`:''}
+        </div>
+        <div class="card">${action}</div>
+        <div class="sec-title">Campaign brief</div>
+        <div class="card"><div class="detail-grid">
+          ${row('Objective',b.objective)}${row('CTA',b.cta)}${row('Socials',b.socials)}
+          ${row('Platforms',b.platforms)}${row('Tags',b.tags)}${row('Payout',b.model_note)}
+          ${b.min_payout?row('Min payout',money(b.min_payout)):''}${b.max_payout?row('Max payout',money(b.max_payout)):''}
+          ${b.max_payout_per_channel?row('Max / channel',money(b.max_payout_per_channel)):''}${row('Commission',b.commission_rate)}
+        </div></div>
+        ${(b.guidelines||b.footage||b.demo_video)?`<div class="sec-title">Resources</div><div class="card"><div class="chips">
+          ${b.guidelines?`<a class="chip" href="${esc(b.guidelines)}" target="_blank" rel="noopener">Brand guidelines ↗</a>`:''}
+          ${b.footage?`<a class="chip" href="${esc(b.footage)}" target="_blank" rel="noopener">Footage / raw assets ↗</a>`:''}
+          ${b.demo_video?`<a class="chip" href="${esc(b.demo_video)}" target="_blank" rel="noopener">Demo video ↗</a>`:''}
+        </div></div>`:''}
+        ${(b.approval_steps||[]).length?`<div class="sec-title">Approval process</div><div class="card"><ol class="steps">${b.approval_steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol></div>`:''}
+        ${(b.terms||[]).length?`<div class="sec-title">Terms &amp; liability</div><div class="card"><ul class="terms">${b.terms.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:''}`;
+      go('detail');
+    };
+
+    window.joinCampaign=async function(id){
+      try{ await api('/api/clipper/campaigns/'+id+'/join',{method:'POST'});
         toast('Joined — now connect the Instagram account for this campaign');
-        await loadCampaigns();
-      } catch (e) { toast(e.message, true); }
+        await loadCampaigns(); openCampaign(id);
+      }catch(e){ toast(e.message,true); }
     };
 
-    window.submitVideo = async function(id) {
-      const input = document.getElementById('url-' + id);
-      const btn = document.getElementById('sb-' + id);
-      const url = input.value.trim();
-      if (!url) return toast('Paste your Reel link first', true);
-      btn.disabled = true; btn.textContent = 'Checking…';
-      try {
-        const r = await api('/api/clipper/submissions', { method:'POST', body: JSON.stringify({ campaign_id:id, url }) });
-        input.value = '';
-        toast(r.message || 'Video submitted');
-        await Promise.all([loadCampaigns(), loadMe()]);
-      } catch (e) {
-        toast(e.message + (e.fix ? ' — ' + e.fix : ''), true);
-        if (e.needs_reauth || e.code === 'TOKEN_EXPIRED') loadCampaigns();
-      } finally { btn.disabled = false; btn.textContent = 'Submit Video'; }
+    window.submitClip=async function(id,inputId){
+      const input=document.getElementById(inputId), btn=document.getElementById('d-btn');
+      const url=input.value.trim();
+      if(!url) return toast('Paste your Reel link first',true);
+      if(btn){btn.disabled=true;btn.textContent='Verifying…';}
+      try{
+        const r=await api('/api/clipper/submissions',{method:'POST',body:JSON.stringify({campaign_id:id,url})});
+        input.value=''; toast(r.message||'Clip verified and added');
+        await Promise.all([loadMe(),loadCampaigns(),loadClips()]);
+        openCampaign(id);
+      }catch(e){
+        toast(e.message+(e.fix?' — '+e.fix:''),true);
+        if(e.needs_reauth){ await loadCampaigns(); openCampaign(id); }
+      }finally{ if(btn){btn.disabled=false;btn.textContent='Verify & Add Clip';} }
     };
 
-    /* ---------- my videos ---------- */
-    async function loadVideos() {
-      const el = document.getElementById('v-videos');
-      try {
-        const { submissions } = await api('/api/clipper/submissions');
-        if (!submissions.length) { el.innerHTML = '<div class="empty">No videos submitted yet.</div>'; return; }
-        el.innerHTML = `<div class="card"><div class="table-wrap"><table>
-          <thead><tr><th>Campaign</th><th>Video</th><th>Views</th><th>Earning</th><th>Status</th><th>Synced</th></tr></thead>
-          <tbody>${submissions.map(s => `<tr>
-            <td>${esc(s.campaign_name)}</td>
-            <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
-            <td>${num(s.views)}</td>
-            <td class="money">${money(s.earning)}</td>
-            <td>${s.status === 'disqualified'
-              ? '<span class="badge completed">Disqualified</span>'
-              : s.sync_error ? `<span class="badge paused" title="${esc(s.sync_error)}">Sync issue</span>`
-              : '<span class="badge active">Tracking</span>'}</td>
-            <td class="muted">${when(s.last_synced_at)}</td>
-          </tr>`).join('')}</tbody></table></div></div>`;
-      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    /* ── clips ── */
+    async function loadClips(){ const {clips}=await api('/api/clipper/submissions'); CLIPS=clips; renderHomeClips(); }
+
+    /* ── manual refresh (rate-capped server-side; UI just mirrors the cooldown) ── */
+    let NEXT_REFRESH_AT=0, refreshTimer=null;
+
+    function paintRefresh(){
+      const btn=document.getElementById('refresh-btn'), note=document.getElementById('refresh-note');
+      if(!btn) return;
+      const left=NEXT_REFRESH_AT-Date.now();
+      if(left>0){
+        btn.disabled=true;
+        const s=Math.ceil(left/1000);
+        note.textContent=`Next refresh in ${s>=60?Math.ceil(s/60)+'m':s+'s'}`;
+        if(!refreshTimer) refreshTimer=setInterval(paintRefresh,1000);
+      }else{
+        btn.disabled=false;
+        note.textContent='Updates automatically every 6 hours';
+        if(refreshTimer){ clearInterval(refreshTimer); refreshTimer=null; }
+      }
     }
 
-    /* ---------- directory ---------- */
-    async function loadDirectory() {
-      const el = document.getElementById('v-directory');
-      try {
-        const { clippers } = await api('/api/clipper/directory');
-        if (!clippers.length) { el.innerHTML = '<div class="empty">No clippers yet.</div>'; return; }
-        el.innerHTML = `<div class="card">
-          <p class="muted" style="font-size:.78rem;margin-bottom:.9rem">Everyone's views and earnings are shared openly. Payment details stay private to each clipper.</p>
-          <div class="table-wrap"><table>
-          <thead><tr><th>#</th><th>Clipper</th><th>Campaigns</th><th>Videos</th><th>Views</th><th>Earned</th></tr></thead>
-          <tbody>${clippers.map((c, i) => `<tr class="${c.is_me ? 'me-row' : ''}">
-            <td class="rank">${i + 1}</td>
-            <td><strong style="color:var(--white)">${esc(c.display_name)}</strong>${c.is_me ? ' <span class="chip">you</span>' : ''}</td>
-            <td><div class="chips">${c.campaigns.length
-                ? c.campaigns.map(x => `<span class="chip">${esc(x.campaign_name)}${x.status !== 'active' ? ' · ' + esc(x.status) : ''}</span>`).join('')
-                : '<span class="muted">—</span>'}</div></td>
-            <td>${num(c.videos)}</td>
-            <td>${num(c.views)}</td>
-            <td class="money">${money(c.earned)}</td>
-          </tr>`).join('')}</tbody></table></div></div>`;
-      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-    }
+    window.manualRefresh=async function(){
+      const btn=document.getElementById('refresh-btn'), note=document.getElementById('refresh-note');
+      btn.disabled=true; note.textContent='Fetching latest views…';
+      try{
+        const r=await api('/api/clipper/refresh',{method:'POST'});
+        NEXT_REFRESH_AT=Date.now()+(r.cooldown_ms||300000);
+        await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
+        renderClips();
+        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read`
+                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}`, !!r.failed);
+      }catch(e){
+        // 429 carries retry_in_ms so the countdown stays honest.
+        if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;
+        toast(e.message,true);
+      }
+      paintRefresh();
+    };
 
-    /* ---------- payments ---------- */
-    async function loadPayments() {
-      const el = document.getElementById('v-payments');
-      try {
-        const { payments, money: m } = await api('/api/clipper/payments');
-        const head = `<div class="card"><div class="minirow" style="border-top:none;margin:0;padding:0">
-          <div class="mini"><b class="green">${money(m.earned)}</b>earned</div>
-          <div class="mini"><b>${money(m.paid)}</b>received</div>
-          <div class="mini"><b style="color:var(--gold)">${money(m.outstanding)}</b>outstanding</div>
+    function renderPlatRow(){
+      const counts={}; CLIPS.forEach(c=>counts[c.platform]=(counts[c.platform]||0)+1);
+      document.getElementById('plat-row').innerHTML=
+        `<button class="plat ${platFilter==='all'?'on':''}" onclick="setPlat('all')">All<span class="sb-count">${CLIPS.length}</span></button>`+
+        PLATFORMS.map(p=>p.live
+          ? `<button class="plat ${platFilter===p.id?'on':''}" onclick="setPlat('${p.id}')"><span class="plat-ic">${platIcon(p.id)}</span>${p.name}<span class="sb-count">${counts[p.id]||0}</span></button>`
+          : `<button class="plat lock" disabled title="Coming soon"><span class="plat-ic">${platIcon(p.id)}</span>${p.name}<span class="soon">SOON</span></button>`
+        ).join('');
+    }
+    window.setPlat=function(p){ platFilter=p; renderClips(); };
+
+    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified'};
+    function clipCard(c){
+      const thumb=c.has_thumb
+        ? `<img src="${c.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
+        : placeholderHTML();
+      return `<div class="clip">
+        <div class="clip-media">${thumb}
+          <span class="clip-state"><span class="badge ${c.state}">${STATE_LABEL[c.state]||c.state}</span></span>
+          <span class="clip-plat">${platIcon(c.platform)}</span>
+        </div>
+        <div class="clip-body">
+          <div class="clip-camp">${esc(c.campaign_name)}</div>
+          <div class="clip-nums">
+            <div class="clip-v">${num(c.views)}<small>views</small></div>
+            <div class="clip-e">${money(c.earning)}<small>earned</small></div>
+          </div>
+          <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on Instagram ↗</a>
         </div></div>`;
-        el.innerHTML = head + (payments.length
+    }
+    window.placeholderHTML=()=>`<div class="clip-ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/></svg>No preview</div>`;
+
+    function renderClips(){
+      renderPlatRow();
+      const list=platFilter==='all'?CLIPS:CLIPS.filter(c=>c.platform===platFilter);
+      document.getElementById('clip-grid').innerHTML=list.length
+        ? `<div class="clips">${list.map(clipCard).join('')}</div>`
+        : '<div class="empty">No clips yet. Join a campaign, connect Instagram, then paste your Reel link.</div>';
+    }
+    function renderHomeClips(){
+      const recent=CLIPS.slice(0,5);
+      document.getElementById('home-clips').innerHTML=recent.length
+        ? `<div class="clips">${recent.map(clipCard).join('')}</div>`
+        : '<div class="card"><p class="muted" style="font-size:.85rem">No clips yet — your posted Reels will show here with live view counts.</p></div>';
+    }
+
+    /* ── accounts ── */
+    async function loadAccounts(){
+      const el=document.getElementById('acct-list');
+      try{
+        const {accounts}=await api('/api/clipper/accounts');
+        const locked=PLATFORMS.filter(p=>!p.live).map(p=>
+          `<div class="card" style="opacity:.5"><div class="card-top"><div style="display:flex;align-items:center;gap:.6rem">
+            <span class="plat-ic" style="color:var(--muted)">${platIcon(p.id)}</span>
+            <div><div class="card-name">${p.name}</div><div class="card-meta">Not available yet</div></div>
+          </div><span class="badge locked">Coming soon</span></div></div>`).join('');
+        el.innerHTML=(accounts.length
+          ? accounts.map(a=>`<div class="card"><div class="card-top">
+              <div style="display:flex;align-items:center;gap:.6rem">
+                <span class="plat-ic" style="color:var(--neon)">${platIcon(a.platform)}</span>
+                <div><div class="card-name">@${esc(a.username)}</div>
+                  <div class="card-meta">${a.campaign_name?'Working '+esc(a.campaign_name):'Not linked to a campaign'} · ${esc(a.account_type||'professional')}</div></div>
+              </div>
+              <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+                <span class="badge ${a.status}">${a.status==='connected'?'✓ Verified':esc(a.status.replace('_',' '))}</span>
+                ${a.status!=='connected'&&a.campaign_id?`<a class="btn btn-warn btn-sm" href="/api/auth/instagram/start?campaign_id=${a.campaign_id}">Reconnect</a>`:''}
+              </div></div></div>`).join('')
+          : '<div class="card"><p class="muted" style="font-size:.85rem">No accounts connected yet. Open a campaign and connect the Instagram account you\'ll post from.</p></div>')
+          + locked;
+      }catch(e){ el.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+    }
+
+    /* ── payments ── */
+    async function loadPayments(){
+      const el=document.getElementById('pay-body');
+      try{
+        const {payments,money:m}=await api('/api/clipper/payments');
+        el.innerHTML=`<div class="stats">
+            <div class="stat"><div class="stat-val">${money(m.earned)}</div><div class="stat-lbl">Earned</div></div>
+            <div class="stat"><div class="stat-val w">${money(m.paid)}</div><div class="stat-lbl">Received</div></div>
+            <div class="stat"><div class="stat-val g">${money(m.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>
+          </div>`+(payments.length
           ? `<div class="card"><div class="table-wrap"><table>
               <thead><tr><th>Date</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
-              <tbody>${payments.map(p => `<tr>
-                <td>${when(p.paid_at)}</td>
-                <td>${esc(p.campaign_name || 'General')}</td>
-                <td>${esc(p.method || '—')}</td>
-                <td class="muted">${esc(p.reference || '—')}</td>
-                <td class="money">${money(p.amount)}</td>
-              </tr>`).join('')}</tbody></table></div></div>`
-          : '<div class="empty">No payments recorded yet. Earnings show as outstanding until paid.</div>');
-      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+              <tbody>${payments.map(p=>`<tr><td>${when(p.paid_at)}</td><td>${esc(p.campaign_name||'General')}</td>
+                <td class="muted">${esc(p.method||'—')}</td><td class="muted">${esc(p.reference||'—')}</td>
+                <td class="money">${money(p.amount)}</td></tr>`).join('')}</tbody></table></div></div>`
+          : '<div class="card"><p class="muted" style="font-size:.85rem">No payments recorded yet. Everything you earn shows as outstanding until it\'s paid out.</p></div>');
+      }catch(e){ el.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
     }
 
-    /* ---------- init: surface Instagram connect results ---------- */
-    (async function init() {
-      const q = new URLSearchParams(location.search);
-      const ga = document.getElementById('global-alert');
-      if (q.get('ig') === 'connected') {
-        ga.innerHTML = alertBox('ok', 'Instagram connected', '@' + (q.get('handle') || '') + ' is now linked to that campaign. You can submit videos to it.');
-      } else if (q.get('ig') === 'error') {
-        ga.innerHTML = alertBox('bad', 'Instagram connection failed', q.get('msg') || 'Something went wrong.', q.get('fix') || '');
-      }
-      if (q.get('ig')) history.replaceState({}, '', location.pathname);
+    /* ── directory ── */
+    let DIRECTORY=[];
+    const MEDALS={1:'🥇',2:'🥈',3:'🥉'};
 
-      try { await loadMe(); await loadCampaigns(); }
-      catch (e) { if (e.message !== 'unauthorized') toast(e.message, true); }
+    async function loadDirectory(){
+      const el=document.getElementById('dir-body');
+      try{
+        const {clippers}=await api('/api/clipper/directory');
+        DIRECTORY=clippers;
+        el.innerHTML=clippers.length?`<div class="card"><div class="table-wrap"><table>
+          <thead><tr><th>Rank</th><th>Clipper</th><th>Total Views</th><th>Total Earned</th></tr></thead>
+          <tbody>${clippers.map(c=>`<tr class="dir-row ${c.is_me?'me-row':''}" onclick="openProfile(${c.id})">
+            <td class="rank-cell ${c.rank<=3?'medal':''}">${MEDALS[c.rank]||('#'+c.rank)}</td>
+            <td><strong style="color:var(--white)">${esc(c.display_name)}</strong>${c.is_me?' <span class="chip">you</span>':''}</td>
+            <td>${num(c.views)}</td><td class="money">${money(c.earned)}</td>
+          </tr>`).join('')}</tbody></table></div>
+          <p class="muted" style="font-size:.73rem;margin-top:.8rem">Ranked by total earned. Tap a name for their totals.</p>
+          </div>`:'<div class="empty">No clippers yet.</div>';
+      }catch(e){ el.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+    }
+
+    window.openProfile=function(id){
+      const c=DIRECTORY.find(x=>x.id===id); if(!c) return;
+      document.getElementById('pf-body').innerHTML=`
+        <div class="pf-head">
+          <div class="pf-av">${esc((c.display_name||'C').trim().charAt(0).toUpperCase())}</div>
+          <div>
+            <div class="pf-name">${esc(c.display_name)}${c.is_me?' <span class="chip">you</span>':''}</div>
+            <div class="pf-rank">${c.rank<=3?MEDALS[c.rank]+' ':''}Rank #${c.rank}</div>
+          </div>
+        </div>
+        <div class="stats" style="margin:1.2rem 0 0">
+          <div class="stat"><div class="stat-val w">${num(c.views)}</div><div class="stat-lbl">Total Views Generated</div></div>
+          <div class="stat"><div class="stat-val">${money(c.earned)}</div><div class="stat-lbl">Total Money Earned</div></div>
+        </div>`;
+      document.getElementById('pf-back').classList.add('open');
+    };
+    window.closeProfile=function(){ document.getElementById('pf-back').classList.remove('open'); };
+
+    /* ── Instagram connect guide ── */
+    window.openConnectGuide=function(campaignId,campaignName){
+      document.getElementById('ig-camp-name').textContent='For '+campaignName;
+      const cb=document.getElementById('ig-confirm'); cb.checked=false;
+      const go=document.getElementById('ig-continue');
+      go.style.opacity='.5'; go.style.pointerEvents='none';
+      go.href='/api/auth/instagram/start?campaign_id='+campaignId;
+      document.getElementById('ig-back').classList.add('open');
+    };
+    window.closeConnectGuide=function(){ document.getElementById('ig-back').classList.remove('open'); };
+
+    window.requestTesterAccess=async function(campaignId){
+      const input=document.getElementById('tr-username-'+campaignId);
+      const username=(input.value||'').trim();
+      if(!username){ toast('Enter your Instagram username',true); return; }
+      try{
+        await api('/api/clipper/tester-request',{method:'POST',body:JSON.stringify({ig_username:username,campaign_id:campaignId})});
+        toast('Request sent — we\'ll add you as a tester shortly');
+        await loadCampaigns();
+        openCampaign(campaignId);
+      }catch(e){ toast(e.message,true); }
+    };
+    window.toggleIgContinue=function(checked){
+      const go=document.getElementById('ig-continue');
+      go.style.opacity=checked?'1':'.5';
+      go.style.pointerEvents=checked?'auto':'none';
+    };
+
+    /* ── init ── */
+    (async function(){
+      const q=new URLSearchParams(location.search), ga=document.getElementById('global-alert');
+      if(q.get('ig')==='connected') ga.innerHTML=alertBox('ok','Instagram connected','@'+(q.get('handle')||'')+' is now verified for that campaign. You can start posting clips to it.');
+      else if(q.get('ig')==='error') ga.innerHTML=alertBox('bad','Instagram connection failed',q.get('msg')||'Something went wrong.',q.get('fix')||'');
+      const jumpTo=q.get('campaign');
+      if(q.get('ig')) history.replaceState({},'',location.pathname);
+
+      try{
+        await loadMe(); await loadCampaigns(); await loadClips();
+        if(jumpTo) openCampaign(Number(jumpTo));
+      }catch(e){ if(e.message!=='unauthorized') toast(e.message,true); }
     })();
   </script>
 </body>

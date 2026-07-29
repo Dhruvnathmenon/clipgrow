@@ -146,6 +146,7 @@
       <button class="tab on" data-v="campaigns" onclick="showView('campaigns',this)">Campaigns</button>
       <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
       <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
+      <button class="tab" data-v="testers" onclick="showView('testers',this)">Instagram Testers</button>
     </div>
 
     <!-- CAMPAIGNS -->
@@ -181,7 +182,8 @@
           <div><label>Display Name</label><input type="text" id="cl-display" class="form-control" /></div>
           <button type="submit" class="btn">Create Clipper</button>
         </form>
-        <p class="note">Share these credentials with the clipper directly — the password is only shown here, never stored in readable form.</p>
+        <p class="note" id="uname-hint">Usernames are saved in lowercase with spaces removed — the clipper must log in with exactly that.</p>
+        <div id="cred-box" style="display:none"></div>
       </div>
       <div class="panel">
         <h2 class="panel-title">All Clippers</h2>
@@ -212,6 +214,18 @@
         <div class="table-wrap"><table>
           <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
           <tbody id="payments-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- INSTAGRAM TESTERS -->
+    <div class="view" id="v-testers">
+      <div class="panel">
+        <h2 class="panel-title">Instagram Tester Queue</h2>
+        <p class="note" style="margin-bottom:1rem">The Meta app is in Development Mode — a clipper's Instagram account must be added as a Tester (Meta App Dashboard → App roles → Instagram Testers) and accept the invite before they can connect. Track that here.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Instagram</th><th>Campaign</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="testers-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -319,6 +333,7 @@
       document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
       document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
       if(name==='payments') loadPayments();
+      if(name==='testers') loadTesters();
     };
 
     window.runSync=async function(){
@@ -620,18 +635,48 @@
       catch(e){ toast(e.message,true); }
     };
 
+    // Mirrors normalizeUsername() on the server so the admin sees the exact
+    // username the clipper will have to type.
+    const normUser=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,'');
+    document.getElementById('cl-username').addEventListener('input',e=>{
+      const n=normUser(e.target.value);
+      document.getElementById('uname-hint').innerHTML = n && n!==e.target.value
+        ? `Will be saved as <strong style="color:var(--neon)">${esc(n)}</strong> — that is what the clipper must type to log in.`
+        : 'Usernames are saved in lowercase with spaces removed — the clipper must log in with exactly that.';
+    });
+
     document.getElementById('clipper-form').addEventListener('submit',async e=>{
       e.preventDefault();
+      const pw=document.getElementById('cl-password').value;
       try{
         const r=await api('/api/admin/clippers',{method:'POST',body:JSON.stringify({
           username:document.getElementById('cl-username').value,
-          password:document.getElementById('cl-password').value,
+          password:pw,
           display_name:document.getElementById('cl-display').value.trim()
         })});
-        toast('Clipper "'+r.username+'" created — share the login now');
-        e.target.reset(); loadAll();
+        const box=document.getElementById('cred-box');
+        box.style.display='block';
+        box.innerHTML=`<div class="alert info" style="margin-top:1rem">
+          <strong>Send these to the clipper exactly as shown</strong>
+          <div style="margin-top:.6rem;font-family:'Space Grotesk',sans-serif;font-size:.95rem;line-height:1.9">
+            Login page: <strong style="color:var(--neon)">clipgrow.in/clipper</strong><br>
+            Username: <strong style="color:var(--neon)">${esc(r.username)}</strong><br>
+            Password: <strong style="color:var(--neon)">${esc(pw)}</strong>
+          </div>
+          <div style="margin-top:.7rem"><button class="btn btn-sm" onclick="copyCreds('${esc(r.username)}','${esc(pw).replace(/'/g,"\\'")}')">Copy</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cred-box').style.display='none'">Hide</button></div>
+        </div>`;
+        toast('Clipper "'+r.username+'" created');
+        e.target.reset();
+        document.getElementById('uname-hint').textContent='Usernames are saved in lowercase with spaces removed — the clipper must log in with exactly that.';
+        loadAll();
       }catch(e2){ toast(e2.message,true); }
     });
+
+    window.copyCreds=function(u,p){
+      const text=`ClipGrow login\nPage: https://clipgrow.in/clipper\nUsername: ${u}\nPassword: ${p}`;
+      navigator.clipboard.writeText(text).then(()=>toast('Credentials copied')).catch(()=>toast('Could not copy',true));
+    };
 
     /* ---------- payments ---------- */
     function fillPaymentSelects(){
@@ -689,6 +734,37 @@
     });
 
     function loadAll(){ loadOverview(); loadCampaigns(); loadClippers(); }
+    /* ── Instagram tester queue ── */
+    const TESTER_BADGE={requested:'pending',invited:'needs_reauth',confirmed:'connected',rejected:'kicked'};
+    async function loadTesters(){
+      try{
+        const {requests}=await api('/api/admin/tester-requests');
+        const tb=document.getElementById('testers-body');
+        tb.innerHTML=requests.length?requests.map(r=>`<tr>
+          <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
+          <td>@${esc(r.ig_username)}</td>
+          <td class="muted">${esc(r.campaign_name||'—')}</td>
+          <td class="muted">${when(r.requested_at)}</td>
+          <td><span class="badge ${TESTER_BADGE[r.status]||''}">${esc(r.status)}</span>${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
+          <td class="actions">
+            ${r.status==='requested'?`<button class="btn btn-sm" onclick="setTester(${r.id},'invited')">Mark Invited</button>`:''}
+            ${r.status==='invited'?`<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Mark Confirmed</button>`:''}
+            ${r.status==='requested'||r.status==='invited'?`<button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>`:''}
+            ${r.status==='confirmed'||r.status==='rejected'?`<span class="muted" style="font-size:.72rem">—</span>`:''}
+          </td>
+        </tr>`).join(''):'<tr><td colspan="6" class="empty">No tester requests yet.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    }
+    window.setTester=async function(id,status){
+      try{ await api('/api/admin/tester-requests/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Updated'); loadTesters(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.rejectTester=async function(id){
+      const note=prompt('Reason (optional, shown to the clipper):')||'';
+      try{ await api('/api/admin/tester-requests/'+id,{method:'PATCH',body:JSON.stringify({status:'rejected',note})}); toast('Rejected'); loadTesters(); }
+      catch(e){ toast(e.message,true); }
+    };
+
     api('/api/admin/overview').then(()=>{ document.getElementById('auth-overlay').style.display='none'; loadAll(); }).catch(()=>{});
   </script>
 </body>

@@ -2,7 +2,7 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
-  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById
+  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername
 } from '../db.js';
 import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
@@ -85,8 +85,10 @@ export async function handleAdmin(request, env, url) {
     const { username, password, display_name } = await readJson(request);
     if (!username || !password) return err('Username and password are required');
     if (String(password).length < 6) return err('Password must be at least 6 characters');
-    const clean = String(username).trim().toLowerCase().replace(/\s+/g, '');
-    const existing = await env.DB.prepare('SELECT id FROM clippers WHERE username = ?').bind(clean).first();
+    const clean = normalizeUsername(username);
+    if (!clean) return err('Username cannot be blank');
+    const existing = await env.DB
+      .prepare('SELECT id FROM clippers WHERE username = ? COLLATE NOCASE').bind(clean).first();
     if (existing) return err('That username is already taken', 409);
     const { hash, salt } = await hashPassword(password);
     const res = await env.DB.prepare(
@@ -267,6 +269,49 @@ export async function handleAdmin(request, env, url) {
       .bind(part.clipper_id, part.campaign_id).first();
     if (subs.n > 0) return err(`This clipper has ${subs.n} video(s) in this campaign. Use Kick instead so their earnings are preserved.`, 409);
     await env.DB.prepare('DELETE FROM participations WHERE id = ?').bind(params.id).run();
+    return json({ ok: true });
+  }
+
+  // -------------------------------------------------------- tester requests
+  // Manual queue ahead of OAuth: the Meta app is in Development Mode, so an
+  // Instagram account must be an accepted app Tester before a clipper's
+  // Connect Instagram can ever succeed. The admin adds/confirms the tester by
+  // hand in the Meta dashboard; these endpoints just track that state.
+  const TESTER_STATUSES = ['requested', 'invited', 'confirmed', 'rejected'];
+
+  if (pathname === '/api/admin/tester-requests' && method === 'GET') {
+    const { results } = await env.DB.prepare(
+      `SELECT t.*, cl.username AS clipper_username, cl.display_name AS clipper_display_name,
+              c.name AS campaign_name
+       FROM tester_requests t
+       JOIN clippers cl ON cl.id = t.clipper_id
+       LEFT JOIN campaigns c ON c.id = t.campaign_id
+       ORDER BY
+         CASE t.status WHEN 'requested' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END,
+         t.requested_at DESC`
+    ).all();
+    return json({ requests: results || [] });
+  }
+
+  params = matchPath('/api/admin/tester-requests/:id', pathname);
+  if (params && method === 'PATCH') {
+    const { status, note } = await readJson(request);
+    const reqRow = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(params.id).first();
+    if (!reqRow) return err('Not found', 404);
+    if (status && !TESTER_STATUSES.includes(status)) return err('Invalid status');
+
+    const nextStatus = status || reqRow.status;
+    await env.DB.prepare(
+      `UPDATE tester_requests SET status = ?, note = ?,
+         invited_at = CASE WHEN ? = 'invited' AND invited_at IS NULL THEN ? ELSE invited_at END,
+         confirmed_at = CASE WHEN ? = 'confirmed' AND confirmed_at IS NULL THEN ? ELSE confirmed_at END
+       WHERE id = ?`
+    ).bind(
+      nextStatus, note != null ? note : reqRow.note,
+      nextStatus, now(),
+      nextStatus, now(),
+      params.id
+    ).run();
     return json({ ok: true });
   }
 
