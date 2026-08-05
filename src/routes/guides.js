@@ -43,11 +43,19 @@ function page(title, description, canonical, bodyHtml, extraHead = '') {
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
 <link rel="canonical" href="${esc(canonical)}" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(canonical)}" />
+<meta property="og:image" content="https://clipgrow.in/og-image.jpg" />
 <meta property="og:site_name" content="ClipGrow" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${esc(title)}" />
+<meta name="twitter:description" content="${esc(description)}" />
+<meta name="twitter:image" content="https://clipgrow.in/og-image.jpg" />
 ${FONT_LINK}
 ${extraHead}
 <style>${HEAD_STYLE}</style>
