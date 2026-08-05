@@ -147,6 +147,7 @@
       <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
       <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
       <button class="tab" data-v="testers" onclick="showView('testers',this)">Instagram Testers</button>
+      <button class="tab" data-v="guides" onclick="showView('guides',this)">SEO Guides</button>
     </div>
 
     <!-- CAMPAIGNS -->
@@ -226,6 +227,36 @@
         <div class="table-wrap"><table>
           <thead><tr><th>Clipper</th><th>Instagram</th><th>Campaign</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="testers-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- SEO GUIDES -->
+    <div class="view" id="v-guides">
+      <div class="panel">
+        <h2 class="panel-title" id="guide-form-title">New Guide</h2>
+        <form id="guide-form" class="form-grid">
+          <input type="hidden" id="g-id" />
+          <div><label>Title <span class="req">*</span></label><input type="text" id="g-title" class="form-control" required /></div>
+          <div><label>URL slug</label><input type="text" id="g-slug" class="form-control" placeholder="auto from title if left blank" /></div>
+          <div><label>Audience</label><select id="g-audience" class="form-control"><option value="clipper">Clippers</option><option value="brand">Brands</option></select></div>
+          <div><label>Target keyword</label><input type="text" id="g-keyword" class="form-control" placeholder="e.g. how to become a clipper in India" /></div>
+          <div style="grid-column:1/-1"><label>Meta description</label><input type="text" id="g-meta" class="form-control" maxlength="160" placeholder="Shown in Google search results, under 160 characters" /></div>
+          <div style="grid-column:1/-1"><label>Body <span class="req">*</span></label>
+            <textarea id="g-body" class="form-control" rows="12" placeholder="HTML: use <p>, <h2>, <h3>, <ul><li>, <strong> etc." required></textarea>
+          </div>
+          <div><label>Status</label><select id="g-status" class="form-control"><option value="draft">Draft</option><option value="published">Published</option></select></div>
+          <div style="display:flex;align-items:flex-end;gap:.6rem">
+            <button type="submit" class="btn">Save Guide</button>
+            <button type="button" class="btn btn-ghost" onclick="resetGuideForm()">New</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">All Guides</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Title</th><th>Audience</th><th>Keyword</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="guides-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -335,6 +366,7 @@
       document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
       if(name==='payments') loadPayments();
       if(name==='testers') loadTesters();
+      if(name==='guides') loadGuides();
     };
 
     window.runSync=async function(){
@@ -770,6 +802,68 @@
       try{ await api('/api/admin/tester-requests/'+id,{method:'PATCH',body:JSON.stringify({status:'rejected',note})}); toast('Rejected'); loadTesters(); }
       catch(e){ toast(e.message,true); }
     };
+
+    /* ── SEO guides ── */
+    async function loadGuides(){
+      try{
+        const {guides}=await api('/api/admin/guides');
+        const tb=document.getElementById('guides-body');
+        tb.innerHTML=guides.length?guides.map(g=>`<tr>
+          <td class="handle">${esc(g.title)}${g.status==='published'?` <a href="/guides/${esc(g.slug)}" target="_blank" style="color:var(--neon);font-size:.72rem">view ↗</a>`:''}</td>
+          <td class="muted">${g.audience==='brand'?'Brands':'Clippers'}</td>
+          <td class="muted" style="font-size:.75rem">${esc(g.target_keyword||'—')}</td>
+          <td><span class="badge ${g.status==='published'?'connected':''}">${esc(g.status)}</span></td>
+          <td><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="editGuide(${g.id})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="delGuide(${g.id})">Delete</button>
+          </div></td>
+        </tr>`).join(''):'<tr><td colspan="5" class="empty">No guides yet — create your first one above.</td></tr>';
+        window._GUIDES=guides;
+      }catch(e){ toast(e.message,true); }
+    }
+    window.resetGuideForm=function(){
+      document.getElementById('guide-form-title').textContent='New Guide';
+      document.getElementById('g-id').value='';
+      document.getElementById('guide-form').reset();
+    };
+    window.editGuide=function(id){
+      const g=(window._GUIDES||[]).find(x=>x.id===id); if(!g) return;
+      document.getElementById('guide-form-title').textContent='Edit Guide';
+      document.getElementById('g-id').value=g.id;
+      document.getElementById('g-title').value=g.title;
+      document.getElementById('g-slug').value=g.slug;
+      document.getElementById('g-audience').value=g.audience;
+      document.getElementById('g-keyword').value=g.target_keyword||'';
+      document.getElementById('g-meta').value=g.meta_description||'';
+      document.getElementById('g-body').value=g.body_html;
+      document.getElementById('g-status').value=g.status;
+      document.getElementById('v-guides').scrollIntoView({behavior:'smooth'});
+    };
+    window.delGuide=async function(id){
+      if(!confirm('Delete this guide? This cannot be undone.')) return;
+      try{ await api('/api/admin/guides/'+id,{method:'DELETE'}); toast('Guide deleted'); loadGuides(); }
+      catch(e){ toast(e.message,true); }
+    };
+    document.getElementById('guide-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const id=document.getElementById('g-id').value;
+      const body={
+        title:document.getElementById('g-title').value.trim(),
+        slug:document.getElementById('g-slug').value.trim(),
+        audience:document.getElementById('g-audience').value,
+        target_keyword:document.getElementById('g-keyword').value.trim(),
+        meta_description:document.getElementById('g-meta').value.trim(),
+        body_html:document.getElementById('g-body').value,
+        status:document.getElementById('g-status').value
+      };
+      try{
+        if(id) await api('/api/admin/guides/'+id,{method:'PATCH',body:JSON.stringify(body)});
+        else await api('/api/admin/guides',{method:'POST',body:JSON.stringify(body)});
+        toast('Guide saved');
+        resetGuideForm();
+        loadGuides();
+      }catch(e2){ toast(e2.message,true); }
+    });
 
     api('/api/admin/overview').then(()=>{ document.getElementById('auth-overlay').style.display='none'; loadAll(); }).catch(()=>{});
   </script>

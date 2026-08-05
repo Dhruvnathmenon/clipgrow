@@ -85,11 +85,28 @@ function safeParse(json) {
   }
 }
 
+/**
+ * URL-friendly slug for a campaign's public page. Lowercased, hyphenated,
+ * stripped of anything non-alphanumeric. Collisions (same name reused) are
+ * resolved by appending the campaign id, since ids are already unique and
+ * stable -- avoids a lookup-and-retry loop at creation time.
+ */
+export function slugify(name, id) {
+  const base = String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return id ? `${base || 'campaign'}-${id}` : (base || 'campaign');
+}
+
 export function publicCampaign(row, spent) {
   const budget = row.budget ?? 0;
   return {
     id: row.id,
     name: row.name,
+    slug: row.slug || null,
     description: row.description,
     cpm: row.cpm,
     min_views: row.min_views == null ? 0 : row.min_views,

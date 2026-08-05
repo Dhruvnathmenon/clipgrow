@@ -3,6 +3,9 @@ import { handleClipper } from './routes/clipper.js';
 import { handleInstagramAuth } from './routes/instagram-auth.js';
 import { handlePublic } from './routes/public.js';
 import { handleMedia } from './routes/media.js';
+import { handleCampaignPage } from './routes/campaigns.js';
+import { handleSitemap } from './routes/sitemap.js';
+import { handleGuide } from './routes/guides.js';
 import { syncAllCampaigns } from './earnings.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
@@ -54,6 +57,21 @@ export default {
         }
       }
       return err('Not found', 404);
+    }
+
+    // SEO surfaces: server-rendered so they're crawlable/shareable on their
+    // own, unlike the homepage's client-fetched campaign tiles. All public,
+    // no gating, all generated fresh from D1 -- never a static file.
+    if (path === '/sitemap.xml' || path.startsWith('/campaigns/') || path === '/guides' || path.startsWith('/guides/')) {
+      try {
+        const res = path === '/sitemap.xml' ? await handleSitemap(request, env, url)
+          : path.startsWith('/campaigns/') ? await handleCampaignPage(request, env, url)
+          : await handleGuide(request, env, url);
+        if (res) return res;
+      } catch (e) {
+        console.error(`SEO route error on ${path}:`, e.stack || e.message);
+        return err('Internal server error', 500);
+      }
     }
 
     if (LOGIN_ALIASES.has(path)) return redirect(LOGIN_PATH);

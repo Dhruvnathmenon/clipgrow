@@ -329,7 +329,7 @@ export async function handleClipper(request, env, url) {
     const thumbSource = media.thumbnail_url || media.media_url || null;
     const thumbKey = await captureThumbnail(env, media.id, thumbSource);
 
-    await env.DB.prepare(
+    const res = await env.DB.prepare(
       `INSERT INTO submissions (clipper_id, campaign_id, account_id, ig_media_id, permalink, views, earning,
          status, created_at, thumbnail_key, thumbnail_url, media_product_type, posted_at)
        VALUES (?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?)`
@@ -339,7 +339,25 @@ export async function handleClipper(request, env, url) {
       media.timestamp ? Date.parse(media.timestamp) || null : null
     ).run();
 
-    return json({ ok: true, message: 'Clip verified and added — views start tracking on the next sync' }, 201);
+    // Fetch this clipper's real view counts right now instead of waiting for
+    // the next cron pass, so the number on screen is live the instant the
+    // clip is added. Best-effort: a fresh Reel with insights not ready yet, or
+    // a transient Instagram error, must never block the submission itself --
+    // it just sits at 0 until the next sync (manual or 6-hourly) picks it up.
+    let liveViews = 0, liveEarning = 0;
+    try {
+      await syncClipperViews(env.DB, clipperId);
+      const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?')
+        .bind(res.meta.last_row_id).first();
+      if (fresh) { liveViews = fresh.views; liveEarning = fresh.earning; }
+    } catch { /* falls back to 0 -- next sync will fill it in */ }
+
+    return json({
+      ok: true,
+      message: liveViews > 0 ? `Clip verified and added — ${liveViews.toLocaleString('en-IN')} views so far` : 'Clip verified and added — views start tracking on the next sync',
+      views: liveViews,
+      earning: liveEarning
+    }, 201);
   }
 
   // ------------------------------------------------------------ directory

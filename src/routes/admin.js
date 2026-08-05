@@ -2,7 +2,7 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
-  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername
+  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify
 } from '../db.js';
 import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
@@ -174,7 +174,13 @@ export async function handleAdmin(request, env, url) {
       `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, created_at)
        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`
     ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '', JSON.stringify(pickBlueprint(payload)), now()).run();
-    return json({ ok: true, id: res.meta.last_row_id }, 201);
+    const id = res.meta.last_row_id;
+    // Slug needs the id (for uniqueness), which only exists after insert --
+    // set it in a follow-up UPDATE. Never changes after this, even if the
+    // campaign is renamed later, so a shared /campaigns/:slug link never breaks.
+    const slug = slugify(name, id);
+    await env.DB.prepare('UPDATE campaigns SET slug = ? WHERE id = ?').bind(slug, id).run();
+    return json({ ok: true, id, slug }, 201);
   }
 
   params = matchPath('/api/admin/campaigns/:id/participants', pathname);
@@ -317,6 +323,58 @@ export async function handleAdmin(request, env, url) {
       nextStatus, now(),
       params.id
     ).run();
+    return json({ ok: true });
+  }
+
+  // ------------------------------------------------------------------ guides
+  // SEO content pages (src/routes/guides.js renders these publicly at
+  // /guides and /guides/:slug). Managed entirely here -- publishing or
+  // editing an article never requires a code deploy.
+  if (pathname === '/api/admin/guides' && method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM guides ORDER BY created_at DESC').all();
+    return json({ guides: results || [] });
+  }
+
+  if (pathname === '/api/admin/guides' && method === 'POST') {
+    const payload = await readJson(request);
+    const title = (payload.title || '').trim();
+    if (!title) return err('Title is required');
+    const bodyHtml = (payload.body_html || '').trim();
+    if (!bodyHtml) return err('Body content is required');
+    let slug = (payload.slug || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!slug) slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const existing = await env.DB.prepare('SELECT id FROM guides WHERE slug = ?').bind(slug).first();
+    if (existing) return err('A guide with this slug already exists', 409);
+    const res = await env.DB.prepare(
+      `INSERT INTO guides (slug, title, meta_description, audience, target_keyword, body_html, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      slug, title, payload.meta_description || '', payload.audience === 'brand' ? 'brand' : 'clipper',
+      payload.target_keyword || '', bodyHtml, payload.status === 'published' ? 'published' : 'draft', now()
+    ).run();
+    return json({ ok: true, id: res.meta.last_row_id, slug }, 201);
+  }
+
+  params = matchPath('/api/admin/guides/:id', pathname);
+  if (params && method === 'PATCH') {
+    const g = await env.DB.prepare('SELECT * FROM guides WHERE id = ?').bind(params.id).first();
+    if (!g) return err('Not found', 404);
+    const payload = await readJson(request);
+    await env.DB.prepare(
+      `UPDATE guides SET title = ?, meta_description = ?, audience = ?, target_keyword = ?, body_html = ?, status = ?, updated_at = ? WHERE id = ?`
+    ).bind(
+      payload.title != null ? String(payload.title).trim() || g.title : g.title,
+      payload.meta_description != null ? payload.meta_description : g.meta_description,
+      payload.audience === 'brand' || payload.audience === 'clipper' ? payload.audience : g.audience,
+      payload.target_keyword != null ? payload.target_keyword : g.target_keyword,
+      payload.body_html != null ? payload.body_html : g.body_html,
+      payload.status === 'published' || payload.status === 'draft' ? payload.status : g.status,
+      now(), params.id
+    ).run();
+    return json({ ok: true });
+  }
+  if (params && method === 'DELETE') {
+    await env.DB.prepare('DELETE FROM guides WHERE id = ?').bind(params.id).run();
     return json({ ok: true });
   }
 

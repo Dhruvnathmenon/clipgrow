@@ -10,3 +10,5 @@ Disallow: /tracker.html
 Disallow: /admin
 Disallow: /admin.html
 Disallow: /api/
+
+Sitemap: https://clipgrow.in/sitemap.xml
