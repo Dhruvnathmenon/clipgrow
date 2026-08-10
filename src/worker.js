@@ -1,5 +1,6 @@
 import { handleAdmin } from './routes/admin.js';
 import { handleClipper } from './routes/clipper.js';
+import { handleClient } from './routes/client.js';
 import { handleInstagramAuth } from './routes/instagram-auth.js';
 import { handlePublic } from './routes/public.js';
 import { handleMedia } from './routes/media.js';
@@ -10,11 +11,14 @@ import { syncAllCampaigns } from './earnings.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
-const handlers = [handleInstagramAuth, handleAdmin, handleClipper, handlePublic, handleMedia];
+const handlers = [handleInstagramAuth, handleAdmin, handleClipper, handleClient, handlePublic, handleMedia];
 
 // The clipper area is unlisted: it lives at /clipper and nothing on the public
 // site links to it.
 const LOGIN_PATH = '/clipper';
+
+// The brand-facing portal, likewise unlisted.
+const CLIENT_LOGIN_PATH = '/client';
 
 // Old paths kept as redirects so previously-shared links still land somewhere.
 const LOGIN_ALIASES = new Set(['/login', '/login.html']);
@@ -25,7 +29,9 @@ const GATED = {
   '/dashboard': { asset: '/dashboard', role: 'clipper' },
   '/dashboard.html': { asset: '/dashboard', role: 'clipper' },
   '/tracker': { asset: '/tracker', role: 'any' },
-  '/tracker.html': { asset: '/tracker', role: 'any' }
+  '/tracker.html': { asset: '/tracker', role: 'any' },
+  '/client-dashboard': { asset: '/client-dashboard', role: 'client' },
+  '/client-dashboard.html': { asset: '/client-dashboard', role: 'client' }
 };
 
 function redirect(to) {
@@ -83,11 +89,19 @@ export default {
       return servePrivate(env, url.origin, '/login');
     }
 
+    if (path === CLIENT_LOGIN_PATH || path === '/client.html') {
+      const session = await getSession(request, env);
+      if (session && session.role === 'client') return redirect('/client-dashboard');
+      return servePrivate(env, url.origin, '/client-login');
+    }
+
     const gate = GATED[path];
     if (gate) {
       const session = await getSession(request, env);
       const ok = session && (gate.role === 'any' ? true : session.role === gate.role);
-      if (!ok) return redirect(LOGIN_PATH);
+      // Send an unauthenticated visitor to the login form that matches the
+      // area they were trying to reach, not always the clipper one.
+      if (!ok) return redirect(gate.role === 'client' ? CLIENT_LOGIN_PATH : LOGIN_PATH);
       return servePrivate(env, url.origin, gate.asset);
     }
 

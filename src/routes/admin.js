@@ -6,6 +6,8 @@ import {
 } from '../db.js';
 import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
+import { payableClips, settlePayment, reversePayment, WRITE_OFF_AFTER_DAYS } from '../payouts.js';
+import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -383,6 +385,12 @@ export async function handleAdmin(request, env, url) {
   if (params && (method === 'PATCH' || method === 'DELETE')) {
     const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
     if (!sub) return err('Not found', 404);
+    // A settled clip is closed history: real money was sent against this exact
+    // amount. Editing or deleting it would rewrite the books and silently
+    // desync the payment ledger. Reverse the payment first if it was a mistake.
+    if (sub.locked_at) {
+      return err('This clip is locked because it has already been settled. Reverse its payment first if you need to change it.', 409);
+    }
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM submissions WHERE id = ?').bind(params.id).run();
     } else {
@@ -413,6 +421,70 @@ export async function handleAdmin(request, env, url) {
       env.DB.prepare('DELETE FROM social_accounts WHERE id = ?').bind(params.id)
     ]);
     return json({ ok: true });
+  }
+
+  // ---------------------------------------------------------------- payouts
+  // Everything a payout run needs: each clip in the window with its posted and
+  // synced dates, whether it cleared the campaign minimum, whether the
+  // per-video cap bit, and what is already settled.
+  params = matchPath('/api/admin/clippers/:id/payable', pathname);
+  if (params && method === 'GET') {
+    const clipper = await env.DB.prepare('SELECT id FROM clippers WHERE id = ?').bind(params.id).first();
+    if (!clipper) return err('Clipper not found', 404);
+    const daysRaw = url.searchParams.get('days');
+    const days = daysRaw === 'all' ? 0 : Math.max(0, Number(daysRaw) || 30);
+    const campaignId = url.searchParams.get('campaign_id') || null;
+    const data = await payableClips(env.DB, Number(params.id), {
+      days,
+      campaignId: campaignId ? Number(campaignId) : null
+    });
+    return json({ ...data, days, write_off_after_days: WRITE_OFF_AFTER_DAYS });
+  }
+
+  // Records the payment AND locks every clip it covers, in one call. Locking is
+  // what stops a clip being paid for twice and what stops its amount being
+  // rewritten later.
+  if (pathname === '/api/admin/payouts/settle' && method === 'POST') {
+    const body = await readJson(request);
+    if (!body.clipper_id) return err('Pick a clipper');
+    const result = await settlePayment(env.DB, {
+      clipperId: Number(body.clipper_id),
+      submissionIds: Array.isArray(body.submission_ids) ? body.submission_ids : [],
+      writeOffIds: Array.isArray(body.write_off_ids) ? body.write_off_ids : [],
+      amount: body.amount,
+      campaignId: body.campaign_id ? Number(body.campaign_id) : null,
+      method: body.method,
+      reference: body.reference,
+      note: body.note,
+      paidAt: body.paid_at
+    });
+    if (result.error) return json({ error: result.error, locked_ids: result.locked_ids }, result.status || 400);
+    return json({ ...result, money: await clipperFinancials(env.DB, body.clipper_id) }, 201);
+  }
+
+  // Reopens a clip that was closed at zero for missing the campaign minimum.
+  // Deliberately refuses clips locked by a payment: those must go back through
+  // the payment reversal, so the ledger and the locks can never drift apart.
+  params = matchPath('/api/admin/submissions/:id/unlock', pathname);
+  if (params && method === 'POST') {
+    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub) return err('Not found', 404);
+    if (!sub.locked_at) return err('This clip is not locked', 400);
+    if (sub.lock_reason === 'paid') {
+      return err('This clip was locked by a payment. Reverse that payment instead, so the ledger stays correct.', 409);
+    }
+    await env.DB.prepare(
+      'UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL WHERE id = ?'
+    ).bind(params.id).run();
+    await reallocateCampaign(env.DB, sub.campaign_id);
+    return json({ ok: true });
+  }
+
+  params = matchPath('/api/admin/payments/:id/reverse', pathname);
+  if (params && method === 'POST') {
+    const result = await reversePayment(env.DB, Number(params.id));
+    if (result.error) return json({ error: result.error }, result.status || 400);
+    return json(result);
   }
 
   // --------------------------------------------------------------- payments
@@ -448,8 +520,12 @@ export async function handleAdmin(request, env, url) {
 
   params = matchPath('/api/admin/payments/:id', pathname);
   if (params && method === 'DELETE') {
-    await env.DB.prepare('DELETE FROM payments WHERE id = ?').bind(params.id).run();
-    return json({ ok: true });
+    // Routed through the reversal so the clips this payment locked are released
+    // too. Deleting the row on its own would strand them locked forever with a
+    // dangling payment_id.
+    const result = await reversePayment(env.DB, Number(params.id));
+    if (result.error) return json({ error: result.error }, result.status || 400);
+    return json(result);
   }
   if (params && method === 'PATCH') {
     const { amount, method: payMethod, reference, note, paid_at } = await readJson(request);
@@ -462,6 +538,105 @@ export async function handleAdmin(request, env, url) {
     ).bind(amt, payMethod != null ? payMethod : pay.method, reference != null ? reference : pay.reference,
            note != null ? note : pay.note, paid_at != null ? Number(paid_at) : pay.paid_at, params.id).run();
     return json({ ok: true });
+  }
+
+  // ---------------------------------------------------------------- clients
+  // Read-only observer logins for brands, scoped to the campaigns granted here.
+  if (pathname === '/api/admin/clients' && method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT * FROM clients ORDER BY created_at DESC').all();
+    const out = [];
+    for (const c of results || []) {
+      const { results: camps } = await env.DB.prepare(
+        `SELECT c.id, c.name FROM client_campaigns cc JOIN campaigns c ON c.id = cc.campaign_id
+         WHERE cc.client_id = ? ORDER BY c.created_at DESC`
+      ).bind(c.id).all();
+      out.push({
+        id: c.id, username: c.username, company_name: c.company_name,
+        contact_name: c.contact_name, status: c.status, created_at: c.created_at,
+        campaigns: camps || []
+      });
+    }
+    return json({ clients: out });
+  }
+
+  if (pathname === '/api/admin/clients' && method === 'POST') {
+    const { username, password, company_name, contact_name, campaign_ids } = await readJson(request);
+    if (!username || !password) return err('Username and password are required');
+    if (String(password).length < 6) return err('Password must be at least 6 characters');
+    const clean = normalizeUsername(username);
+    if (!clean) return err('Username cannot be blank');
+    const existing = await env.DB.prepare('SELECT id FROM clients WHERE username = ? COLLATE NOCASE').bind(clean).first();
+    if (existing) return err('That client username is already taken', 409);
+    const { hash, salt } = await hashPassword(password);
+    const res = await env.DB.prepare(
+      `INSERT INTO clients (username, password_hash, password_salt, company_name, contact_name, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?)`
+    ).bind(clean, hash, salt, company_name || clean, contact_name || '', now()).run();
+    const clientId = res.meta.last_row_id;
+    for (const cid of Array.isArray(campaign_ids) ? campaign_ids : []) {
+      await env.DB.prepare(
+        'INSERT OR IGNORE INTO client_campaigns (client_id, campaign_id, granted_at) VALUES (?, ?, ?)'
+      ).bind(clientId, Number(cid), now()).run();
+    }
+    return json({ ok: true, id: clientId, username: clean }, 201);
+  }
+
+  params = matchPath('/api/admin/clients/:id', pathname);
+  if (params && method === 'PATCH') {
+    const client = await env.DB.prepare('SELECT * FROM clients WHERE id = ?').bind(params.id).first();
+    if (!client) return err('Not found', 404);
+    const { status, company_name, contact_name, password, campaign_ids } = await readJson(request);
+    if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
+    await env.DB.prepare(
+      'UPDATE clients SET status = ?, company_name = ?, contact_name = ? WHERE id = ?'
+    ).bind(status || client.status,
+           company_name != null ? company_name : client.company_name,
+           contact_name != null ? contact_name : client.contact_name, params.id).run();
+    if (password) {
+      if (String(password).length < 6) return err('Password must be at least 6 characters');
+      const { hash, salt } = await hashPassword(password);
+      await env.DB.prepare('UPDATE clients SET password_hash = ?, password_salt = ? WHERE id = ?')
+        .bind(hash, salt, params.id).run();
+    }
+    // Campaign grants are replaced wholesale when supplied, so unticking a
+    // campaign in the admin UI actually revokes that client's access to it.
+    if (Array.isArray(campaign_ids)) {
+      await env.DB.prepare('DELETE FROM client_campaigns WHERE client_id = ?').bind(params.id).run();
+      for (const cid of campaign_ids) {
+        await env.DB.prepare(
+          'INSERT OR IGNORE INTO client_campaigns (client_id, campaign_id, granted_at) VALUES (?, ?, ?)'
+        ).bind(params.id, Number(cid), now()).run();
+      }
+    }
+    return json({ ok: true });
+  }
+
+  if (params && method === 'DELETE') {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM client_campaigns WHERE client_id = ?').bind(params.id),
+      env.DB.prepare('DELETE FROM clients WHERE id = ?').bind(params.id)
+    ]);
+    return json({ ok: true });
+  }
+
+  // ----------------------------------------------------------------- export
+  // Offline backup of the books. Generated live from D1 on every request, so a
+  // download is always a true snapshot of the current state -- the point being
+  // that it still tells you what was paid for even if the site is down.
+  if (pathname === '/api/admin/export.csv' && method === 'GET') {
+    const kind = url.searchParams.get('type') === 'payments' ? 'payments' : 'clips';
+    const csv = kind === 'payments'
+      ? await exportPaymentsCsv(env.DB)
+      : await exportClipsCsv(env.DB);
+    const stamp = new Date().toISOString().slice(0, 10);
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="clipgrow-${kind}-${stamp}.csv"`,
+        'Cache-Control': 'no-store'
+      }
+    });
   }
 
   // ------------------------------------------------------------------- sync

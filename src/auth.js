@@ -120,3 +120,9 @@ export async function requireClipper(request, env) {
   if (!session || session.role !== 'clipper') return null;
   return session;
 }
+
+export async function requireClient(request, env) {
+  const session = await getSession(request, env);
+  if (!session || session.role !== 'client') return null;
+  return session;
+}

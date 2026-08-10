@@ -1,4 +1,5 @@
 import { fetchMediaViews, refreshLongLivedToken, listRecentMedia, isVideoMedia, IgError } from './instagram.js';
+import { maxPayoutPerVideo } from './db.js';
 
 const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -38,11 +39,13 @@ export async function refreshExpiringTokens(db) {
  * the loop continues.
  */
 export async function syncSubmissionViews(db, campaignId) {
+  // Locked clips are closed out: their amount is settled and further views
+  // change nothing, so re-fetching them would only burn Instagram rate limit.
   const { results } = await db.prepare(
     `SELECT s.id, s.ig_media_id, a.id AS account_id, a.access_token, a.status AS account_status
      FROM submissions s
      LEFT JOIN social_accounts a ON a.id = s.account_id
-     WHERE s.campaign_id = ? AND s.status = 'active'`
+     WHERE s.campaign_id = ? AND s.status = 'active' AND s.locked_at IS NULL`
   ).bind(campaignId).all();
 
   for (const sub of results || []) {
@@ -53,8 +56,8 @@ export async function syncSubmissionViews(db, campaignId) {
     }
     try {
       const views = await fetchMediaViews(sub.ig_media_id, sub.access_token);
-      await db.prepare('UPDATE submissions SET views = ?, last_synced_at = ?, sync_error = NULL WHERE id = ?')
-        .bind(views, Date.now(), sub.id).run();
+      await db.prepare('UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ?')
+        .bind(views, Date.now(), Date.now(), sub.id).run();
       if (sub.account_status !== 'connected') await markAccount(db, sub.account_id, { status: 'connected', code: null });
     } catch (e) {
       const code = e.code || 'UNKNOWN';
@@ -154,7 +157,7 @@ export async function syncClipperViews(db, clipperId) {
     `SELECT s.id, s.ig_media_id, s.campaign_id, a.id AS account_id, a.access_token, a.status AS account_status
      FROM submissions s
      LEFT JOIN social_accounts a ON a.id = s.account_id
-     WHERE s.clipper_id = ? AND s.status = 'active'
+     WHERE s.clipper_id = ? AND s.status = 'active' AND s.locked_at IS NULL
      ORDER BY s.created_at DESC
      LIMIT ?`
   ).bind(clipperId, MANUAL_SYNC_MAX_CLIPS).all();
@@ -171,8 +174,8 @@ export async function syncClipperViews(db, clipperId) {
     }
     try {
       const views = await fetchMediaViews(sub.ig_media_id, sub.access_token);
-      await db.prepare('UPDATE submissions SET views = ?, last_synced_at = ?, sync_error = NULL WHERE id = ?')
-        .bind(views, Date.now(), sub.id).run();
+      await db.prepare('UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ?')
+        .bind(views, Date.now(), Date.now(), sub.id).run();
       if (sub.account_status !== 'connected') await markAccount(db, sub.account_id, { status: 'connected', code: null });
       synced++;
     } catch (e) {
@@ -201,13 +204,19 @@ export async function syncClipperViews(db, clipperId) {
  * Only 'active' submissions from participations that are not 'kicked' earn.
  * Views only ever grow, so an earlier submission's allocation never shrinks —
  * later submissions simply stop earning once the budget is exhausted.
+ *
+ * Locked submissions are settled history: their amount was already paid out,
+ * so it is never recalculated and always consumes budget, whatever happens to
+ * the clip or the campaign afterwards. A locked clip is closed -- views it
+ * gains later earn nothing.
  */
 export async function allocateCampaignEarnings(db, campaignId) {
   const campaign = await db.prepare('SELECT * FROM campaigns WHERE id = ?').bind(campaignId).first();
   if (!campaign) return;
 
   const { results: submissions } = await db.prepare(
-    `SELECT s.id, s.views, s.earning, s.status AS sub_status, COALESCE(p.status, 'active') AS part_status
+    `SELECT s.id, s.views, s.earning, s.locked_at, s.locked_earning,
+            s.status AS sub_status, COALESCE(p.status, 'active') AS part_status
      FROM submissions s
      LEFT JOIN participations p ON p.clipper_id = s.clipper_id AND p.campaign_id = s.campaign_id
      WHERE s.campaign_id = ?
@@ -216,27 +225,43 @@ export async function allocateCampaignEarnings(db, campaignId) {
 
   const cpm = campaign.cpm || 0;
   const minViews = campaign.min_views == null ? 0 : campaign.min_views;
-  let remaining = campaign.budget || 0;
+  const maxPerVideo = maxPayoutPerVideo(campaign);
+  const rows = submissions || [];
+
+  // Settled money is committed, so it comes off the budget before anything
+  // else is priced. Deducting it in FCFS order instead would let an older
+  // unlocked clip win budget that a newer, already-paid clip had spent --
+  // pushing total spend above the budget. This also means that if the budget
+  // is later cut below what has already been paid out, nothing new earns
+  // rather than the books going further into deficit.
+  const lockedTotal = rows.reduce((n, s) => n + (s.locked_at ? (s.locked_earning || 0) : 0), 0);
+  let remaining = Math.max(0, (campaign.budget || 0) - lockedTotal);
   const updates = [];
 
-  for (const sub of submissions || []) {
+  for (const sub of rows) {
     let allocated;
-    if (sub.sub_status !== 'active') {
+    if (sub.locked_at) {
+      // Settled and paid. Historical fact -- never re-priced, and immune to
+      // any later status change on the clip. Already deducted above.
+      allocated = sub.locked_earning || 0;
+    } else if (sub.sub_status !== 'active') {
       // Paused (under review) or disqualified by an admin: earns nothing and
       // hands its share of the budget back to the pool.
       allocated = 0;
     } else if (sub.part_status === 'kicked') {
       // Removed from the campaign: earnings freeze at what they had already
       // accrued. The money is still owed, so it still consumes budget.
-      allocated = Math.min(sub.earning || 0, remaining);
+      allocated = Math.min(sub.earning || 0, Math.max(0, remaining));
       remaining -= allocated;
     } else if (sub.views < minViews) {
       // Under the campaign's minimum: tracked and shown, but earns nothing yet.
       allocated = 0;
     } else {
       // Threshold cleared -- earns on the FULL view count, not just the excess.
-      const naive = Math.floor((sub.views / 1000) * cpm);
-      allocated = Math.max(0, Math.min(naive, remaining));
+      let naive = Math.floor((sub.views / 1000) * cpm);
+      // Per-video ceiling from the campaign blueprint, when one is set.
+      if (maxPerVideo > 0) naive = Math.min(naive, maxPerVideo);
+      allocated = Math.max(0, Math.min(naive, Math.max(0, remaining)));
       remaining -= allocated;
     }
     if (allocated !== sub.earning) {

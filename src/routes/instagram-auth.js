@@ -115,19 +115,34 @@ export async function handleInstagramAuth(request, env, url) {
       const profile = await fetchProfile(longLived.access_token); // rejects personal accounts
       const expiresAt = Date.now() + (longLived.expires_in || 0) * 1000;
 
-      // Each campaign is worked from its own account, so refuse to bind an
-      // account that is already driving a different campaign for this clipper.
+      // One Instagram account drives one LIVE campaign at a time.
+      //
+      // Checked across every clipper, not just this one, so two logins can't
+      // quietly point at the same account. Completed campaigns and revoked or
+      // detached accounts are excluded, which is what lets a good account be
+      // reused on the next campaign once the current one is finished.
       const clash = await env.DB.prepare(
-        `SELECT c.name AS campaign_name FROM participations p
+        `SELECT c.name AS campaign_name, p.clipper_id, cl.username AS clipper_username
+         FROM participations p
          JOIN social_accounts a ON a.id = p.account_id
          JOIN campaigns c ON c.id = p.campaign_id
-         WHERE p.clipper_id = ? AND a.external_id = ? AND p.campaign_id != ?`
-      ).bind(session.sub, profile.id, campaignId).first();
+         JOIN clippers cl ON cl.id = p.clipper_id
+         WHERE a.external_id = ? AND a.platform = 'instagram'
+           AND p.campaign_id != ?
+           AND p.status != 'kicked'
+           AND a.status != 'revoked'
+           AND c.status != 'completed'`
+      ).bind(profile.id, campaignId).first();
       if (clash) {
+        const mine = String(clash.clipper_id) === String(session.sub);
         throw new IgError(
           'ACCOUNT_IN_USE',
-          `@${profile.username} is already connected to your "${clash.campaign_name}" campaign.`,
-          'Each campaign needs its own Instagram account. Connect a different account for this campaign.'
+          mine
+            ? `@${profile.username} is already connected to your "${clash.campaign_name}" campaign.`
+            : `@${profile.username} is already connected to another ClipGrow campaign ("${clash.campaign_name}").`,
+          mine
+            ? 'Each live campaign needs its own Instagram account. Connect a different account, or use this one again once that campaign is marked over.'
+            : 'If this is genuinely your account, ask the ClipGrow admin to release it.'
         );
       }
 

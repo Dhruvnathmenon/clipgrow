@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ClipGrow — Campaign Dashboard</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg:#080D08; --card:#0F170F; --card-h:#141E14; --border:#1A2C1A; --border-s:#223322;
+      --neon:#3DFF7A; --glow-s:rgba(61,255,122,.22); --white:#F0F5F0; --text:#C4D4C4;
+      --muted:#566056; --muted-l:#849484; --red:#FF4D4D; --gold:#FFD700;
+    }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; padding:1.5rem 1.2rem 4rem; }
+    h1,h2,h3 { font-family:'Space Grotesk',sans-serif; color:var(--white); }
+    a { color:var(--neon); }
+    .wrap { max-width:1100px; margin:0 auto; }
+
+    header { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1.6rem; }
+    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.3rem; color:var(--white); text-decoration:none; }
+    .logo span { color:var(--neon); }
+    .who { font-size:.8rem; color:var(--muted-l); }
+    .btn { background:var(--neon); color:#060E06; padding:.5rem 1rem; border-radius:6px; font-weight:700; border:none; cursor:pointer; font-size:.82rem; font-family:'Space Grotesk',sans-serif; }
+    .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--border-s); }
+
+    .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.4rem; margin-bottom:1.2rem; }
+    .panel-title { font-size:1rem; color:var(--neon); margin-bottom:1rem; }
+
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.9rem; }
+    .stat { background:var(--card-h); border:1px solid var(--border); border-radius:9px; padding:1rem; }
+    .stat-val { font-family:'Space Grotesk',sans-serif; font-size:1.5rem; font-weight:800; color:var(--white); line-height:1.1; }
+    .stat-val.g { color:var(--neon); }
+    .stat-lbl { font-size:.68rem; color:var(--muted-l); text-transform:uppercase; letter-spacing:.5px; margin-top:.3rem; }
+
+    .bar { height:8px; border-radius:5px; background:var(--card-h); overflow:hidden; margin:.9rem 0 .4rem; border:1px solid var(--border-s); }
+    .bar-fill { height:100%; background:var(--neon); }
+
+    .tabs { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+    .tab { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); padding:.5rem 1rem; border-radius:7px; cursor:pointer; font-size:.82rem; font-weight:600; font-family:'Space Grotesk',sans-serif; }
+    .tab.on { border-color:var(--neon); color:var(--neon); background:rgba(61,255,122,.08); }
+
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:.84rem; min-width:600px; }
+    th { text-align:left; font-size:.68rem; text-transform:uppercase; letter-spacing:.6px; color:var(--muted-l); padding:.6rem .7rem; border-bottom:1px solid var(--border); font-weight:700; }
+    td { padding:.75rem .7rem; border-bottom:1px solid var(--border); vertical-align:top; }
+    tr:last-child td { border-bottom:none; }
+    .handle { color:var(--white); font-weight:600; }
+    .muted { color:var(--muted-l); }
+    .empty { text-align:center; color:var(--muted); padding:2rem; font-style:italic; }
+
+    .badge { font-size:.62rem; font-weight:700; padding:.2rem .5rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; display:inline-block; white-space:nowrap; }
+    .badge.ok { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.warn { background:rgba(255,215,0,.12); color:var(--gold); }
+    .badge.bad { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.neutral { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
+
+    .note { font-size:.75rem; color:var(--muted); line-height:1.6; }
+    @media (max-width:700px){ body{padding:1rem .8rem 3rem} .panel{padding:1.1rem} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <a href="/" class="logo">Clip<span>Grow</span></a>
+      <div class="who" id="who">Loading…</div>
+    </div>
+    <button class="btn btn-ghost" onclick="logout()">Log out</button>
+  </header>
+
+  <div class="tabs" id="camp-tabs"></div>
+  <div id="body"><div class="panel"><p class="muted">Loading your campaign…</p></div></div>
+</div>
+
+<script>
+  const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
+  const num=n=>Number(n||0).toLocaleString('en-IN');
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+
+  // Mirrors src/clipstate.js so a clip reads the same here as it does for the
+  // clipper and the admin.
+  const BADGE={tracking:'ok',locked:'neutral',below_min:'warn',verified:'neutral',
+    removed:'bad',disconnected:'bad',reconnect:'warn',unavailable:'bad',issue:'warn',
+    paused:'warn',disqualified:'bad'};
+  const LABEL={tracking:'live',locked:'closed',below_min:'below min',verified:'pending first sync',
+    removed:'removed from IG',disconnected:'account disconnected',reconnect:'needs reconnect',
+    unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'not eligible'};
+
+  let CAMPAIGNS=[], current=null;
+
+  async function api(path){
+    const res=await fetch(path);
+    if(res.status===401){ location.href='/client'; throw new Error('signed out'); }
+    const body=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(body.error||'Request failed');
+    return body;
+  }
+
+  window.logout=async function(){
+    await fetch('/api/client/logout',{method:'POST'}).catch(()=>{});
+    location.href='/client';
+  };
+
+  async function init(){
+    try{
+      const [{client},{campaigns}]=await Promise.all([api('/api/client/me'),api('/api/client/campaigns')]);
+      document.getElementById('who').textContent=client.company_name+(client.contact_name?' · '+client.contact_name:'');
+      CAMPAIGNS=campaigns;
+      if(!campaigns.length){
+        document.getElementById('body').innerHTML='<div class="panel"><p class="muted">No campaign has been shared with this login yet. Contact ClipGrow.</p></div>';
+        return;
+      }
+      document.getElementById('camp-tabs').innerHTML=campaigns.map((c,i)=>
+        `<button class="tab ${i===0?'on':''}" onclick="pick(${c.id},this)">${esc(c.name)}</button>`).join('');
+      pick(campaigns[0].id);
+    }catch(e){
+      document.getElementById('body').innerHTML=`<div class="panel"><p class="muted">${esc(e.message)}</p></div>`;
+    }
+  }
+
+  window.pick=async function(id,btn){
+    if(btn){ document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on')); btn.classList.add('on'); }
+    current=id;
+    document.getElementById('body').innerHTML='<div class="panel"><p class="muted">Loading…</p></div>';
+    try{ render(await api('/api/client/campaigns/'+id)); }
+    catch(e){ document.getElementById('body').innerHTML=`<div class="panel"><p class="muted">${esc(e.message)}</p></div>`; }
+  };
+
+  function render(d){
+    const c=d.campaign, t=d.totals;
+    const pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
+
+    document.getElementById('body').innerHTML=`
+      <div class="panel">
+        <h2 class="panel-title">${esc(c.name)}</h2>
+        <div class="stats">
+          <div class="stat"><div class="stat-val g">${num(t.views)}</div><div class="stat-lbl">Total Views</div></div>
+          <div class="stat"><div class="stat-val">${num(t.clips)}</div><div class="stat-lbl">Videos Posted</div></div>
+          <div class="stat"><div class="stat-val">${num(t.clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
+          <div class="stat"><div class="stat-val">${money(c.cpm)}</div><div class="stat-lbl">Per 1,000 Views</div></div>
+        </div>
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <p class="note">${money(c.spent)} of ${money(c.budget)} budget allocated · ${money(c.remaining)} remaining · minimum ${num(c.min_views)} views per video before it earns</p>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Clippers on this campaign</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th></tr></thead>
+          <tbody>${d.clippers.length?d.clippers.map(x=>`<tr>
+            <td class="handle">${esc(x.clipper_name)}</td>
+            <td class="muted">${x.account_username?'@'+esc(x.account_username):'—'}</td>
+            <td>${num(x.clips)}</td>
+            <td class="handle">${num(x.views)}</td>
+          </tr>`).join(''):'<tr><td colspan="4" class="empty">No clippers yet.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Every video (${num(t.clips)})</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Video</th><th>Posted</th><th>Views</th><th>Status</th></tr></thead>
+          <tbody>${d.clips.length?d.clips.map(x=>`<tr>
+            <td class="handle">${esc(x.clipper_name)}</td>
+            <td>${x.permalink?`<a href="${esc(x.permalink)}" target="_blank" rel="noopener">view ↗</a>`:'—'}
+              ${x.account_username?`<div class="muted" style="font-size:.7rem">@${esc(x.account_username)}</div>`:''}</td>
+            <td class="muted">${when(x.posted_at||x.synced_at)}</td>
+            <td class="handle">${num(x.views)}</td>
+            <td><span class="badge ${BADGE[x.state]||'neutral'}">${LABEL[x.state]||esc(x.state)}</span>
+              ${x.state_message?`<div class="note" style="margin-top:.25rem;max-width:280px">${esc(x.state_message)}</div>`:''}</td>
+          </tr>`).join(''):'<tr><td colspan="5" class="empty">No videos yet.</td></tr>'}</tbody>
+        </table></div>
+        <p class="note" style="margin-top:.8rem">Views are pulled directly from each clipper's connected Instagram account. ${t.clips_below_min?`${num(t.clips_below_min)} video(s) have not yet reached the ${num(c.min_views)}-view minimum.`:''}</p>
+      </div>`;
+  }
+
+  init();
+</script>
+</body>
+</html>

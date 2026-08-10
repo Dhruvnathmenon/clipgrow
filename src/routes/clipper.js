@@ -5,6 +5,7 @@ import {
   getAccountById, publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, clipperTotals
 } from '../db.js';
+import { clipState, clipStateMessage } from '../clipstate.js';
 import { findMediaByUrl, isVideoMedia, IgError, IG_ERRORS } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
 import { syncClipperViews } from '../earnings.js';
@@ -14,20 +15,8 @@ import { syncClipperViews } from '../earnings.js';
 // even with a full 40-clip refresh every time.
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 
-/**
- * Ownership is proven against Instagram the moment a clip is pasted, so every
- * stored clip is "verified". Tracking is a separate axis: views only start
- * flowing once a sync succeeds, which can lag a few hours on fresh posts.
- */
-function clipState(s) {
-  if (s.status === 'disqualified') return 'disqualified';
-  if (s.status === 'paused') return 'paused';   // admin froze monetisation
-  if (s.sync_error) return 'issue';
-  if (!s.last_synced_at) return 'verified';
-  // Synced, but hasn't reached the campaign's minimum views to start earning.
-  if (s.min_views && s.views < s.min_views) return 'below_min';
-  return 'tracking';
-}
+// Clip status lives in src/clipstate.js so the clipper dashboard, the admin
+// panel and the client portal can never describe the same clip differently.
 
 function igErrorResponse(e, status = 400) {
   if (e instanceof IgError) return json({ error: e.message, fix: e.fix, code: e.code, needs_reauth: e.needsReauth }, status);
@@ -250,36 +239,50 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/submissions' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
+              s.last_ok_sync_at, s.locked_at, s.locked_earning, s.lock_reason,
               s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
               c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views,
-              a.username AS account_username, a.platform
+              a.username AS account_username, a.platform,
+              p.paid_at AS payment_paid_at
        FROM submissions s
        JOIN campaigns c ON c.id = s.campaign_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
+       LEFT JOIN payments p ON p.id = s.payment_id
        WHERE s.clipper_id = ? ORDER BY s.created_at DESC`
     ).bind(clipperId).all();
 
     return json({
-      clips: (results || []).map(s => ({
-        id: s.id,
-        campaign_id: s.campaign_id,
-        campaign_name: s.campaign_name,
-        permalink: s.permalink,
-        platform: s.platform || 'instagram',
-        account_username: s.account_username,
-        views: s.views,
-        earning: s.earning,
-        cpm: s.cpm,
-        min_views: s.min_views || 0,
-        views_needed: Math.max(0, (s.min_views || 0) - s.views),
-        state: clipState(s),
-        source: s.source || 'manual',
-        has_thumb: !!(s.thumbnail_key || s.thumbnail_url),
-        thumb: `/api/media/thumb/${s.id}`,
-        created_at: s.created_at,
-        posted_at: s.posted_at,
-        last_synced_at: s.last_synced_at
-      }))
+      clips: (results || []).map(s => {
+        const state = clipState(s);
+        return {
+          id: s.id,
+          campaign_id: s.campaign_id,
+          campaign_name: s.campaign_name,
+          permalink: s.permalink,
+          platform: s.platform || 'instagram',
+          account_username: s.account_username,
+          views: s.views,
+          // A locked clip shows the amount that was actually settled, which is
+          // frozen and will not move again however many views it gains.
+          earning: s.locked_at ? (s.locked_earning || 0) : s.earning,
+          cpm: s.cpm,
+          min_views: s.min_views || 0,
+          views_needed: Math.max(0, (s.min_views || 0) - s.views),
+          state,
+          state_message: clipStateMessage(state, s),
+          locked: !!s.locked_at,
+          locked_at: s.locked_at,
+          lock_reason: s.lock_reason,
+          paid_at: s.payment_paid_at,
+          source: s.source || 'manual',
+          has_thumb: !!(s.thumbnail_key || s.thumbnail_url),
+          thumb: `/api/media/thumb/${s.id}`,
+          created_at: s.created_at,
+          posted_at: s.posted_at,
+          last_synced_at: s.last_synced_at,
+          last_ok_sync_at: s.last_ok_sync_at
+        };
+      })
     });
   }
 

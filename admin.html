@@ -71,6 +71,14 @@
     .badge.budget_full, .badge.paused, .badge.needs_reauth { background:rgba(255,215,0,.12); color:var(--gold); }
     .badge.model, .badge.neutral { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
 
+    /* Payouts: a settled row is history, so it reads as visually inert. */
+    tr.is-locked { opacity:.55; }
+    tr.is-locked td { background:rgba(255,255,255,.015); }
+    .chips-pick { display:flex; flex-wrap:wrap; gap:.5rem; }
+    .chip-pick { display:inline-flex; align-items:center; gap:.4rem; font-size:.78rem; padding:.4rem .7rem;
+      border:1px solid var(--border-s); border-radius:6px; cursor:pointer; color:var(--text); }
+    .chip-pick:has(input:checked) { border-color:var(--neon); color:var(--neon); background:rgba(61,255,122,.08); }
+
     .progress { width:120px; height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); }
     .progress-fill { height:100%; background:var(--neon); }
     .progress-lbl { font-size:.68rem; color:var(--muted); margin-top:.25rem; }
@@ -145,7 +153,9 @@
     <div class="tabs">
       <button class="tab on" data-v="campaigns" onclick="showView('campaigns',this)">Campaigns</button>
       <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
+      <button class="tab" data-v="payouts" onclick="showView('payouts',this)">Payouts</button>
       <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
+      <button class="tab" data-v="clients" onclick="showView('clients',this)">Clients</button>
       <button class="tab" data-v="testers" onclick="showView('testers',this)">Instagram Testers</button>
       <button class="tab" data-v="guides" onclick="showView('guides',this)">SEO Guides</button>
     </div>
@@ -189,8 +199,81 @@
       <div class="panel">
         <h2 class="panel-title">All Clippers</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Paid</th><th>Outstanding</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Paid</th><th>Pending</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="clippers-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- PAYOUTS -->
+    <div class="view" id="v-payouts">
+      <div class="panel">
+        <h2 class="panel-title">Run a Payout</h2>
+        <p class="note" style="margin-bottom:1rem">Pick a clipper, refresh their views, then tick exactly the videos you are paying for. Paying <strong>locks</strong> those videos: the amount is frozen, they grey out for the clipper, and they can never be paid for twice or re-priced later.</p>
+        <div class="form-grid">
+          <div><label>Clipper <span class="req">*</span></label><select id="po-clipper" class="form-control" onchange="loadPayable()"></select></div>
+          <div><label>Period</label><select id="po-days" class="form-control" onchange="loadPayable()">
+            <option value="30" selected>Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="all">All time</option>
+          </select></div>
+          <div><label>Campaign</label><select id="po-campaign" class="form-control" onchange="loadPayable()"><option value="">All campaigns</option></select></div>
+          <div style="display:flex;align-items:flex-end"><button class="btn btn-ghost" onclick="refreshClipperViews()" id="po-refresh">Refresh views first</button></div>
+        </div>
+      </div>
+
+      <div class="panel" id="po-panel" style="display:none">
+        <h2 class="panel-title">Videos in this period</h2>
+        <div class="stats" id="po-totals" style="margin-bottom:1.1rem"></div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th style="width:34px"><input type="checkbox" id="po-all" onchange="toggleAllClips(this)" /></th>
+            <th>Video</th><th>Campaign</th><th>Posted</th><th>Synced</th><th>Views</th><th>Earning</th><th>State</th>
+          </tr></thead>
+          <tbody id="po-body"></tbody>
+        </table></div>
+        <p class="note" id="po-note" style="margin-top:.8rem"></p>
+      </div>
+
+      <div class="panel" id="po-settle" style="display:none">
+        <h2 class="panel-title">Settle &amp; Lock</h2>
+        <div class="form-grid">
+          <div><label>Amount actually transferred ₹ <span class="req">*</span></label><input type="number" id="po-amount" class="form-control" min="0" /></div>
+          <div><label>Method</label><input type="text" id="po-method" class="form-control" value="UPI" /></div>
+          <div><label>Reference</label><input type="text" id="po-reference" class="form-control" placeholder="UPI txn ID" /></div>
+          <div><label>Date paid</label><input type="date" id="po-date" class="form-control" /></div>
+          <div style="grid-column:1/-1"><label>Note</label><input type="text" id="po-note-in" class="form-control" placeholder="Optional" /></div>
+        </div>
+        <div id="po-summary" class="banner" style="margin-top:1rem"></div>
+        <div style="margin-top:1rem;display:flex;gap:.7rem;flex-wrap:wrap">
+          <button class="btn" id="po-pay" onclick="settlePayout()">Pay &amp; Lock Selected</button>
+          <button class="btn btn-ghost" onclick="loadPayable()">Reset selection</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENTS -->
+    <div class="view" id="v-clients">
+      <div class="panel">
+        <h2 class="panel-title" id="client-form-title">Create Client Login</h2>
+        <p class="note" style="margin-bottom:1rem">A read-only login for a brand. They see only the campaigns you tick here: clippers, videos, views, budget and spend. They never see what any clipper is owed or paid, and they cannot change anything.</p>
+        <form id="client-form" class="form-grid">
+          <div><label>Username <span class="req">*</span></label><input type="text" id="cli-username" class="form-control" autocomplete="off" required /></div>
+          <div><label>Password <span class="req">*</span></label><input type="text" id="cli-password" class="form-control" autocomplete="off" /></div>
+          <div><label>Company name</label><input type="text" id="cli-company" class="form-control" /></div>
+          <div><label>Contact person</label><input type="text" id="cli-contact" class="form-control" /></div>
+          <div style="grid-column:1/-1"><label>Campaigns they can see</label><div id="cli-campaigns" class="chips-pick"></div></div>
+          <button type="submit" class="btn" id="cli-submit">Create Client</button>
+          <button type="button" class="btn btn-ghost" id="cli-cancel" style="display:none" onclick="resetClientForm()">Cancel edit</button>
+        </form>
+        <div id="cli-cred" style="display:none"></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">All Clients</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Company</th><th>Username</th><th>Contact</th><th>Campaigns</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="clients-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -198,7 +281,16 @@
     <!-- PAYMENTS -->
     <div class="view" id="v-payments">
       <div class="panel">
+        <h2 class="panel-title">Backup Export</h2>
+        <p class="note" style="margin-bottom:1rem">Downloads the current books straight from the database. Keep a copy after every payout run so you still know what was paid for, and for which videos, even if this site is unavailable.</p>
+        <div style="display:flex;gap:.7rem;flex-wrap:wrap">
+          <a class="btn" href="/api/admin/export.csv?type=clips" download>Download all videos (CSV)</a>
+          <a class="btn btn-ghost" href="/api/admin/export.csv?type=payments" download>Download payment history (CSV)</a>
+        </div>
+      </div>
+      <div class="panel">
         <h2 class="panel-title">Record a Payment</h2>
+        <p class="note" style="margin-bottom:1rem">Standalone entry that does <strong>not</strong> lock any videos, for corrections and off-cycle transfers. For a normal payout use the <strong>Payouts</strong> tab so the videos are locked against it.</p>
         <form id="pay-form" class="form-grid">
           <div><label>Clipper <span class="req">*</span></label><select id="p-clipper" class="form-control" required></select></div>
           <div><label>Campaign (optional)</label><select id="p-campaign" class="form-control"><option value="">General / all</option></select></div>
@@ -213,9 +305,10 @@
       <div class="panel">
         <h2 class="panel-title">Payment History</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
-          <tbody id="payments-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Videos</th><th>Amount</th><th></th></tr></thead>
+          <tbody id="payments-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
+        <p class="note" style="margin-top:.8rem">Reversing a payment unlocks every video it settled and puts them back in the pending pool.</p>
       </div>
     </div>
 
@@ -365,9 +458,256 @@
       document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
       document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
       if(name==='payments') loadPayments();
+      if(name==='payouts') initPayouts();
+      if(name==='clients') loadClients();
       if(name==='testers') loadTesters();
       if(name==='guides') loadGuides();
     };
+
+    /* ══════════════ payouts ══════════════
+       Paying LOCKS the ticked videos: the amount freezes, they grey out for
+       the clipper, and they can never be paid for twice. The amount field is
+       pre-filled from the ticked videos but stays editable, because what you
+       actually transferred is the number that belongs in the ledger. */
+    let PAYABLE=null;
+
+    const CLIP_BADGE={locked:'completed',tracking:'active',below_min:'budget_full',verified:'neutral',
+      removed:'disabled',disconnected:'disabled',reconnect:'needs_reauth',unavailable:'disabled',
+      issue:'needs_reauth',paused:'paused',disqualified:'disqualified'};
+    const CLIP_LABEL={locked:'locked',tracking:'tracking',below_min:'below min',verified:'pending first sync',
+      removed:'removed from IG',disconnected:'account gone',reconnect:'needs reconnect',
+      unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'disqualified'};
+
+    function initPayouts(){
+      const sel=document.getElementById('po-clipper');
+      if(!sel.options.length){
+        sel.innerHTML='<option value="">Select a clipper…</option>'+
+          CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} (@${esc(c.username)})</option>`).join('');
+        document.getElementById('po-campaign').innerHTML='<option value="">All campaigns</option>'+
+          CAMPAIGNS.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      }
+    }
+
+    window.refreshClipperViews=async function(){
+      const id=document.getElementById('po-clipper').value;
+      if(!id) return toast('Pick a clipper first',true);
+      const btn=document.getElementById('po-refresh');
+      btn.disabled=true; btn.textContent='Refreshing…';
+      try{ await api('/api/admin/sync',{method:'POST'}); toast('Views refreshed from Instagram'); await loadPayable(); }
+      catch(e){ toast(e.message,true); }
+      finally{ btn.disabled=false; btn.textContent='Refresh views first'; }
+    };
+
+    window.loadPayable=async function(){
+      const id=document.getElementById('po-clipper').value;
+      const panel=document.getElementById('po-panel'), settle=document.getElementById('po-settle');
+      if(!id){ panel.style.display='none'; settle.style.display='none'; return; }
+      const days=document.getElementById('po-days').value;
+      const camp=document.getElementById('po-campaign').value;
+      try{
+        PAYABLE=await api(`/api/admin/clippers/${id}/payable?days=${days}${camp?'&campaign_id='+camp:''}`);
+        renderPayable();
+        panel.style.display=''; settle.style.display='';
+      }catch(e){ toast(e.message,true); }
+    };
+
+    function renderPayable(){
+      const {clips,totals,write_off_after_days}=PAYABLE;
+      document.getElementById('po-totals').innerHTML=`
+        <div class="stat"><div class="stat-val g">${money(totals.payable_now)}</div><div class="stat-lbl">Payable now (${totals.payable_clips} videos)</div></div>
+        <div class="stat"><div class="stat-val w">${num(totals.views)}</div><div class="stat-lbl">Views in period</div></div>
+        <div class="stat"><div class="stat-val">${money(totals.already_settled)}</div><div class="stat-lbl">Already settled (${totals.settled_clips})</div></div>
+        <div class="stat"><div class="stat-val">${num(totals.below_min_clips)}</div><div class="stat-lbl">Below minimum</div></div>`;
+
+      const tb=document.getElementById('po-body');
+      if(!clips.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No videos in this period.</td></tr>'; }
+      else tb.innerHTML=clips.map(c=>{
+        const dis=!c.selectable && !c.write_off_due;
+        const checked=c.selectable?'checked':'';
+        return `<tr class="${c.locked?'is-locked':''}">
+          <td>${c.locked?'🔒':`<input type="checkbox" class="po-tick" data-id="${c.id}" data-kind="${c.selectable?'pay':'writeoff'}" data-amt="${c.earning}" ${checked} ${dis?'disabled':''} onchange="recalcPayout()" />`}</td>
+          <td><a href="${esc(c.permalink)}" target="_blank" rel="noopener">video ↗</a>${c.account_username?`<div class="muted" style="font-size:.7rem">@${esc(c.account_username)}</div>`:''}</td>
+          <td class="muted">${esc(c.campaign_name)}</td>
+          <td class="muted">${when(c.posted_at)}${c.age_days!=null?`<div style="font-size:.68rem">${c.age_days}d ago</div>`:''}</td>
+          <td class="muted">${when(c.synced_at)}</td>
+          <td>${num(c.views)}${c.below_min?`<div class="muted" style="font-size:.68rem">needs ${num(c.views_needed)} more</div>`:''}</td>
+          <td class="money">${money(c.locked?c.locked_earning:c.earning)}
+            ${c.capped?`<div class="muted" style="font-size:.68rem" title="Raw ${money(c.uncapped_earning)} capped at the campaign's per-video max">capped from ${money(c.uncapped_earning)}</div>`:''}</td>
+          <td><span class="badge ${CLIP_BADGE[c.state]||'neutral'}">${CLIP_LABEL[c.state]||c.state}</span>
+            ${c.write_off_due?`<div class="muted" style="font-size:.68rem">dead ${write_off_after_days}d+ — tick to close at ₹0</div>`:''}
+            ${c.locked&&c.lock_reason==='below_min'?`<button class="btn btn-ghost btn-sm" style="margin-top:.3rem" onclick="unlockClip(${c.id})">Reopen</button>`:''}</td>
+        </tr>`;
+      }).join('');
+      document.getElementById('po-note').textContent=
+        `Ticked videos with an amount get paid and locked. Ticked videos worth ₹0 (past ${write_off_after_days} days and still under the campaign minimum) are closed out at zero so they stop showing as pending forever.`;
+      document.getElementById('po-all').checked=false;
+      recalcPayout();
+    }
+
+    window.toggleAllClips=function(box){
+      document.querySelectorAll('.po-tick:not([disabled])').forEach(t=>{ t.checked=box.checked; });
+      recalcPayout();
+    };
+
+    window.recalcPayout=function(){
+      let total=0,pay=0,off=0;
+      document.querySelectorAll('.po-tick:checked').forEach(t=>{
+        if(t.dataset.kind==='pay'){ pay++; total+=Number(t.dataset.amt||0); } else off++;
+      });
+      document.getElementById('po-amount').value=total||'';
+      document.getElementById('po-summary').innerHTML=
+        `<strong>${pay}</strong> video(s) to pay, totalling <strong>${money(total)}</strong>` +
+        (off?` &nbsp;·&nbsp; <strong>${off}</strong> video(s) to close out at ₹0`:'') +
+        `<div class="note" style="margin-top:.4rem">Locking is permanent unless you reverse the payment from the Payments tab.</div>`;
+      document.getElementById('po-pay').disabled=(pay+off)===0;
+    };
+
+    window.unlockClip=async function(id){
+      if(!confirm('Reopen this video so it can earn again?')) return;
+      try{ await api(`/api/admin/submissions/${id}/unlock`,{method:'POST'}); toast('Video reopened'); loadPayable(); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    window.settlePayout=async function(){
+      const clipperId=document.getElementById('po-clipper').value;
+      const payIds=[],offIds=[];
+      document.querySelectorAll('.po-tick:checked').forEach(t=>{
+        (t.dataset.kind==='pay'?payIds:offIds).push(Number(t.dataset.id));
+      });
+      const amount=Number(document.getElementById('po-amount').value||0);
+      const expected=payIds.reduce((n,id)=>{
+        const c=PAYABLE.clips.find(x=>x.id===id); return n+(c?c.earning:0);
+      },0);
+      if(payIds.length && amount!==expected){
+        if(!confirm(`You entered ${money(amount)} but the ticked videos add up to ${money(expected)}.\n\nThe videos will still be locked at ${money(expected)} — only the ledger records ${money(amount)}. Continue?`)) return;
+      }
+      if(!confirm(`Lock ${payIds.length} paid video(s)${offIds.length?` and close ${offIds.length} at ₹0`:''}?\n\nThis cannot be undone except by reversing the payment.`)) return;
+      const btn=document.getElementById('po-pay'); btn.disabled=true; btn.textContent='Settling…';
+      try{
+        const camp=document.getElementById('po-campaign').value;
+        const dateVal=document.getElementById('po-date').value;
+        const r=await api('/api/admin/payouts/settle',{method:'POST',body:JSON.stringify({
+          clipper_id:Number(clipperId), campaign_id:camp?Number(camp):null,
+          submission_ids:payIds, write_off_ids:offIds, amount,
+          method:document.getElementById('po-method').value,
+          reference:document.getElementById('po-reference').value,
+          note:document.getElementById('po-note-in').value,
+          paid_at:dateVal?new Date(dateVal).getTime():null
+        })});
+        toast(`Settled ${r.paid_clips} video(s) — ${money(r.amount)} recorded and locked`);
+        document.getElementById('po-reference').value='';
+        document.getElementById('po-note-in').value='';
+        await loadPayable(); loadAll();
+      }catch(e){ toast(e.message,true); await loadPayable(); }
+      finally{ btn.disabled=false; btn.textContent='Pay & Lock Selected'; }
+    };
+
+    /* ══════════════ clients ══════════════ */
+    let CLIENTS=[], editingClient=null;
+
+    async function loadClients(){
+      try{
+        const {clients}=await api('/api/admin/clients');
+        CLIENTS=clients;
+        renderClientCampaignPicks();
+        const tb=document.getElementById('clients-body');
+        tb.innerHTML=clients.length?clients.map(c=>`<tr>
+          <td class="handle">${esc(c.company_name||c.username)}</td>
+          <td class="muted">@${esc(c.username)}</td>
+          <td class="muted">${esc(c.contact_name||'—')}</td>
+          <td class="muted">${c.campaigns.length?c.campaigns.map(x=>esc(x.name)).join(', '):'<span class="gold">none granted</span>'}</td>
+          <td><span class="badge ${c.status}">${c.status}</span></td>
+          <td><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="editClient(${c.id})">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="resetClientPass(${c.id})">Reset Pass</button>
+            <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClient(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
+            <button class="btn btn-danger btn-sm" onclick="delClient(${c.id})">Delete</button>
+          </div></td>
+        </tr>`).join(''):'<tr><td colspan="6" class="empty">No client logins yet.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    }
+
+    function renderClientCampaignPicks(selected){
+      const sel=new Set((selected||[]).map(Number));
+      document.getElementById('cli-campaigns').innerHTML=CAMPAIGNS.length
+        ? CAMPAIGNS.map(c=>`<label class="chip-pick"><input type="checkbox" class="cli-camp" value="${c.id}" ${sel.has(c.id)?'checked':''} /> ${esc(c.name)}</label>`).join('')
+        : '<span class="muted">No campaigns yet.</span>';
+    }
+
+    window.resetClientForm=function(){
+      editingClient=null;
+      document.getElementById('client-form').reset();
+      document.getElementById('client-form-title').textContent='Create Client Login';
+      document.getElementById('cli-submit').textContent='Create Client';
+      document.getElementById('cli-cancel').style.display='none';
+      document.getElementById('cli-username').disabled=false;
+      document.getElementById('cli-password').required=true;
+      document.getElementById('cli-cred').style.display='none';
+      renderClientCampaignPicks();
+    };
+
+    window.editClient=function(id){
+      const c=CLIENTS.find(x=>x.id===id); if(!c) return;
+      editingClient=id;
+      document.getElementById('client-form-title').textContent='Edit '+(c.company_name||c.username);
+      document.getElementById('cli-username').value=c.username;
+      document.getElementById('cli-username').disabled=true;
+      document.getElementById('cli-password').value='';
+      document.getElementById('cli-password').required=false;
+      document.getElementById('cli-company').value=c.company_name||'';
+      document.getElementById('cli-contact').value=c.contact_name||'';
+      renderClientCampaignPicks(c.campaigns.map(x=>x.id));
+      document.getElementById('cli-submit').textContent='Save Changes';
+      document.getElementById('cli-cancel').style.display='';
+      window.scrollTo({top:0,behavior:'smooth'});
+    };
+
+    window.setClient=async function(id,status){
+      try{ await api('/api/admin/clients/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Client updated'); loadClients(); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.resetClientPass=async function(id){
+      const pw=prompt('New password for this client (min 6 characters) — copy it before closing:');
+      if(!pw) return;
+      try{ await api('/api/admin/clients/'+id,{method:'PATCH',body:JSON.stringify({password:pw})}); toast('Password changed — share it with the client'); }
+      catch(e){ toast(e.message,true); }
+    };
+    window.delClient=async function(id){
+      if(!confirm('Delete this client login? Their campaign data is untouched.')) return;
+      try{ await api('/api/admin/clients/'+id,{method:'DELETE'}); toast('Client deleted'); loadClients(); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    document.getElementById('client-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const campaign_ids=[...document.querySelectorAll('.cli-camp:checked')].map(x=>Number(x.value));
+      const payload={
+        company_name:document.getElementById('cli-company').value,
+        contact_name:document.getElementById('cli-contact').value,
+        campaign_ids
+      };
+      const pw=document.getElementById('cli-password').value;
+      try{
+        if(editingClient){
+          if(pw) payload.password=pw;
+          await api('/api/admin/clients/'+editingClient,{method:'PATCH',body:JSON.stringify(payload)});
+          toast('Client updated'); resetClientForm(); loadClients();
+        }else{
+          payload.username=document.getElementById('cli-username').value;
+          payload.password=pw;
+          const r=await api('/api/admin/clients',{method:'POST',body:JSON.stringify(payload)});
+          const box=document.getElementById('cli-cred');
+          box.style.display='';
+          box.innerHTML=`<div class="banner">Client login created — send these details, they will not be shown again.<br>
+            <strong>Page:</strong> ${location.origin}/client &nbsp;·&nbsp;
+            <strong>Username:</strong> ${esc(r.username)} &nbsp;·&nbsp;
+            <strong>Password:</strong> ${esc(pw)}</div>`;
+          document.getElementById('cli-username').value='';
+          document.getElementById('cli-password').value='';
+          loadClients();
+        }
+      }catch(e){ toast(e.message,true); }
+    });
 
     window.runSync=async function(){
       toast('Syncing views from Instagram…');
@@ -592,7 +932,7 @@
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td>${money(c.money.paid)}</td>
-          <td class="gold">${money(c.money.outstanding)}</td>
+          <td class="gold">${money(c.money.pending!=null?c.money.pending:c.money.outstanding)}</td>
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="resetPassword(${c.id})">Reset Pass</button>
@@ -743,15 +1083,21 @@
         tb.innerHTML=payments.length?payments.map(p=>`<tr>
           <td>${when(p.paid_at)}</td><td class="handle">${esc(p.username)}</td>
           <td>${esc(p.campaign_name||'General')}</td><td class="muted">${esc(p.method||'—')}</td>
-          <td class="muted">${esc(p.reference||'—')}</td><td class="money">${money(p.amount)}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id})">Delete</button></td>
-        </tr>`).join(''):'<tr><td colspan="7" class="empty">No payments recorded yet.</td></tr>';
+          <td class="muted">${esc(p.reference||'—')}</td>
+          <td class="muted">${p.clip_count?`${num(p.clip_count)} locked`:'—'}</td>
+          <td class="money">${money(p.amount)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id},${p.clip_count||0})">Reverse</button></td>
+        </tr>`).join(''):'<tr><td colspan="8" class="empty">No payments recorded yet.</td></tr>';
       }catch(e){ toast(e.message,true); }
     }
-    window.delPayment=async function(id){
-      if(!confirm('Delete this payment record? The clipper\'s outstanding balance will go back up.')) return;
-      try{ await api('/api/admin/payments/'+id,{method:'DELETE'}); toast('Payment deleted'); loadAll(); loadPayments(); }
-      catch(e){ toast(e.message,true); }
+    window.delPayment=async function(id,clips){
+      const extra=clips>0?`\n\nThis will also UNLOCK the ${clips} video(s) it settled — they go back to pending and will be re-priced on the next sync.`:'';
+      if(!confirm('Reverse this payment?'+extra)) return;
+      try{
+        const r=await api('/api/admin/payments/'+id,{method:'DELETE'});
+        toast(r.unlocked_clips?`Payment reversed — ${r.unlocked_clips} video(s) unlocked`:'Payment reversed');
+        loadAll(); loadPayments();
+      }catch(e){ toast(e.message,true); }
     };
     document.getElementById('pay-form').addEventListener('submit',async e=>{
       e.preventDefault();

@@ -120,12 +120,34 @@ export function publicCampaign(row, spent) {
   };
 }
 
+/**
+ * Budget consumed by a campaign.
+ *
+ * A locked clip counts its settled amount no matter what its status later
+ * becomes: that money genuinely left the account, so it cannot be un-spent by
+ * disqualifying the clip afterwards. Only unlocked clips are contingent on
+ * still being 'active'.
+ */
+export const SPEND_EXPR =
+  "COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) WHEN status = 'active' THEN earning ELSE 0 END), 0)";
+
 export async function campaignSpend(db, campaignId) {
   const row = await db
-    .prepare("SELECT COALESCE(SUM(earning),0) AS spent FROM submissions WHERE campaign_id = ? AND status = 'active'")
+    .prepare(`SELECT ${SPEND_EXPR} AS spent FROM submissions WHERE campaign_id = ?`)
     .bind(campaignId)
     .first();
   return row.spent || 0;
+}
+
+/**
+ * Per-video earnings ceiling for a campaign, from its blueprint. Zero means
+ * uncapped. Parsed defensively because blueprints are extracted from Word
+ * documents, so the value can arrive as a string like "5000" or be absent.
+ */
+export function maxPayoutPerVideo(campaignRow) {
+  const bp = safeParse(campaignRow && campaignRow.blueprint_json);
+  const raw = Number(bp.max_payout);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
 }
 
 export async function campaignWithSpend(db, row) {
@@ -187,14 +209,36 @@ export async function clipperTotals(db, clipperId) {
   return { clips: row.clips || 0, views: row.views || 0 };
 }
 
+/**
+ * Money for one clipper.
+ *
+ * `pending` is the number that actually matters at payout time: everything
+ * earned on clips that have not been locked yet. It is derived straight from
+ * the clips rather than from `earned - paid`, so a rounding difference between
+ * what was owed and what was actually transferred can never silently roll into
+ * the next payout.
+ */
 export async function clipperFinancials(db, clipperId) {
-  const earnedRow = await db
-    .prepare("SELECT COALESCE(SUM(earning),0) AS earned FROM submissions WHERE clipper_id = ? AND status = 'active'")
-    .bind(clipperId).first();
+  const row = await db.prepare(
+    `SELECT
+       ${SPEND_EXPR} AS earned,
+       COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) ELSE 0 END), 0) AS settled,
+       COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN earning ELSE 0 END), 0) AS pending,
+       COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN 1 ELSE 0 END), 0) AS pending_clips
+     FROM submissions WHERE clipper_id = ?`
+  ).bind(clipperId).first();
+
   const paidRow = await db
     .prepare('SELECT COALESCE(SUM(amount),0) AS paid FROM payments WHERE clipper_id = ?')
     .bind(clipperId).first();
-  const earned = earnedRow.earned || 0;
-  const paid = paidRow.paid || 0;
-  return { earned, paid, outstanding: Math.max(0, earned - paid) };
+
+  return {
+    earned: row.earned || 0,
+    settled: row.settled || 0,
+    pending: row.pending || 0,
+    pending_clips: row.pending_clips || 0,
+    paid: paidRow.paid || 0,
+    // Kept for existing callers/UI. Pending is the authoritative figure now.
+    outstanding: row.pending || 0
+  };
 }

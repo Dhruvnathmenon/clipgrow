@@ -97,7 +97,10 @@
     .badge { font-size:.62rem; font-weight:700; padding:.22rem .55rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; display:inline-flex; align-items:center; gap:.3rem; }
     .badge.active, .badge.connected, .badge.tracking { background:rgba(61,255,122,.12); color:var(--neon); }
     .badge.verified { background:rgba(77,166,255,.12); color:var(--blue); }
-    .badge.budget_full, .badge.paused, .badge.needs_reauth, .badge.issue { background:rgba(255,215,0,.12); color:var(--gold); }
+    .badge.budget_full, .badge.paused, .badge.needs_reauth, .badge.issue, .badge.reconnect { background:rgba(255,215,0,.12); color:var(--gold); }
+    /* Settled: closed history, so it reads as neutral rather than alarming. */
+    .badge.locked { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
+    .badge.removed, .badge.disconnected, .badge.unavailable { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.joined, .badge.locked { background:transparent; border:1px solid var(--border-s); color:var(--muted); }
 
@@ -211,6 +214,7 @@
     .clip-note { font-size:.7rem; color:var(--gold); line-height:1.45; margin:.4rem 0 .1rem; }
     .clip-note.min { color:var(--muted-l); }
     .clip-note.min small { color:var(--muted); }
+    .clip-note.lock { color:var(--muted-l); }
     .badge.paused { background:rgba(255,215,0,.14); color:var(--gold); }
     .badge.below_min { background:rgba(255,255,255,.08); color:var(--muted-l); }
 
@@ -518,7 +522,7 @@
       document.getElementById('home-stats').innerHTML=`
         <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Total Earned</div></div>
         <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Received</div></div>
-        <div class="stat"><div class="stat-val g">${money(d.money.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>
+        <div class="stat"><div class="stat-val g">${money(d.money.pending!=null?d.money.pending:d.money.outstanding)}</div><div class="stat-lbl">Due Next Payout</div></div>
         <div class="stat"><div class="stat-val w">${num(d.totals.views)}</div><div class="stat-lbl">Total Views</div></div>
         <div class="stat"><div class="stat-val w">${num(d.totals.clips)}</div><div class="stat-lbl">Clips Posted</div></div>`;
       document.getElementById('n-clips').textContent=d.totals.clips;
@@ -728,13 +732,18 @@
     }
     window.setPlat=function(p){ platFilter=p; renderClips(); };
 
-    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',paused:'Not monetised',below_min:'Below minimum'};
+    const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',
+      paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from Instagram',
+      disconnected:'Account disconnected',reconnect:'Reconnect needed',unavailable:'Not updating'};
+    // Every state that means "this clip is not earning right now" reads as
+    // visually inactive, so a clipper never mistakes a stuck clip for a live one.
+    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable']);
+
     function clipCard(c){
       const thumb=c.has_thumb
         ? `<img src="${c.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
         : placeholderHTML();
-      // Paused/disqualified clips stay visible but read as clearly inactive.
-      const off=c.state==='paused'||c.state==='disqualified';
+      const off=OFF_STATES.has(c.state);
       return `<div class="clip${off?' clip-off':''}">
         <div class="clip-media">${thumb}
           <span class="clip-state"><span class="badge ${c.state}">${STATE_LABEL[c.state]||c.state}</span></span>
@@ -744,11 +753,15 @@
           <div class="clip-camp">${esc(c.campaign_name)}</div>
           <div class="clip-nums">
             <div class="clip-v">${num(c.views)}<small>views</small></div>
-            <div class="clip-e">${money(c.earning)}<small>earned</small></div>
+            <div class="clip-e">${money(c.earning)}<small>${c.locked?'settled':'earned'}</small></div>
           </div>
-          ${c.state==='paused'?'<div class="clip-note">Paused by ClipGrow — not earning while under review.</div>':''}
-          ${c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
-          ${c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
+          ${c.locked?`<div class="clip-note lock">${c.lock_reason==='below_min'
+              ? `Closed on ${when(c.locked_at)} — never reached the ${num(c.min_views)}-view minimum.`
+              : `Paid and locked on ${when(c.paid_at||c.locked_at)}. This amount is final.`}</div>`:''}
+          ${!c.locked&&c.state==='paused'?'<div class="clip-note">Paused by ClipGrow — not earning while under review.</div>':''}
+          ${!c.locked&&c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
+          ${!c.locked&&c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
+          ${!c.locked&&c.state_message&&c.state!=='below_min'&&c.state!=='verified'?`<div class="clip-note">${esc(c.state_message)}</div>`:''}
           <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on Instagram ↗</a>
         </div></div>`;
     }
@@ -802,8 +815,9 @@
         el.innerHTML=`<div class="stats">
             <div class="stat"><div class="stat-val">${money(m.earned)}</div><div class="stat-lbl">Earned</div></div>
             <div class="stat"><div class="stat-val w">${money(m.paid)}</div><div class="stat-lbl">Received</div></div>
-            <div class="stat"><div class="stat-val g">${money(m.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>
-          </div>`+(payments.length
+            <div class="stat"><div class="stat-val g">${money(m.pending!=null?m.pending:m.outstanding)}</div><div class="stat-lbl">Due Next Payout</div></div>
+          </div>
+          <p class="muted" style="font-size:.78rem;margin:.3rem 0 .9rem">Once a video is paid for it locks: the amount is final and later views do not change it.</p>`+(payments.length
           ? `<div class="card"><div class="table-wrap"><table>
               <thead><tr><th>Date</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
               <tbody>${payments.map(p=>`<tr><td>${when(p.paid_at)}</td><td>${esc(p.campaign_name||'General')}</td>
