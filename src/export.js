@@ -1,4 +1,5 @@
 import { clipState } from './clipstate.js';
+import { platformLabel } from './platforms.js';
 
 // CSV backup of the books.
 //
@@ -33,6 +34,7 @@ function isoDate(ts) {
 export async function exportClipsCsv(db) {
   const { results } = await db.prepare(
     `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.source, s.sync_error,
+            s.platform, s.duration_seconds, s.is_short, s.eligible,
             s.created_at, s.posted_at, s.last_ok_sync_at,
             s.locked_at, s.locked_earning, s.lock_reason,
             c.name AS campaign_name, c.cpm, c.min_views,
@@ -49,9 +51,9 @@ export async function exportClipsCsv(db) {
   ).all();
 
   const headers = [
-    'Campaign', 'Clipper', 'Clipper username', 'Instagram account', 'Clip URL',
+    'Campaign', 'Clipper', 'Clipper username', 'Platform', 'Account', 'Clip URL',
     'Posted at', 'Synced to ClipGrow', 'Views last updated',
-    'Views', 'Campaign CPM', 'Min views', 'Clip state',
+    'Views', 'Campaign CPM', 'Min views', 'Clip state', 'Eligible', 'Is Short', 'Duration (s)',
     'Earning', 'Settled amount', 'Payment status', 'Locked at', 'Lock reason',
     'Payment ID', 'Payment reference', 'Payment method', 'Paid at', 'Source'
   ];
@@ -60,12 +62,16 @@ export async function exportClipsCsv(db) {
     const state = clipState(r);
     const paymentStatus = r.locked_at
       ? (r.lock_reason === 'paid' ? 'PAID' : 'CLOSED (below minimum)')
-      : (r.earning > 0 ? 'PENDING' : 'NOT YET EARNING');
+      : (r.eligible === 0 ? 'NOT ELIGIBLE' : r.earning > 0 ? 'PENDING' : 'NOT YET EARNING');
     return [
       r.campaign_name, r.clipper_name || r.clipper_username, r.clipper_username,
+      platformLabel(r.platform || 'instagram'),
       r.account_username ? '@' + r.account_username : '', r.permalink,
       isoDate(r.posted_at), isoDate(r.created_at), isoDate(r.last_ok_sync_at),
       r.views, r.cpm, r.min_views, state,
+      r.eligible === 0 ? 'no' : 'yes',
+      r.is_short == null ? '' : (r.is_short ? 'yes' : 'no'),
+      r.duration_seconds == null ? '' : r.duration_seconds,
       r.earning, r.locked_at ? (r.locked_earning || 0) : '', paymentStatus,
       isoDate(r.locked_at), r.lock_reason || '',
       r.payment_id || '', r.payment_reference || '', r.payment_method || '',

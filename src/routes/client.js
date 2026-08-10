@@ -2,6 +2,7 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireClient, verifyPassword, clearCookieHeader } from '../auth.js';
 import { getClipperByUsername, normalizeUsername, campaignSpend, publicCampaign } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
+import { platformLabel, campaignPlatforms } from '../platforms.js';
 
 // Read-only brand/client portal.
 //
@@ -109,7 +110,7 @@ export async function handleClient(request, env, url) {
     if (!campaign) return err('Not found', 404);
 
     const { results: clipRows } = await env.DB.prepare(
-      `SELECT s.id, s.permalink, s.views, s.status, s.sync_error, s.source,
+      `SELECT s.id, s.permalink, s.views, s.status, s.sync_error, s.source, s.platform, s.eligible,
               s.created_at, s.posted_at, s.last_ok_sync_at, s.locked_at, s.lock_reason,
               s.thumbnail_key, s.thumbnail_url,
               cl.id AS clipper_id, cl.display_name, cl.username,
@@ -132,6 +133,8 @@ export async function handleClient(request, env, url) {
         clipper_id: r.clipper_id,
         clipper_name: r.display_name || r.username,
         account_username: r.account_username,
+        platform: r.platform || 'instagram',
+        platform_label: platformLabel(r.platform || 'instagram'),
         permalink: r.permalink,
         views: r.views,
         state,
@@ -166,6 +169,12 @@ export async function handleClient(request, env, url) {
         budget: pub.budget, spent: pub.spent, remaining: pub.remaining,
         created_at: pub.created_at, blueprint: pub.blueprint
       },
+      by_platform: Object.values(clips.reduce((acc, c) => {
+        if (!acc[c.platform]) acc[c.platform] = { platform: c.platform, label: c.platform_label, clips: 0, views: 0 };
+        acc[c.platform].clips++;
+        acc[c.platform].views += c.views || 0;
+        return acc;
+      }, {})),
       totals: {
         clips: clips.length,
         views: clips.reduce((n, c) => n + (c.views || 0), 0),

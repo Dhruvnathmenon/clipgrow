@@ -25,6 +25,9 @@ export function clipState(s) {
   if (s.locked_at) return 'locked';
   if (s.status === 'disqualified') return 'disqualified';
   if (s.status === 'paused') return 'paused';
+  // Ruled out by the platform's own rules at import time -- currently a
+  // YouTube upload that is not a Short. Tracked and visible, never earns.
+  if (s.eligible === 0) return 'ineligible';
 
   if (s.sync_error) {
     if (s.sync_error === 'MEDIA_NOT_FOUND') return 'removed';
@@ -55,22 +58,29 @@ export function clipStateMessage(state, s) {
     : stale === 0
       ? 'Views last updated today.'
       : `Views last updated ${stale} day${stale === 1 ? '' : 's'} ago.`;
+  // Wording follows the clip's own platform, so a YouTube problem never tells
+  // a clipper to go and check Instagram.
+  const site = (s.platform || 'instagram') === 'youtube' ? 'YouTube' : 'Instagram';
 
   switch (state) {
+    case 'ineligible':
+      return s.platform === 'youtube'
+        ? 'This campaign pays on YouTube Shorts, and this upload is not a Short, so it does not earn.'
+        : 'This clip does not meet the campaign\'s format rules, so it does not earn.';
     case 'locked':
       return s.lock_reason === 'below_min'
         ? 'Closed: this clip did not reach the campaign minimum in time, so it was settled at zero.'
         : 'Paid and closed. Views after the lock date do not change the amount.';
     case 'removed':
-      return `This post is no longer on Instagram, so its views cannot be checked. ${staleNote}`;
+      return `This post is no longer on ${site}, so its views cannot be checked. ${staleNote}`;
     case 'disconnected':
-      return `The Instagram account this clip was posted from is disconnected. ${staleNote}`;
+      return `The ${site} account this clip was posted from is disconnected. ${staleNote}`;
     case 'reconnect':
-      return `The Instagram connection needs re-authorising before views can update. ${staleNote}`;
+      return `The ${site} connection needs re-authorising before views can update. ${staleNote}`;
     case 'unavailable':
-      return `Instagram has not returned views for this clip in a while. ${staleNote} Tell the ClipGrow admin if it stays this way.`;
+      return `${site} has not returned views for this clip in a while. ${staleNote} Tell the ClipGrow admin if it stays this way.`;
     case 'issue':
-      return `Instagram did not answer on the last check. This usually clears on its own. ${staleNote}`;
+      return `${site} did not answer on the last check. This usually clears on its own. ${staleNote}`;
     case 'disqualified':
       return 'An admin marked this clip as not eligible, so it earns nothing.';
     case 'paused':
@@ -78,7 +88,7 @@ export function clipStateMessage(state, s) {
     case 'below_min':
       return null;   // the dashboard already shows a "needs N more views" bar
     case 'verified':
-      return 'Verified. Views start showing once Instagram publishes insights for the post.';
+      return `Verified. Views start showing once ${site} publishes stats for the post.`;
     default:
       return null;
   }

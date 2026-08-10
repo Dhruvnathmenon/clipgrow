@@ -34,6 +34,77 @@ export function getAccountById(db, id) {
   return db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(id).first();
 }
 
+/**
+ * The account a participation uses on one platform, from the
+ * participation_accounts join table (migration 012). A participation can hold
+ * one account per platform, so a campaign can run Instagram and YouTube
+ * side by side.
+ */
+export function getParticipationAccount(db, participationId, platform) {
+  return db.prepare(
+    `SELECT a.* FROM participation_accounts pa
+     JOIN social_accounts a ON a.id = pa.account_id
+     WHERE pa.participation_id = ? AND pa.platform = ?`
+  ).bind(participationId, platform).first();
+}
+
+export async function listParticipationAccounts(db, participationId) {
+  const { results } = await db.prepare(
+    `SELECT a.*, pa.platform AS linked_platform FROM participation_accounts pa
+     JOIN social_accounts a ON a.id = pa.account_id
+     WHERE pa.participation_id = ?`
+  ).bind(participationId).all();
+  return results || [];
+}
+
+/**
+ * Binds an account to a participation for its platform, replacing whatever was
+ * linked for that platform before. participations.account_id is kept in step
+ * for Instagram so any code path still reading that legacy column stays correct.
+ */
+export async function linkParticipationAccount(db, participationId, accountId, platform) {
+  await db.prepare('DELETE FROM participation_accounts WHERE participation_id = ? AND platform = ?')
+    .bind(participationId, platform).run();
+  await db.prepare(
+    'INSERT INTO participation_accounts (participation_id, account_id, platform, linked_at) VALUES (?, ?, ?, ?)'
+  ).bind(participationId, accountId, platform, now()).run();
+  if (platform === 'instagram') {
+    await db.prepare('UPDATE participations SET account_id = ? WHERE id = ?').bind(accountId, participationId).run();
+  }
+}
+
+export async function unlinkParticipationAccount(db, participationId, platform) {
+  await db.prepare('DELETE FROM participation_accounts WHERE participation_id = ? AND platform = ?')
+    .bind(participationId, platform).run();
+  if (platform === 'instagram') {
+    await db.prepare('UPDATE participations SET account_id = NULL WHERE id = ?').bind(participationId).run();
+  }
+}
+
+/**
+ * Whether this external account is already driving a different LIVE campaign.
+ *
+ * Checked across every clipper, not just the one connecting, so two logins
+ * cannot quietly point at the same account. Completed campaigns, kicked
+ * participations and revoked accounts are excluded, which is what frees a
+ * good account up for reuse on the next campaign.
+ */
+export function findAccountClash(db, externalId, platform, campaignId) {
+  return db.prepare(
+    `SELECT c.name AS campaign_name, p.clipper_id, cl.username AS clipper_username
+     FROM participation_accounts pa
+     JOIN social_accounts a ON a.id = pa.account_id
+     JOIN participations p ON p.id = pa.participation_id
+     JOIN campaigns c ON c.id = p.campaign_id
+     JOIN clippers cl ON cl.id = p.clipper_id
+     WHERE a.external_id = ? AND a.platform = ?
+       AND p.campaign_id != ?
+       AND p.status != 'kicked'
+       AND a.status != 'revoked'
+       AND c.status != 'completed'`
+  ).bind(externalId, platform, campaignId).first();
+}
+
 // ---------------------------------------------------------------- shaping
 
 export function publicClipper(row) {
@@ -106,6 +177,7 @@ export function publicCampaign(row, spent) {
   return {
     id: row.id,
     name: row.name,
+    allowed_platforms: String(row.allowed_platforms || 'instagram').split(',').filter(Boolean),
     slug: row.slug || null,
     description: row.description,
     cpm: row.cpm,

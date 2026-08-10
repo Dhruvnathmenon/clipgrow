@@ -2,6 +2,7 @@ import { handleAdmin } from './routes/admin.js';
 import { handleClipper } from './routes/clipper.js';
 import { handleClient } from './routes/client.js';
 import { handleInstagramAuth } from './routes/instagram-auth.js';
+import { handleYoutubeAuth } from './routes/youtube-auth.js';
 import { handlePublic } from './routes/public.js';
 import { handleMedia } from './routes/media.js';
 import { handleCampaignPage } from './routes/campaigns.js';
@@ -11,7 +12,7 @@ import { syncAllCampaigns } from './earnings.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
-const handlers = [handleInstagramAuth, handleAdmin, handleClipper, handleClient, handlePublic, handleMedia];
+const handlers = [handleInstagramAuth, handleYoutubeAuth, handleAdmin, handleClipper, handleClient, handlePublic, handleMedia];
 
 // The clipper area is unlisted: it lives at /clipper and nothing on the public
 // site links to it.
@@ -109,6 +110,6 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(syncAllCampaigns(env.DB));
+    ctx.waitUntil(syncAllCampaigns(env.DB, env));
   }
 };

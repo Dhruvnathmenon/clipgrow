@@ -229,7 +229,7 @@
         <div class="table-wrap"><table>
           <thead><tr>
             <th style="width:34px"><input type="checkbox" id="po-all" onchange="toggleAllClips(this)" /></th>
-            <th>Video</th><th>Campaign</th><th>Posted</th><th>Synced</th><th>Views</th><th>Earning</th><th>State</th>
+            <th>Video</th><th>Platform</th><th>Campaign</th><th>Posted</th><th>Synced</th><th>Views</th><th>Earning</th><th>State</th>
           </tr></thead>
           <tbody id="po-body"></tbody>
         </table></div>
@@ -374,6 +374,13 @@
             <div class="fld"><label>Model</label><input class="form-control" id="f-model" placeholder="cpm / affiliate" /></div>
           </div>
           <div class="fld"><label>Short Description</label><input class="form-control" id="f-description" /></div>
+          <div class="fld"><label>Platforms this campaign accepts</label>
+            <div class="chips-pick" id="f-platforms">
+              <label class="chip-pick"><input type="checkbox" class="camp-plat" value="instagram" checked /> Instagram Reels</label>
+              <label class="chip-pick"><input type="checkbox" class="camp-plat" value="youtube" /> YouTube Shorts</label>
+            </div>
+            <p class="note" style="margin-top:.4rem">Clippers can only connect and submit on the platforms ticked here. YouTube pays on Shorts only — regular uploads are tracked but never earn.</p>
+          </div>
         </div>
         <div class="fieldset">
           <div class="fs-title">Campaign Details</div>
@@ -473,10 +480,11 @@
 
     const CLIP_BADGE={locked:'completed',tracking:'active',below_min:'budget_full',verified:'neutral',
       removed:'disabled',disconnected:'disabled',reconnect:'needs_reauth',unavailable:'disabled',
-      issue:'needs_reauth',paused:'paused',disqualified:'disqualified'};
+      issue:'needs_reauth',paused:'paused',disqualified:'disqualified',ineligible:'neutral'};
     const CLIP_LABEL={locked:'locked',tracking:'tracking',below_min:'below min',verified:'pending first sync',
-      removed:'removed from IG',disconnected:'account gone',reconnect:'needs reconnect',
-      unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'disqualified'};
+      removed:'removed from platform',disconnected:'account gone',reconnect:'needs reconnect',
+      unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'disqualified',
+      ineligible:'not eligible'};
 
     function initPayouts(){
       const sel=document.getElementById('po-clipper');
@@ -512,21 +520,30 @@
     };
 
     function renderPayable(){
-      const {clips,totals,write_off_after_days}=PAYABLE;
+      const {clips,totals,write_off_after_days,by_platform}=PAYABLE;
+      // Both platforms draw on one budget, so the split is informational --
+      // shown because it is the first thing you want to know, not because the
+      // money is separated.
+      const platSplit=(by_platform||[]).map(p=>
+        `<div class="stat"><div class="stat-val">${num(p.views)}</div><div class="stat-lbl">${esc(p.label)} views (${p.clips})</div></div>`).join('');
       document.getElementById('po-totals').innerHTML=`
         <div class="stat"><div class="stat-val g">${money(totals.payable_now)}</div><div class="stat-lbl">Payable now (${totals.payable_clips} videos)</div></div>
         <div class="stat"><div class="stat-val w">${num(totals.views)}</div><div class="stat-lbl">Views in period</div></div>
         <div class="stat"><div class="stat-val">${money(totals.already_settled)}</div><div class="stat-lbl">Already settled (${totals.settled_clips})</div></div>
-        <div class="stat"><div class="stat-val">${num(totals.below_min_clips)}</div><div class="stat-lbl">Below minimum</div></div>`;
+        <div class="stat"><div class="stat-val">${num(totals.below_min_clips)}</div><div class="stat-lbl">Below minimum</div></div>
+        ${totals.ineligible_clips?`<div class="stat"><div class="stat-val">${num(totals.ineligible_clips)}</div><div class="stat-lbl">Not eligible</div></div>`:''}
+        ${platSplit}`;
 
       const tb=document.getElementById('po-body');
-      if(!clips.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No videos in this period.</td></tr>'; }
+      if(!clips.length){ tb.innerHTML='<tr><td colspan="9" class="empty">No videos in this period.</td></tr>'; }
       else tb.innerHTML=clips.map(c=>{
         const dis=!c.selectable && !c.write_off_due;
         const checked=c.selectable?'checked':'';
         return `<tr class="${c.locked?'is-locked':''}">
           <td>${c.locked?'🔒':`<input type="checkbox" class="po-tick" data-id="${c.id}" data-kind="${c.selectable?'pay':'writeoff'}" data-amt="${c.earning}" ${checked} ${dis?'disabled':''} onchange="recalcPayout()" />`}</td>
-          <td><a href="${esc(c.permalink)}" target="_blank" rel="noopener">video ↗</a>${c.account_username?`<div class="muted" style="font-size:.7rem">@${esc(c.account_username)}</div>`:''}</td>
+          <td><a href="${esc(c.permalink)}" target="_blank" rel="noopener">video ↗</a>${c.account_username?`<div class="muted" style="font-size:.7rem">${c.platform==='youtube'?'':'@'}${esc(c.account_username)}</div>`:''}</td>
+          <td><span class="badge ${c.platform==='youtube'?'budget_full':'neutral'}">${esc(c.platform_label||c.platform)}</span>
+            ${c.platform==='youtube'&&c.is_short===false?'<div class="muted" style="font-size:.66rem">not a Short</div>':''}</td>
           <td class="muted">${esc(c.campaign_name)}</td>
           <td class="muted">${when(c.posted_at)}${c.age_days!=null?`<div style="font-size:.68rem">${c.age_days}d ago</div>`:''}</td>
           <td class="muted">${when(c.synced_at)}</td>
@@ -765,6 +782,10 @@
       NUM_FIELDS.forEach(k=>{const el=document.getElementById('f-'+k); if(el) el.value=(draft[k]==null?'':draft[k]);});
       document.getElementById('f-approval_steps').value=(draft.approval_steps||[]).join('\n');
       document.getElementById('f-terms').value=(draft.terms||[]).join('\n');
+      // New campaigns default to Instagram only, matching how every existing
+      // campaign already behaves.
+      const allowed=new Set(draft.allowed_platforms||['instagram']);
+      document.querySelectorAll('.camp-plat').forEach(x=>{ x.checked=allowed.has(x.value); });
       const missing=[];
       ['name','cpm','budget'].forEach(k=>{
         const el=document.getElementById('f-'+k); const empty=!el.value;
@@ -790,9 +811,11 @@
       NUM_FIELDS.forEach(k=>{const v=document.getElementById('f-'+k).value; p[k]=v===''?null:Number(v);});
       const lines=id=>document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
       p.approval_steps=lines('f-approval_steps'); p.terms=lines('f-terms');
+      p.allowed_platforms=[...document.querySelectorAll('.camp-plat:checked')].map(x=>x.value);
       if(!p.name) return toast('Campaign name is required',true);
       if(!p.cpm||p.cpm<=0) return toast('CPM must be greater than 0',true);
       if(!p.budget||p.budget<=0) return toast('Budget must be greater than 0',true);
+      if(!p.allowed_platforms.length) return toast('Pick at least one platform for this campaign',true);
       const btn=document.getElementById('modal-save'); btn.disabled=true;
       try{
         if(modalMode==='create'){ await api('/api/admin/campaigns',{method:'POST',body:JSON.stringify(p)}); toast('Campaign created and live'); }
@@ -906,7 +929,7 @@
     window.editCampaign=async function(id){
       try{
         const {campaign}=await api('/api/admin/campaigns/'+id);
-        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model},'edit',id);
+        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model,allowed_platforms:campaign.allowed_platforms},'edit',id);
       }catch(e){ toast(e.message,true); }
     };
     window.setCampaignStatus=async function(id,status){

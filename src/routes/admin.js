@@ -8,10 +8,23 @@ import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, WRITE_OFF_AFTER_DAYS } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
+import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
 const PART_STATUSES = ['active', 'paused', 'kicked'];
+
+/**
+ * Sanitises the platform list for a campaign. Falls back to Instagram when the
+ * input is empty or unrecognised, so a bad value can never silently open a
+ * campaign to a platform the brand did not agree to.
+ */
+function normalisePlatforms(input) {
+  const list = (Array.isArray(input) ? input : String(input || '').split(','))
+    .map(s => String(s).trim().toLowerCase())
+    .filter(p => PLATFORMS.includes(p));
+  return ([...new Set(list)].join(',')) || 'instagram';
+}
 
 export async function handleAdmin(request, env, url) {
   const { pathname } = url;
@@ -172,10 +185,12 @@ export async function handleAdmin(request, env, url) {
     if (budget <= 0) return err('Budget must be greater than 0');
     // Views a clip must reach before it earns anything. Defaults to 1,000.
     const minViews = payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : 1000;
+    const platforms = normalisePlatforms(payload.allowed_platforms);
     const res = await env.DB.prepare(
-      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, created_at)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`
-    ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '', JSON.stringify(pickBlueprint(payload)), now()).run();
+      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`
+    ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '',
+           JSON.stringify(pickBlueprint(payload)), platforms, now()).run();
     const id = res.meta.last_row_id;
     // Slug needs the id (for uniqueness), which only exists after insert --
     // set it in a follow-up UPDATE. Never changes after this, even if the
@@ -207,7 +222,7 @@ export async function handleAdmin(request, env, url) {
     const campaign = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!campaign) return err('Not found', 404);
     const { results: submissions } = await env.DB.prepare(
-      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at, s.source,
+      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at, s.source, s.platform,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
@@ -223,7 +238,7 @@ export async function handleAdmin(request, env, url) {
     if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) return err('Invalid status');
     const merged = { ...JSON.parse(existing.blueprint_json || '{}'), ...pickBlueprint(payload) };
     await env.DB.prepare(
-      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ? WHERE id = ?`
+      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ?, allowed_platforms = ? WHERE id = ?`
     ).bind(
       payload.name != null ? String(payload.name).trim() || existing.name : existing.name,
       payload.description != null ? payload.description : existing.description,
@@ -232,7 +247,11 @@ export async function handleAdmin(request, env, url) {
       payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : existing.min_views,
       payload.status || existing.status,
       payload.model != null ? payload.model : existing.model,
-      JSON.stringify(merged), params.id
+      JSON.stringify(merged),
+      payload.allowed_platforms != null
+        ? normalisePlatforms(payload.allowed_platforms)
+        : (existing.allowed_platforms || 'instagram'),
+      params.id
     ).run();
     // CPM, budget or threshold changes re-price every submission in this campaign.
     if (payload.cpm != null || payload.budget != null || payload.min_views != null) {
@@ -641,7 +660,7 @@ export async function handleAdmin(request, env, url) {
 
   // ------------------------------------------------------------------- sync
   if (pathname === '/api/admin/sync' && method === 'POST') {
-    const summary = await syncAllCampaigns(env.DB);
+    const summary = await syncAllCampaigns(env.DB, env);
     return json({ ok: true, ...summary });
   }
 

@@ -1,5 +1,6 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
-import { getParticipation, getCampaignById, now } from '../db.js';
+import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
+import { campaignPlatforms } from '../platforms.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, exchangeForLongLivedToken, fetchProfile, IgError
 } from '../instagram.js';
@@ -74,6 +75,12 @@ export async function handleInstagramAuth(request, env, url) {
       return failure(campaignId, new Error('Your account is disabled, so accounts cannot be connected. Contact the ClipGrow admin.'));
     }
 
+    const campaign = await getCampaignById(env.DB, campaignId);
+    if (!campaign) return failure(campaignId, new Error('Campaign not found.'));
+    if (!campaignPlatforms(campaign).includes('instagram')) {
+      return failure(campaignId, new Error('This campaign does not accept Instagram.'));
+    }
+
     const part = await getParticipation(env.DB, session.sub, campaignId);
     if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
     if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
@@ -115,24 +122,10 @@ export async function handleInstagramAuth(request, env, url) {
       const profile = await fetchProfile(longLived.access_token); // rejects personal accounts
       const expiresAt = Date.now() + (longLived.expires_in || 0) * 1000;
 
-      // One Instagram account drives one LIVE campaign at a time.
-      //
-      // Checked across every clipper, not just this one, so two logins can't
-      // quietly point at the same account. Completed campaigns and revoked or
-      // detached accounts are excluded, which is what lets a good account be
-      // reused on the next campaign once the current one is finished.
-      const clash = await env.DB.prepare(
-        `SELECT c.name AS campaign_name, p.clipper_id, cl.username AS clipper_username
-         FROM participations p
-         JOIN social_accounts a ON a.id = p.account_id
-         JOIN campaigns c ON c.id = p.campaign_id
-         JOIN clippers cl ON cl.id = p.clipper_id
-         WHERE a.external_id = ? AND a.platform = 'instagram'
-           AND p.campaign_id != ?
-           AND p.status != 'kicked'
-           AND a.status != 'revoked'
-           AND c.status != 'completed'`
-      ).bind(profile.id, campaignId).first();
+      // One Instagram account drives one LIVE campaign at a time, checked
+      // across every clipper. Shared with the YouTube route so both platforms
+      // enforce the rule identically.
+      const clash = await findAccountClash(env.DB, profile.id, 'instagram', campaignId);
       if (clash) {
         const mine = String(clash.clipper_id) === String(session.sub);
         throw new IgError(
@@ -167,7 +160,7 @@ export async function handleInstagramAuth(request, env, url) {
         accountId = res.meta.last_row_id;
       }
 
-      await env.DB.prepare('UPDATE participations SET account_id = ? WHERE id = ?').bind(accountId, part.id).run();
+      await linkParticipationAccount(env.DB, part.id, accountId, 'instagram');
 
       const q = new URLSearchParams({ ig: 'connected', campaign: String(campaignId), handle: profile.username });
       return redirect('/dashboard.html?' + q.toString());

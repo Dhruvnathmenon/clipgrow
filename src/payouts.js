@@ -1,5 +1,6 @@
 import { now, maxPayoutPerVideo } from './db.js';
 import { clipState, clipStateMessage, daysSince } from './clipstate.js';
+import { platformLabel } from './platforms.js';
 import { reallocateCampaign } from './earnings.js';
 
 // Settling a payout.
@@ -29,6 +30,7 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
 
   const { results } = await db.prepare(
     `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.source,
+            s.platform, s.duration_seconds, s.is_short, s.eligible,
             s.created_at, s.posted_at, s.last_synced_at, s.last_ok_sync_at,
             s.locked_at, s.locked_earning, s.lock_reason, s.payment_id,
             c.id AS campaign_id, c.name AS campaign_name, c.cpm, c.min_views, c.blueprint_json,
@@ -59,6 +61,10 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       campaign_name: r.campaign_name,
       permalink: r.permalink,
       account_username: r.account_username,
+      platform: r.platform || 'instagram',
+      platform_label: platformLabel(r.platform || 'instagram'),
+      is_short: r.is_short == null ? null : !!r.is_short,
+      eligible: r.eligible !== 0,
       source: r.source || 'manual',
       views: r.views,
       cpm: r.cpm,
@@ -67,10 +73,11 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       earning: r.earning,
       uncapped_earning: uncapped,
       max_per_video: maxPerVideo,
-      // True when the per-video ceiling actually bit, i.e. the clipper earned
-      // less than raw views x CPM would suggest. Surfaced so the admin can see
-      // why the number is lower than expected instead of assuming a bug.
-      capped: maxPerVideo > 0 && uncapped > maxPerVideo,
+      // True only when the per-video ceiling is the actual reason the number is
+      // lower than raw views x CPM. A clip that earns nothing because it is
+      // ineligible was not "capped", and saying so would send the admin
+      // hunting for a pricing bug that does not exist.
+      capped: r.eligible !== 0 && maxPerVideo > 0 && uncapped > maxPerVideo,
       state,
       state_message: clipStateMessage(state, r),
       below_min: belowMin,
@@ -102,10 +109,23 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
     settled_clips: clips.filter(c => c.locked).length,
     write_off_clips: clips.filter(c => c.write_off_due).length,
     below_min_clips: clips.filter(c => c.below_min).length,
+    ineligible_clips: clips.filter(c => !c.eligible).length,
     views: clips.reduce((n, c) => n + (c.views || 0), 0)
   };
 
-  return { clips, totals };
+  // Both platforms draw on one budget, but the split is worth seeing at a
+  // glance when deciding a payout.
+  const byPlatform = {};
+  for (const c of clips) {
+    const p = c.platform;
+    if (!byPlatform[p]) byPlatform[p] = { platform: p, label: c.platform_label, clips: 0, views: 0, payable: 0, settled: 0 };
+    byPlatform[p].clips++;
+    byPlatform[p].views += c.views || 0;
+    if (c.selectable) byPlatform[p].payable += c.earning;
+    if (c.locked) byPlatform[p].settled += c.locked_earning || 0;
+  }
+
+  return { clips, totals, by_platform: Object.values(byPlatform) };
 }
 
 /**

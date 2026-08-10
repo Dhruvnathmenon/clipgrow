@@ -86,10 +86,11 @@
   // clipper and the admin.
   const BADGE={tracking:'ok',locked:'neutral',below_min:'warn',verified:'neutral',
     removed:'bad',disconnected:'bad',reconnect:'warn',unavailable:'bad',issue:'warn',
-    paused:'warn',disqualified:'bad'};
+    paused:'warn',disqualified:'bad',ineligible:'neutral'};
   const LABEL={tracking:'live',locked:'closed',below_min:'below min',verified:'pending first sync',
-    removed:'removed from IG',disconnected:'account disconnected',reconnect:'needs reconnect',
-    unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'not eligible'};
+    removed:'removed from platform',disconnected:'account disconnected',reconnect:'needs reconnect',
+    unavailable:'not updating',issue:'sync issue',paused:'paused',disqualified:'not eligible',
+    ineligible:'not eligible'};
 
   let CAMPAIGNS=[], current=null;
 
@@ -164,16 +165,17 @@
       <div class="panel">
         <h2 class="panel-title">Every video (${num(t.clips)})</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Video</th><th>Posted</th><th>Views</th><th>Status</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Video</th><th>Posted</th><th>Views</th><th>Status</th></tr></thead>
           <tbody>${d.clips.length?d.clips.map(x=>`<tr>
             <td class="handle">${esc(x.clipper_name)}</td>
+            <td><span class="badge ${x.platform==='youtube'?'warn':'neutral'}">${esc(x.platform_label||x.platform)}</span></td>
             <td>${x.permalink?`<a href="${esc(x.permalink)}" target="_blank" rel="noopener">view ↗</a>`:'—'}
-              ${x.account_username?`<div class="muted" style="font-size:.7rem">@${esc(x.account_username)}</div>`:''}</td>
+              ${x.account_username?`<div class="muted" style="font-size:.7rem">${x.platform==='youtube'?'':'@'}${esc(x.account_username)}</div>`:''}</td>
             <td class="muted">${when(x.posted_at||x.synced_at)}</td>
             <td class="handle">${num(x.views)}</td>
             <td><span class="badge ${BADGE[x.state]||'neutral'}">${LABEL[x.state]||esc(x.state)}</span>
               ${x.state_message?`<div class="note" style="margin-top:.25rem;max-width:280px">${esc(x.state_message)}</div>`:''}</td>
-          </tr>`).join(''):'<tr><td colspan="5" class="empty">No videos yet.</td></tr>'}</tbody>
+          </tr>`).join(''):'<tr><td colspan="6" class="empty">No videos yet.</td></tr>'}</tbody>
         </table></div>
         <p class="note" style="margin-top:.8rem">Views are pulled directly from each clipper's connected Instagram account. ${t.clips_below_min?`${num(t.clips_below_min)} video(s) have not yet reached the ${num(c.min_views)}-view minimum.`:''}</p>
       </div>`;

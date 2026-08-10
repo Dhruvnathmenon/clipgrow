@@ -101,6 +101,7 @@
     /* Settled: closed history, so it reads as neutral rather than alarming. */
     .badge.locked { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
     .badge.removed, .badge.disconnected, .badge.unavailable { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.ineligible { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
     .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.joined, .badge.locked { background:transparent; border:1px solid var(--border-s); color:var(--muted); }
 
@@ -344,7 +345,7 @@
     <!-- CLIPS -->
     <section class="view" id="v-clips">
       <div class="page-head clips-head">
-        <div><h1>My Clips</h1><p>Views are pulled straight from Instagram — no manual reporting</p></div>
+        <div><h1>My Clips</h1><p>Views are pulled straight from the platform you posted on — no manual reporting</p></div>
         <div class="refresh-wrap">
           <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Refresh views</button>
           <div class="note refresh-note">Updates automatically every 6 hours</div>
@@ -457,10 +458,13 @@
     const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
 
+    // `live` is overwritten from the server's configured_platforms, so a
+    // platform only ever appears usable once its app credentials are actually
+    // set on the Worker.
     const PLATFORMS=[
       {id:'instagram',name:'Reels',live:true,  svg:'<rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/>'},
-      {id:'tiktok',   name:'TikTok',live:false,svg:'<path d="M15 4v8.5a4 4 0 11-3-3.87"/><path d="M15 4c.5 2.5 2 4 4.5 4.2"/>'},
       {id:'youtube',  name:'Shorts',live:false,svg:'<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/>'},
+      {id:'tiktok',   name:'TikTok',live:false,svg:'<path d="M15 4v8.5a4 4 0 11-3-3.87"/><path d="M15 4c.5 2.5 2 4 4.5 4.2"/>'},
       {id:'x',        name:'X',     live:false,svg:'<path d="M4 4l16 16M20 4L4 20"/>'}
     ];
     const platIcon=id=>{const p=PLATFORMS.find(x=>x.id===id)||PLATFORMS[0];
@@ -530,8 +534,12 @@
 
     /* ── campaigns ── */
     async function loadCampaigns(){
-      const {campaigns}=await api('/api/clipper/campaigns');
+      const {campaigns,configured_platforms}=await api('/api/clipper/campaigns');
       CAMPAIGNS=campaigns;
+      // A platform is only offered once its credentials exist on the server.
+      if(Array.isArray(configured_platforms)){
+        PLATFORMS.forEach(p=>{ p.live=configured_platforms.includes(p.id); });
+      }
       const joined=campaigns.filter(c=>c.participation&&c.participation.status!=='kicked');
       document.getElementById('n-camp').textContent=joined.length;
 
@@ -563,6 +571,67 @@
       </div>`;
     }
 
+    /* One platform's connect / reconnect / connected state inside a campaign.
+       Instagram carries the extra tester-invite helper because its Meta app is
+       still in Development Mode; YouTube's equivalent gate is a Google test
+       user, which the admin adds by email rather than by handle. */
+    function platformBlock(c,p,plat,a){
+      const isYt=plat==='youtube';
+      const label=isYt?'YouTube':'Instagram';
+      const thing=isYt?'Shorts':'Reels';
+      const startUrl=`/api/auth/${isYt?'youtube':'instagram'}/start?campaign_id=${c.id}`;
+      const handle=a?(isYt?esc(a.username):'@'+esc(a.username)):'';
+
+      if(!a){
+        if(isYt){
+          return `<div class="alert warn">
+            <div class="alert-t">YouTube not connected</div>
+            <div>Connect the YouTube channel you'll post this campaign's Shorts from.</div>
+            <div class="alert-fix">This campaign pays on Shorts only — regular uploads are tracked but do not earn. Your Google account must have been added by the ClipGrow admin first.</div>
+            <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect YouTube</a></div>
+          </div>`;
+        }
+        // Connect is ALWAYS reachable. An account that is already an approved
+        // tester must never be blocked by our own queue -- and if it isn't a
+        // tester yet, Instagram returns a typed NOT_A_TESTER error that tells
+        // the clipper exactly what to do. The request form below is a helper
+        // for getting on the admin's list, not a gate.
+        const t=p.tester;
+        let note='It must be a Professional account (Creator or Business) — personal accounts cannot report views.';
+        if(t&&t.status==='requested') note=`Access requested for @${esc(t.ig_username)} — ClipGrow is adding you as a tester. Already approved? Connect now.`;
+        else if(t&&t.status==='invited') note=`Invite sent to @${esc(t.ig_username)}. Accept it in Instagram → Settings and privacy → Apps and websites → Tester invites, then connect.`;
+        else if(t&&t.status==='confirmed') note=`@${esc(t.ig_username)} is approved — connect it now.`;
+        else if(t&&t.status==='rejected') note=`Your access request wasn't approved${t.note?': '+esc(t.note):''}. Check the username and request again.`;
+
+        return `<div class="alert warn">
+          <div class="alert-t">Instagram not connected</div>
+          <div>Connect the Instagram account you'll post this campaign's clips from.</div>
+          <div class="alert-fix">${note}</div>
+          <div style="margin-top:.85rem"><button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button></div>
+          ${(!t||t.status==='rejected')?`<div class="tester-req-row">
+            <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
+            <button class="btn btn-ghost btn-sm" onclick="requestTesterAccess(${c.id})">Not a tester yet? Request access</button>
+          </div>`:''}
+        </div>`;
+      }
+
+      if(a.status==='needs_reauth'||a.status==='revoked'){
+        return alertBox('bad',`${label} connection needs attention`,`We can no longer read views from ${handle}.`,
+          'Reconnect the same account — your earnings are safe.',
+          `<a class="btn btn-warn" href="${startUrl}">Reconnect ${handle}</a>`);
+      }
+
+      let out=`<div class="acct"><span class="plat-ic">${platIcon(plat)}</span><span class="badge connected">✓ Verified</span>Posting from <strong style="color:var(--white)">${handle}</strong>
+        <span class="chip">${esc(a.account_type||(isYt?'channel':'professional'))}</span></div>`;
+      if(p.status==='active'&&c.status==='active'){
+        out+=`<div class="auto-note">
+          <strong>New ${thing} are added automatically.</strong> Anything you post on ${handle} from now on shows up here on its own — you don't need to do anything.
+          ${isYt?'<div class="note" style="margin-top:.4rem">Only Shorts earn on this campaign. Regular uploads still appear here, marked as not eligible.</div>':''}
+        </div>`;
+      }
+      return out;
+    }
+
     /* ── campaign detail ── */
     window.openCampaign=function(id){
       const c=CAMPAIGNS.find(x=>x.id===id); if(!c) return;
@@ -578,51 +647,31 @@
         action=alertBox('bad','Removed from this campaign',p.note||'You were removed by the ClipGrow admin.','Anything you already earned here is kept and still owed to you.');
       } else {
         if(p.status==='paused') action+=alertBox('warn','Paused',p.note||'You cannot submit new clips right now.','Clips you already posted keep tracking and earning.');
-        const a=p.account;
-        if(!a){
-          // Connect is ALWAYS reachable. An account that is already an approved
-          // tester must never be blocked by our own queue -- and if it isn't a
-          // tester yet, Instagram returns a typed NOT_A_TESTER error that tells
-          // the clipper exactly what to do. The request form below is a helper
-          // for getting on the admin's list, not a gate.
-          const t=p.tester;
-          let note='It must be a Professional account (Creator or Business) — personal accounts cannot report views.';
-          if(t&&t.status==='requested') note=`Access requested for @${esc(t.ig_username)} — ClipGrow is adding you as a tester. Already approved? Connect now.`;
-          else if(t&&t.status==='invited') note=`Invite sent to @${esc(t.ig_username)}. Accept it in Instagram → Settings and privacy → Apps and websites → Tester invites, then connect.`;
-          else if(t&&t.status==='confirmed') note=`@${esc(t.ig_username)} is approved — connect it now.`;
-          else if(t&&t.status==='rejected') note=`Your access request wasn't approved${t.note?': '+esc(t.note):''}. Check the username and request again.`;
 
-          action+=`<div class="alert warn">
-            <div class="alert-t">Instagram not connected</div>
-            <div>Connect the Instagram account you'll post this campaign's clips from.</div>
-            <div class="alert-fix">${note}</div>
-            <div style="margin-top:.85rem"><button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button></div>
-            ${(!t||t.status==='rejected')?`<div class="tester-req-row">
-              <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
-              <button class="btn btn-ghost btn-sm" onclick="requestTesterAccess(${c.id})">Not a tester yet? Request access</button>
-            </div>`:''}
-          </div>`;
-        } else if(a.status==='needs_reauth'||a.status==='revoked'){
-          action+=alertBox('bad','Instagram connection needs attention',`We can no longer read views from @${a.username}.`,'Reconnect the same account — your earnings are safe.',
-            `<a class="btn btn-warn" href="/api/auth/instagram/start?campaign_id=${c.id}">Reconnect @${esc(a.username)}</a>`);
-        } else {
-          action+=`<div class="acct"><span class="badge connected">✓ Verified</span>Posting from <strong style="color:var(--white)">@${esc(a.username)}</strong>
-            <span class="chip">${esc(a.account_type||'professional')}</span></div>`;
-          if(p.status==='active'&&c.status==='active'){
-            action+=`<div class="auto-note">
-              <strong>New Reels are added automatically.</strong> Anything you post on @${esc(a.username)} from now on shows up here on its own — you don't need to do anything.
-              <div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
-                <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Check for new clips &amp; views</button>
-                <div class="note refresh-note">Updates automatically every 6 hours</div>
-              </div>
+        // One block per platform this campaign accepts, so a clipper can run
+        // Instagram and YouTube on the same campaign side by side.
+        const plats=(c.platforms_available&&c.platforms_available.length)
+          ? c.platforms_available
+          : (c.allowed_platforms||['instagram']).filter(x=>x==='instagram');
+        const accounts=p.accounts||{};
+        plats.forEach(plat=>{ action+=platformBlock(c,p,plat,accounts[plat]); });
+
+        const anyConnected=plats.some(plat=>{
+          const a=accounts[plat]; return a && a.status==='connected';
+        });
+        if(anyConnected&&p.status==='active'&&c.status==='active'){
+          const what=plats.length>1?'Reel or Short':'Reel';
+          // One refresh control for the whole campaign, not one per platform.
+          action+=`<div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
+              <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Check for new clips &amp; views</button>
+              <div class="note refresh-note">Updates automatically every 6 hours</div>
             </div>
             <div class="submit-row">
-              <input type="url" id="d-url" placeholder="Paste a link to add an older Reel" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
+              <input type="url" id="d-url" placeholder="Paste a link to add an older ${what}" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
               <button class="btn" id="d-btn" onclick="submitClip(${c.id},'d-url')">Add Clip</button></div>
-              <p class="muted" style="font-size:.73rem;margin-top:.45rem">Only needed for Reels posted before you connected @${esc(a.username)}. We check the link really belongs to that account.</p>`;
-          } else if(c.status==='budget_full'){
-            action+=alertBox('info','Budget fully allocated','New clips can no longer earn on this campaign.','Your existing clips keep their earnings.');
-          }
+              <p class="muted" style="font-size:.73rem;margin-top:.45rem">Only needed for posts made before you connected the account. We work out the platform from the link and check it really belongs to your connected account.</p>`;
+        } else if(c.status==='budget_full'){
+          action+=alertBox('info','Budget fully allocated','New clips can no longer earn on this campaign.','Your existing clips keep their earnings.');
         }
       }
 
@@ -733,11 +782,12 @@
     window.setPlat=function(p){ platFilter=p; renderClips(); };
 
     const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',
-      paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from Instagram',
-      disconnected:'Account disconnected',reconnect:'Reconnect needed',unavailable:'Not updating'};
+      paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from platform',
+      disconnected:'Account disconnected',reconnect:'Reconnect needed',unavailable:'Not updating',
+      ineligible:'Not eligible'};
     // Every state that means "this clip is not earning right now" reads as
     // visually inactive, so a clipper never mistakes a stuck clip for a live one.
-    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable']);
+    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible']);
 
     function clipCard(c){
       const thumb=c.has_thumb
@@ -762,7 +812,7 @@
           ${!c.locked&&c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
           ${!c.locked&&c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
           ${!c.locked&&c.state_message&&c.state!=='below_min'&&c.state!=='verified'?`<div class="clip-note">${esc(c.state_message)}</div>`:''}
-          <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on Instagram ↗</a>
+          <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
         </div></div>`;
     }
     window.placeholderHTML=()=>`<div class="clip-ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/></svg>No preview</div>`;

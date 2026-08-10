@@ -2,11 +2,13 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireClipper, verifyPassword, clearCookieHeader } from '../auth.js';
 import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
-  getAccountById, publicCampaign, publicAccount, campaignSpend, clipperFinancials,
-  clipperStreak, clipperTotals
+  publicCampaign, publicAccount, campaignSpend, clipperFinancials,
+  clipperStreak, clipperTotals, listParticipationAccounts, getParticipationAccount,
+  unlinkParticipationAccount
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
-import { findMediaByUrl, isVideoMedia, IgError, IG_ERRORS } from '../instagram.js';
+import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
+import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
 import { syncClipperViews } from '../earnings.js';
 
@@ -18,9 +20,26 @@ const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 // Clip status lives in src/clipstate.js so the clipper dashboard, the admin
 // panel and the client portal can never describe the same clip differently.
 
-function igErrorResponse(e, status = 400) {
+// Both platform modules raise errors carrying the same shape (code, message,
+// fix, needsReauth), so one responder serves both.
+function platformErrorResponse(e, status = 400) {
+  if (e && e.code && e.fix !== undefined) {
+    return json({ error: e.message, fix: e.fix, code: e.code, needs_reauth: !!e.needsReauth }, status);
+  }
   if (e instanceof IgError) return json({ error: e.message, fix: e.fix, code: e.code, needs_reauth: e.needsReauth }, status);
-  return err(e.message || 'Something went wrong', status);
+  return err((e && e.message) || 'Something went wrong', status);
+}
+
+/**
+ * Which platform a pasted link belongs to. Detected from the URL rather than
+ * trusted from the client, so a clipper cannot file a YouTube link against an
+ * Instagram account (or vice versa) by tampering with the request.
+ */
+function detectPlatform(postUrl, fallback) {
+  const s = String(postUrl || '');
+  if (/youtube\.com|youtu\.be/i.test(s)) return 'youtube';
+  if (/instagram\.com/i.test(s)) return 'instagram';
+  return PLATFORMS.includes(fallback) ? fallback : null;
 }
 
 export async function handleClipper(request, env, url) {
@@ -121,31 +140,59 @@ export async function handleClipper(request, env, url) {
       .prepare('SELECT * FROM tester_requests WHERE clipper_id = ? ORDER BY requested_at DESC')
       .bind(clipperId).all();
     const latestTester = (testerRows && testerRows[0]) || null;
+    const configured = configuredPlatforms(env);
 
     const out = [];
     for (const c of campaigns || []) {
       const part = byCampaign.get(c.id);
-      let account = null;
-      if (part && part.account_id) account = publicAccount(await getAccountById(env.DB, part.account_id));
+      const allowed = campaignPlatforms(c);
+
+      // One connected account per platform, so a campaign can run Instagram
+      // and YouTube at the same time.
+      const accounts = {};
+      if (part) {
+        for (const linked of await listParticipationAccounts(env.DB, part.id)) {
+          accounts[linked.linked_platform] = publicAccount(linked);
+        }
+      }
+      // Instagram is the only platform still gated behind a manual tester
+      // invite, so the tester prompt is scoped to it.
+      const igAccount = accounts.instagram || null;
+
       const stats = await env.DB.prepare(
         `SELECT COUNT(*) AS videos, COALESCE(SUM(views),0) AS views, COALESCE(SUM(earning),0) AS earned
          FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND status = 'active'`
       ).bind(clipperId, c.id).first();
 
+      const { results: platStats } = await env.DB.prepare(
+        `SELECT platform, COUNT(*) AS videos, COALESCE(SUM(views),0) AS views, COALESCE(SUM(earning),0) AS earned
+         FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND status = 'active'
+         GROUP BY platform`
+      ).bind(clipperId, c.id).all();
+
       out.push({
         ...publicCampaign(c, await campaignSpend(env.DB, c.id)),
+        allowed_platforms: allowed,
+        platforms_available: allowed.filter(p => configured.includes(p)),
         participation: part
           ? {
-              status: part.status, note: part.status_note, joined_at: part.joined_at, account,
-              tester: account ? null : (latestTester
+              status: part.status, note: part.status_note, joined_at: part.joined_at,
+              // Kept for older clients that expect a single Instagram account.
+              account: igAccount,
+              accounts,
+              tester: igAccount || !allowed.includes('instagram') ? null : (latestTester
                 ? { ig_username: latestTester.ig_username, status: latestTester.status }
                 : null)
             }
           : null,
-        my_stats: { videos: stats.videos, views: stats.views, earned: stats.earned }
+        my_stats: { videos: stats.videos, views: stats.views, earned: stats.earned },
+        my_stats_by_platform: (platStats || []).reduce((acc, r) => {
+          acc[r.platform] = { videos: r.videos, views: r.views, earned: r.earned };
+          return acc;
+        }, {})
       });
     }
-    return json({ campaigns: out });
+    return json({ campaigns: out, configured_platforms: configured });
   }
 
   let params = matchPath('/api/clipper/campaigns/:id/join', pathname);
@@ -168,20 +215,27 @@ export async function handleClipper(request, env, url) {
     return json({ ok: true }, 201);
   }
 
-  // Detach the connected account from a campaign so a different one can be linked.
+  // Detach one platform's account from a campaign so a different one can be
+  // linked. Scoped per platform, so unlinking YouTube leaves Instagram intact.
   params = matchPath('/api/clipper/campaigns/:id/account', pathname);
   if (params && method === 'DELETE') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
+    const platform = String(url.searchParams.get('platform') || 'instagram');
+    if (!PLATFORMS.includes(platform)) return err('Unknown platform');
+
     const part = await getParticipation(env.DB, clipperId, params.id);
     if (!part) return err('You have not joined this campaign', 404);
+
+    // Only this platform's videos block the unlink -- an Instagram clip must
+    // not stop a YouTube channel being swapped.
     const used = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND status = 'active'"
-    ).bind(clipperId, params.id).first();
+      "SELECT COUNT(*) AS n FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND platform = ? AND status = 'active'"
+    ).bind(clipperId, params.id, platform).first();
     if (used.n > 0) {
-      return err('You already have videos submitted with this account. Ask the ClipGrow admin to change it so your earnings stay intact.', 409);
+      return err(`You already have ${platformLabel(platform)} videos submitted with this account. Ask the ClipGrow admin to change it so your earnings stay intact.`, 409);
     }
-    await env.DB.prepare('UPDATE participations SET account_id = NULL WHERE id = ?').bind(part.id).run();
+    await unlinkParticipationAccount(env.DB, part.id, platform);
     return json({ ok: true });
   }
 
@@ -230,7 +284,7 @@ export async function handleClipper(request, env, url) {
     await env.DB.prepare('UPDATE clippers SET last_manual_sync_at = ? WHERE id = ?')
       .bind(Date.now(), clipperId).run();
 
-    const result = await syncClipperViews(env.DB, clipperId);
+    const result = await syncClipperViews(env.DB, clipperId, env);
     const money = await clipperFinancials(env.DB, clipperId);
     const totals = await clipperTotals(env.DB, clipperId);
     return json({ ok: true, ...result, money, totals, cooldown_ms: MANUAL_SYNC_COOLDOWN_MS });
@@ -241,8 +295,9 @@ export async function handleClipper(request, env, url) {
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
               s.last_ok_sync_at, s.locked_at, s.locked_earning, s.lock_reason,
               s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
+              s.platform, s.duration_seconds, s.is_short, s.eligible,
               c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views,
-              a.username AS account_username, a.platform,
+              a.username AS account_username,
               p.paid_at AS payment_paid_at
        FROM submissions s
        JOIN campaigns c ON c.id = s.campaign_id
@@ -260,7 +315,11 @@ export async function handleClipper(request, env, url) {
           campaign_name: s.campaign_name,
           permalink: s.permalink,
           platform: s.platform || 'instagram',
+          platform_label: platformLabel(s.platform || 'instagram'),
           account_username: s.account_username,
+          duration_seconds: s.duration_seconds,
+          is_short: s.is_short == null ? null : !!s.is_short,
+          eligible: s.eligible !== 0,
           views: s.views,
           // A locked clip shows the amount that was actually settled, which is
           // frozen and will not move again however many views it gains.
@@ -289,7 +348,7 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/submissions' && method === 'POST') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
-    const { campaign_id, url: postUrl } = await readJson(request);
+    const { campaign_id, url: postUrl, platform: askedPlatform } = await readJson(request);
     if (!campaign_id || !postUrl) return err('Pick a campaign and paste your post link');
 
     const campaign = await getCampaignById(env.DB, campaign_id);
@@ -301,45 +360,73 @@ export async function handleClipper(request, env, url) {
     if (!part) return err('Join this campaign before submitting a video');
     if (part.status === 'kicked') return err('You have been removed from this campaign. Contact the ClipGrow admin.', 403);
     if (part.status === 'paused') return err('Your participation in this campaign is paused, so new videos cannot be submitted right now.', 403);
-    if (!part.account_id) return err('Connect the Instagram account for this campaign before submitting a video');
 
-    const account = await getAccountById(env.DB, part.account_id);
-    if (!account || account.status === 'revoked') return err('The Instagram account for this campaign is disconnected. Reconnect it to continue.');
-    if (account.status === 'needs_reauth') {
-      return json({ error: 'The Instagram connection for this campaign has expired.', fix: 'Click Reconnect on this campaign, then submit again.', code: 'TOKEN_EXPIRED', needs_reauth: true }, 400);
+    // Work out which platform the link belongs to, so a clipper never has to
+    // pick one from a dropdown and can't pick the wrong one.
+    const allowed = campaignPlatforms(campaign);
+    const platform = detectPlatform(postUrl, askedPlatform);
+    if (!platform) return err('That link is not a recognised Instagram or YouTube link');
+    if (!allowed.includes(platform)) {
+      return err(`This campaign does not accept ${platformLabel(platform)} videos.`);
     }
 
+    const account = await getParticipationAccount(env.DB, part.id, platform);
+    if (!account) return err(`Connect the ${platformLabel(platform)} account for this campaign before submitting a video`);
+    if (account.status === 'revoked') return err(`The ${platformLabel(platform)} account for this campaign is disconnected. Reconnect it to continue.`);
+    if (account.status === 'needs_reauth') {
+      return json({
+        error: `The ${platformLabel(platform)} connection for this campaign has expired.`,
+        fix: 'Click Reconnect on this campaign, then submit again.',
+        code: 'TOKEN_EXPIRED', needs_reauth: true
+      }, 400);
+    }
+
+    const adapter = getAdapter(platform);
     let media;
     try {
-      media = await findMediaByUrl(account.external_id, account.access_token, postUrl);
+      // findByUrl proves the post belongs to the connected account, and for
+      // YouTube also rejects anything that is not a Short.
+      media = await adapter.withFreshToken(
+        account, env,
+        (token) => adapter.findByUrl({ ...account, access_token: token }, postUrl, env),
+        async (fresh) => {
+          await env.DB.prepare(
+            `UPDATE social_accounts SET access_token = ?, refresh_token = COALESCE(?, refresh_token),
+               token_expires_at = ? WHERE id = ?`
+          ).bind(fresh.access_token, fresh.refresh_token || null, fresh.expires_at || null, account.id).run();
+        }
+      );
     } catch (e) {
-      if (e instanceof IgError && e.needsReauth) {
+      if (e && e.needsReauth) {
         await env.DB.prepare('UPDATE social_accounts SET status = ?, last_error_code = ?, last_error_at = ? WHERE id = ?')
           .bind('needs_reauth', e.code, now(), account.id).run();
       }
-      return igErrorResponse(e, 502);
+      return platformErrorResponse(e, 502);
     }
 
-    if (!media) return igErrorResponse(IG_ERRORS.MEDIA_NOT_FOUND());
-    if (!isVideoMedia(media)) return igErrorResponse(IG_ERRORS.NOT_VIDEO());
-
-    const dup = await env.DB.prepare('SELECT id, clipper_id FROM submissions WHERE ig_media_id = ?').bind(media.id).first();
+    const dup = await env.DB.prepare(
+      'SELECT id, clipper_id FROM submissions WHERE platform = ? AND ig_media_id = ?'
+    ).bind(platform, media.external_id).first();
     if (dup) {
       return err(dup.clipper_id === clipperId ? 'You have already submitted this video' : 'This video has already been submitted', 409);
     }
 
     // Best-effort preview capture; a missing image never blocks submission.
-    const thumbSource = media.thumbnail_url || media.media_url || null;
-    const thumbKey = await captureThumbnail(env, media.id, thumbSource);
+    const thumbSource = media.thumbnail_url || null;
+    const thumbKey = await captureThumbnail(env, media.external_id, thumbSource);
 
     const res = await env.DB.prepare(
-      `INSERT INTO submissions (clipper_id, campaign_id, account_id, ig_media_id, permalink, views, earning,
-         status, created_at, thumbnail_key, thumbnail_url, media_product_type, posted_at)
-       VALUES (?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?)`
+      `INSERT INTO submissions (clipper_id, campaign_id, account_id, platform, ig_media_id, permalink, views, earning,
+         status, created_at, thumbnail_key, thumbnail_url, media_product_type, posted_at,
+         duration_seconds, is_short, eligible)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      clipperId, campaign_id, account.id, media.id, media.permalink, now(),
-      thumbKey, thumbSource, media.media_product_type || media.media_type || null,
-      media.timestamp ? Date.parse(media.timestamp) || null : null
+      clipperId, campaign_id, account.id, platform, media.external_id, media.permalink, now(),
+      thumbKey, thumbSource, media.media_type || null,
+      media.posted_at || null,
+      media.duration_seconds == null ? null : media.duration_seconds,
+      media.is_short == null ? null : (media.is_short ? 1 : 0),
+      media.eligible === false ? 0 : 1
     ).run();
 
     // Fetch this clipper's real view counts right now instead of waiting for
@@ -349,7 +436,7 @@ export async function handleClipper(request, env, url) {
     // it just sits at 0 until the next sync (manual or 6-hourly) picks it up.
     let liveViews = 0, liveEarning = 0;
     try {
-      await syncClipperViews(env.DB, clipperId);
+      await syncClipperViews(env.DB, clipperId, env);
       const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?')
         .bind(res.meta.last_row_id).first();
       if (fresh) { liveViews = fresh.views; liveEarning = fresh.earning; }
