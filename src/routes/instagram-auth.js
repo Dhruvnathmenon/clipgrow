@@ -1,6 +1,7 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
+import { canConnect } from '../access.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, exchangeForLongLivedToken, fetchProfile, IgError
 } from '../instagram.js';
@@ -84,6 +85,16 @@ export async function handleInstagramAuth(request, env, url) {
     const part = await getParticipation(env.DB, session.sub, campaignId);
     if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
     if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
+
+    // The account must have been approved (added as a Meta app Tester) first.
+    // Enforced here and not only by hiding the button, because this URL is a
+    // plain link a clipper could have kept from an earlier session. Without
+    // approval Instagram would reject them anyway -- this just replaces an
+    // opaque platform error with an explanation of what to do next.
+    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'instagram');
+    if (!gate.allowed) {
+      return failure(campaignId, new IgError('NOT_APPROVED', gate.title, gate.reason));
+    }
 
     const redirectUri = callbackUri(env, url);
     const state = await signSession(

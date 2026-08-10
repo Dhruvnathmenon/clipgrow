@@ -311,10 +311,27 @@ export async function handleAdmin(request, env, url) {
   // hand in the Meta dashboard; these endpoints just track that state.
   const TESTER_STATUSES = ['requested', 'invited', 'confirmed', 'rejected'];
 
-  if (pathname === '/api/admin/tester-requests' && method === 'GET') {
+  if ((pathname === '/api/admin/access-requests' || pathname === '/api/admin/tester-requests') && method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT t.*, cl.username AS clipper_username, cl.display_name AS clipper_display_name,
-              c.name AS campaign_name
+      `SELECT t.*, COALESCE(t.identifier, t.ig_username) AS identifier,
+              cl.username AS clipper_username, cl.display_name AS clipper_display_name,
+              c.name AS campaign_name,
+              -- Whether this exact account was already approved on another
+              -- campaign. Tester/test-user status is app-level on both
+              -- platforms, so if it was, there is nothing to do in Meta or
+              -- Google Cloud and this can simply be approved.
+              (SELECT COUNT(*) FROM tester_requests p
+                WHERE p.clipper_id = t.clipper_id
+                  AND p.platform = t.platform
+                  AND COALESCE(p.identifier, p.ig_username) = COALESCE(t.identifier, t.ig_username)
+                  AND p.status = 'confirmed' AND p.id != t.id) AS already_granted,
+              -- Whether they have since connected, so a stale queue entry is
+              -- visibly resolved rather than looking like outstanding work.
+              (SELECT COUNT(*) FROM participation_accounts pa
+                JOIN participations pp ON pp.id = pa.participation_id
+                JOIN social_accounts sa ON sa.id = pa.account_id
+                WHERE pp.clipper_id = t.clipper_id AND pp.campaign_id = t.campaign_id
+                  AND pa.platform = t.platform AND sa.status != 'revoked') AS is_connected
        FROM tester_requests t
        JOIN clippers cl ON cl.id = t.clipper_id
        LEFT JOIN campaigns c ON c.id = t.campaign_id
@@ -325,7 +342,8 @@ export async function handleAdmin(request, env, url) {
     return json({ requests: results || [] });
   }
 
-  params = matchPath('/api/admin/tester-requests/:id', pathname);
+  params = matchPath('/api/admin/access-requests/:id', pathname)
+        || matchPath('/api/admin/tester-requests/:id', pathname);
   if (params && method === 'PATCH') {
     const { status, note } = await readJson(request);
     const reqRow = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(params.id).first();

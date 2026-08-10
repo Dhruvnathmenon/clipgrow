@@ -8,6 +8,9 @@ import {
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
 import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
+import {
+  accessState, accessGuidance, submitAccessRequest, normaliseIdentifier, validateIdentifier
+} from '../access.js';
 import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
 import { syncClipperViews } from '../earnings.js';
@@ -134,12 +137,16 @@ export async function handleClipper(request, env, url) {
       .prepare('SELECT * FROM participations WHERE clipper_id = ?').bind(clipperId).all();
     const byCampaign = new Map((parts || []).map(p => [p.campaign_id, p]));
 
-    // Only needed while no account is connected, so fetch once up front
-    // rather than a query per campaign.
-    const { results: testerRows } = await env.DB
+    // Every access request this clipper has, fetched once and indexed, rather
+    // than a query per campaign per platform.
+    const { results: reqRows } = await env.DB
       .prepare('SELECT * FROM tester_requests WHERE clipper_id = ? ORDER BY requested_at DESC')
       .bind(clipperId).all();
-    const latestTester = (testerRows && testerRows[0]) || null;
+    const requestByKey = new Map();
+    for (const r of reqRows || []) {
+      const key = `${r.campaign_id}:${r.platform || 'instagram'}`;
+      if (!requestByKey.has(key)) requestByKey.set(key, r);
+    }
     const configured = configuredPlatforms(env);
 
     const out = [];
@@ -155,9 +162,27 @@ export async function handleClipper(request, env, url) {
           accounts[linked.linked_platform] = publicAccount(linked);
         }
       }
-      // Instagram is the only platform still gated behind a manual tester
-      // invite, so the tester prompt is scoped to it.
       const igAccount = accounts.instagram || null;
+
+      // Where this clipper stands on each platform, and the single next thing
+      // they should do. Driving the UI from one computed state (rather than
+      // the page inferring it from several fields) is what keeps the clipper
+      // from ever being offered an action that cannot succeed.
+      const access = {};
+      if (part && part.status !== 'kicked') {
+        for (const plat of allowed) {
+          if (!configured.includes(plat)) continue;
+          const req = requestByKey.get(`${c.id}:${plat}`) || null;
+          const state = accessState(req, accounts[plat]);
+          access[plat] = {
+            state,
+            identifier: req ? (req.identifier || req.ig_username) : null,
+            note: req ? req.note : null,
+            requested_at: req ? req.requested_at : null,
+            ...accessGuidance(state, plat, req)
+          };
+        }
+      }
 
       const stats = await env.DB.prepare(
         `SELECT COUNT(*) AS videos, COALESCE(SUM(views),0) AS views, COALESCE(SUM(earning),0) AS earned
@@ -180,9 +205,7 @@ export async function handleClipper(request, env, url) {
               // Kept for older clients that expect a single Instagram account.
               account: igAccount,
               accounts,
-              tester: igAccount || !allowed.includes('instagram') ? null : (latestTester
-                ? { ig_username: latestTester.ig_username, status: latestTester.status }
-                : null)
+              access
             }
           : null,
         my_stats: { videos: stats.videos, views: stats.views, earned: stats.earned },
@@ -244,24 +267,37 @@ export async function handleClipper(request, env, url) {
   // so an Instagram account must be an accepted app Tester before OAuth can
   // ever succeed for it. The admin adds/confirms testers by hand in Meta; this
   // just tracks that step so a clipper isn't left guessing why Connect fails.
-  if (pathname === '/api/clipper/tester-request' && method === 'POST') {
+  // Step 1 of connecting: the clipper tells us which account they intend to
+  // use, so the admin can grant it access on the platform's side. The old
+  // Instagram-only path is kept as an alias so a stale browser tab still works.
+  if ((pathname === '/api/clipper/access-request' || pathname === '/api/clipper/tester-request') && method === 'POST') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
     const body = await readJson(request);
-    const igUsername = String(body.ig_username || '').trim().replace(/^@/, '');
-    if (!igUsername) return err('Enter your Instagram username');
+
+    const platform = PLATFORMS.includes(body.platform) ? body.platform : 'instagram';
     const campaignId = body.campaign_id ? Number(body.campaign_id) : null;
+    if (!campaignId) return err('Pick a campaign first');
 
-    const existing = await env.DB.prepare(
-      'SELECT * FROM tester_requests WHERE clipper_id = ? AND ig_username = ? COLLATE NOCASE'
-    ).bind(clipperId, igUsername).first();
-    if (existing) return json({ ok: true, request: existing });
+    const campaign = await getCampaignById(env.DB, campaignId);
+    if (!campaign) return err('Campaign not found', 404);
+    if (!campaignPlatforms(campaign).includes(platform)) {
+      return err(`This campaign does not accept ${platformLabel(platform)}.`);
+    }
 
-    const res = await env.DB.prepare(
-      'INSERT INTO tester_requests (clipper_id, ig_username, status, campaign_id, requested_at) VALUES (?, ?, ?, ?, ?)'
-    ).bind(clipperId, igUsername, 'requested', campaignId, now()).run();
-    const created = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(res.meta.last_row_id).first();
-    return json({ ok: true, request: created }, 201);
+    const part = await getParticipation(env.DB, clipperId, campaignId);
+    if (!part) return err('Join this campaign before requesting access');
+    if (part.status === 'kicked') return err('You have been removed from this campaign.', 403);
+
+    // `ig_username` is the legacy field name; accept either so an older client
+    // posting the old shape still works.
+    const raw = body.identifier != null ? body.identifier : body.ig_username;
+    const identifier = normaliseIdentifier(platform, raw);
+    const invalid = validateIdentifier(platform, identifier);
+    if (invalid) return err(invalid);
+
+    const result = await submitAccessRequest(env.DB, { clipperId, campaignId, platform, identifier });
+    return json(result, 201);
   }
 
   // ----------------------------------------------------------- submissions

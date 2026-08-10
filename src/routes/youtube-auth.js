@@ -1,6 +1,7 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
+import { canConnect } from '../access.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, fetchChannel, YtError, YT_ERRORS
 } from '../youtube.js';
@@ -66,6 +67,14 @@ export async function handleYoutubeAuth(request, env, url) {
     const part = await getParticipation(env.DB, session.sub, campaignId);
     if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
     if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
+
+    // The Google account must already be on the Cloud project's Test users
+    // list. Same reasoning as Instagram: without it Google rejects the sign-in
+    // with an error the clipper cannot act on.
+    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'youtube');
+    if (!gate.allowed) {
+      return failure(campaignId, new YtError('NOT_APPROVED', gate.title, gate.reason));
+    }
 
     const state = await signSession(
       { sub: session.sub, campaign_id: Number(campaignId), exp: Date.now() + STATE_TTL_MS },

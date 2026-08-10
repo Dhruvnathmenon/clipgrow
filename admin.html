@@ -79,6 +79,14 @@
       border:1px solid var(--border-s); border-radius:6px; cursor:pointer; color:var(--text); }
     .chip-pick:has(input:checked) { border-color:var(--neon); color:var(--neon); background:rgba(61,255,122,.08); }
 
+    /* Pending-approval count, on the tab so blocked clippers are visible
+       without opening it. */
+    .tab-count { display:none; background:var(--gold); color:#060E06; font-size:.62rem; font-weight:800;
+      border-radius:9px; padding:.05rem .38rem; margin-left:.35rem; vertical-align:middle; }
+    .auth-steps { display:grid; gap:.6rem; }
+    .auth-step { font-size:.8rem; color:var(--text); background:var(--card-h); border:1px solid var(--border);
+      border-radius:8px; padding:.7rem .85rem; line-height:1.55; }
+
     .progress { width:120px; height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); }
     .progress-fill { height:100%; background:var(--neon); }
     .progress-lbl { font-size:.68rem; color:var(--muted); margin-top:.25rem; }
@@ -156,7 +164,7 @@
       <button class="tab" data-v="payouts" onclick="showView('payouts',this)">Payouts</button>
       <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
       <button class="tab" data-v="clients" onclick="showView('clients',this)">Clients</button>
-      <button class="tab" data-v="testers" onclick="showView('testers',this)">Instagram Testers</button>
+      <button class="tab" data-v="testers" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
       <button class="tab" data-v="guides" onclick="showView('guides',this)">SEO Guides</button>
     </div>
 
@@ -312,13 +320,24 @@
       </div>
     </div>
 
-    <!-- INSTAGRAM TESTERS -->
+    <!-- AUTHENTICATION -->
     <div class="view" id="v-testers">
       <div class="panel">
-        <h2 class="panel-title">Instagram Tester Queue</h2>
-        <p class="note" style="margin-bottom:1rem">The Meta app is in Development Mode — a clipper's Instagram account must be added as a Tester (Meta App Dashboard → App roles → Instagram Testers) and accept the invite before they can connect. Track that here.</p>
+        <h2 class="panel-title">Waiting for your approval</h2>
+        <p class="note" style="margin-bottom:1rem">Neither platform lets a clipper connect until you grant their specific account access. Do the step below on the platform, then hit <strong>Approve</strong> — the clipper's Connect button only appears once you do, so they can never walk into an error.</p>
+        <div class="auth-steps">
+          <div class="auth-step"><span class="badge neutral">Instagram</span> Meta App Dashboard → App roles → <strong>Instagram Testers</strong> → add their handle. They then accept the invite inside Instagram.</div>
+          <div class="auth-step"><span class="badge budget_full">YouTube</span> Google Cloud Console → OAuth consent screen → <strong>Test users</strong> → add their Google email. Takes effect immediately.</div>
+        </div>
+        <div class="table-wrap" style="margin-top:1.1rem"><table>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Account to grant</th><th>Campaign</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="pending-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Already handled</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Instagram</th><th>Campaign</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Account</th><th>Campaign</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="testers-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
@@ -1140,35 +1159,78 @@
       }catch(e2){ toast(e2.message,true); }
     });
 
-    function loadAll(){ loadOverview(); loadCampaigns(); loadClippers(); }
+    // loadTesters runs on every refresh, not just when its tab is opened, so
+    // the pending-approval badge is accurate from the moment you sign in.
+    function loadAll(){ loadOverview(); loadCampaigns(); loadClippers(); loadTesters(); }
     /* ── Instagram tester queue ── */
     const TESTER_BADGE={requested:'pending',invited:'needs_reauth',confirmed:'connected',rejected:'kicked'};
+    // Clippers are blocked until these are actioned, so the count rides on the
+    // tab itself rather than only being visible once you open it.
+    function setAuthCount(n){
+      const el=document.getElementById('auth-count');
+      if(!el) return;
+      el.textContent=n>0?n:'';
+      el.style.display=n>0?'':'none';
+    }
+
+    const platBadge=p=>p==='youtube'?'budget_full':'neutral';
+    const platName=p=>p==='youtube'?'YouTube':'Instagram';
+    const acctDisplay=r=>(r.platform==='youtube'?'':'@')+(r.identifier||r.ig_username||'');
+
     async function loadTesters(){
       try{
-        const {requests}=await api('/api/admin/tester-requests');
-        const tb=document.getElementById('testers-body');
-        tb.innerHTML=requests.length?requests.map(r=>`<tr>
+        const {requests}=await api('/api/admin/access-requests');
+        const pending=requests.filter(r=>r.status==='requested'||r.status==='invited');
+        const done=requests.filter(r=>r.status==='confirmed'||r.status==='rejected');
+        setAuthCount(pending.length);
+
+        document.getElementById('pending-body').innerHTML=pending.length?pending.map(r=>`<tr>
           <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
-          <td>@${esc(r.ig_username)}</td>
+          <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
+          <td><strong style="color:var(--white)">${esc(acctDisplay(r))}</strong>
+            <button class="btn btn-ghost btn-sm" style="margin-left:.4rem" onclick="copyText('${esc(r.identifier||r.ig_username)}')">copy</button>
+            ${r.already_granted>0?`<div class="muted" style="font-size:.68rem;margin-top:.2rem">Already granted on another campaign — nothing to do on the platform, just approve.</div>`:''}</td>
           <td class="muted">${esc(r.campaign_name||'—')}</td>
           <td class="muted">${when(r.requested_at)}</td>
-          <td><span class="badge ${TESTER_BADGE[r.status]||''}">${esc(r.status)}</span>${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
+          <td><span class="badge needs_reauth">waiting</span></td>
           <td class="actions">
-            ${r.status==='requested'?`<button class="btn btn-sm" onclick="setTester(${r.id},'invited')">Mark Invited</button>`:''}
-            ${r.status==='invited'?`<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Mark Confirmed</button>`:''}
-            ${r.status==='requested'||r.status==='invited'?`<button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>`:''}
-            ${r.status==='confirmed'||r.status==='rejected'?`<span class="muted" style="font-size:.72rem">—</span>`:''}
+            <button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>
           </td>
-        </tr>`).join(''):'<tr><td colspan="6" class="empty">No tester requests yet.</td></tr>';
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">Nothing waiting — you\'re all caught up.</td></tr>';
+
+        document.getElementById('testers-body').innerHTML=done.length?done.map(r=>`<tr>
+          <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
+          <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
+          <td class="muted">${esc(acctDisplay(r))}</td>
+          <td class="muted">${esc(r.campaign_name||'—')}</td>
+          <td><span class="badge ${TESTER_BADGE[r.status]||''}">${r.status==='confirmed'?'approved':esc(r.status)}</span>
+            ${r.is_connected>0?'<span class="badge connected" style="margin-left:.3rem">connected</span>':''}
+            ${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
+          <td class="actions">
+            ${r.status==='rejected'?`<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>`:''}
+            ${r.status==='confirmed'&&!r.is_connected?`<button class="btn btn-ghost btn-sm" onclick="rejectTester(${r.id})">Revoke</button>`:''}
+            ${r.status==='confirmed'&&r.is_connected?'<span class="muted" style="font-size:.72rem">—</span>':''}
+          </td>
+        </tr>`).join(''):'<tr><td colspan="6" class="empty">Nothing handled yet.</td></tr>';
       }catch(e){ toast(e.message,true); }
     }
+
+    // The handle/email has to be pasted into Meta or Google Cloud by hand, so
+    // make that copy one click rather than a careful manual retype.
+    window.copyText=function(t){
+      navigator.clipboard.writeText(t).then(()=>toast('Copied: '+t)).catch(()=>toast('Could not copy',true));
+    };
     window.setTester=async function(id,status){
-      try{ await api('/api/admin/tester-requests/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Updated'); loadTesters(); }
-      catch(e){ toast(e.message,true); }
+      try{
+        await api('/api/admin/access-requests/'+id,{method:'PATCH',body:JSON.stringify({status})});
+        toast(status==='confirmed'?'Approved — the clipper can connect now':'Updated');
+        loadTesters();
+      }catch(e){ toast(e.message,true); }
     };
     window.rejectTester=async function(id){
       const note=prompt('Reason (optional, shown to the clipper):')||'';
-      try{ await api('/api/admin/tester-requests/'+id,{method:'PATCH',body:JSON.stringify({status:'rejected',note})}); toast('Rejected'); loadTesters(); }
+      try{ await api('/api/admin/access-requests/'+id,{method:'PATCH',body:JSON.stringify({status:'rejected',note})}); toast('Rejected'); loadTesters(); }
       catch(e){ toast(e.message,true); }
     };
 

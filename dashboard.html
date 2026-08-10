@@ -220,10 +220,10 @@
     .badge.below_min { background:rgba(255,255,255,.08); color:var(--muted-l); }
 
     /* Instagram tester-request inline form */
-    .tester-req-row { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
-    .tester-req-row input { flex:1; min-width:180px; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.55rem .75rem; color:var(--white); font-size:.85rem; }
-    .tester-req-row input:focus { outline:none; border-color:var(--neon); }
-    .tester-req-row .btn { flex-shrink:0; }
+    .tester-req-row, .step-row { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; }
+    .tester-req-row input, .step-row input { flex:1; min-width:180px; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.55rem .75rem; color:var(--white); font-size:.85rem; }
+    .tester-req-row input:focus, .step-row input:focus { outline:none; border-color:var(--neon); }
+    .tester-req-row .btn, .step-row .btn { flex-shrink:0; }
 
     /* Directory ranking + profile popup */
     .dir-row { cursor:pointer; transition:background .18s; }
@@ -571,48 +571,68 @@
       </div>`;
     }
 
-    /* One platform's connect / reconnect / connected state inside a campaign.
-       Instagram carries the extra tester-invite helper because its Meta app is
-       still in Development Mode; YouTube's equivalent gate is a Google test
-       user, which the admin adds by email rather than by handle. */
+    /* One platform's onboarding state inside a campaign, rendered from the
+       server-computed `access` state rather than inferred here.
+
+       The clipper is only ever shown ONE next action, and only ever one that
+       can actually succeed: request access -> wait -> connect. Both platforms
+       reject accounts that have not been granted access on their side, so
+       offering Connect before approval would just walk them into an error they
+       cannot act on. */
     function platformBlock(c,p,plat,a){
       const isYt=plat==='youtube';
       const label=isYt?'YouTube':'Instagram';
       const thing=isYt?'Shorts':'Reels';
       const startUrl=`/api/auth/${isYt?'youtube':'instagram'}/start?campaign_id=${c.id}`;
       const handle=a?(isYt?esc(a.username):'@'+esc(a.username)):'';
+      const acc=(p.access&&p.access[plat])||null;
 
       if(!a){
-        if(isYt){
-          return `<div class="alert warn">
-            <div class="alert-t">YouTube not connected</div>
-            <div>Connect the YouTube channel you'll post this campaign's Shorts from.</div>
-            <div class="alert-fix">This campaign pays on Shorts only — regular uploads are tracked but do not earn. Your Google account must have been added by the ClipGrow admin first.</div>
-            <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect YouTube</a></div>
+        // No server-computed state (older payload, or platform not offered) —
+        // fall back to the plain connect link rather than showing nothing.
+        if(!acc) return `<div class="alert warn">
+          <div class="alert-t">${label} not connected</div>
+          <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect ${label}</a></div></div>`;
+
+        const idLabel=isYt?'Google account email':'Instagram username';
+        const idPlaceholder=isYt?'you@gmail.com':'yourhandle';
+
+        if(acc.state==='none'||acc.state==='rejected'){
+          return `<div class="alert ${acc.state==='rejected'?'bad':'warn'}">
+            <div class="alert-t">${esc(acc.title)}</div>
+            <div>${esc(acc.body)}</div>
+            <div class="step-row">
+              <input type="text" id="ar-${plat}-${c.id}" placeholder="${idPlaceholder}"
+                value="${acc.identifier?esc(acc.identifier):''}"
+                onkeydown="if(event.key==='Enter')requestAccess(${c.id},'${plat}')" />
+              <button class="btn" onclick="requestAccess(${c.id},'${plat}')">Request access</button>
+            </div>
+            <div class="alert-fix">${esc(idLabel)} — make sure it is exactly right; we grant access to this specific account.</div>
           </div>`;
         }
-        // Connect is ALWAYS reachable. An account that is already an approved
-        // tester must never be blocked by our own queue -- and if it isn't a
-        // tester yet, Instagram returns a typed NOT_A_TESTER error that tells
-        // the clipper exactly what to do. The request form below is a helper
-        // for getting on the admin's list, not a gate.
-        const t=p.tester;
-        let note='It must be a Professional account (Creator or Business) — personal accounts cannot report views.';
-        if(t&&t.status==='requested') note=`Access requested for @${esc(t.ig_username)} — ClipGrow is adding you as a tester. Already approved? Connect now.`;
-        else if(t&&t.status==='invited') note=`Invite sent to @${esc(t.ig_username)}. Accept it in Instagram → Settings and privacy → Apps and websites → Tester invites, then connect.`;
-        else if(t&&t.status==='confirmed') note=`@${esc(t.ig_username)} is approved — connect it now.`;
-        else if(t&&t.status==='rejected') note=`Your access request wasn't approved${t.note?': '+esc(t.note):''}. Check the username and request again.`;
 
-        return `<div class="alert warn">
-          <div class="alert-t">Instagram not connected</div>
-          <div>Connect the Instagram account you'll post this campaign's clips from.</div>
-          <div class="alert-fix">${note}</div>
-          <div style="margin-top:.85rem"><button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button></div>
-          ${(!t||t.status==='rejected')?`<div class="tester-req-row">
-            <input type="text" id="tr-username-${c.id}" placeholder="Your Instagram username" value="${t?esc(t.ig_username):''}"/>
-            <button class="btn btn-ghost btn-sm" onclick="requestTesterAccess(${c.id})">Not a tester yet? Request access</button>
-          </div>`:''}
-        </div>`;
+        if(acc.state==='requested'){
+          return `<div class="alert info">
+            <div class="alert-t">⏳ ${esc(acc.title)}</div>
+            <div>${esc(acc.body)}</div>
+            <div class="step-row" style="margin-top:.7rem">
+              <button class="btn btn-ghost btn-sm" onclick="loadCampaigns().then(()=>openCampaign(${c.id}))">Check again</button>
+              <button class="btn btn-ghost btn-sm" onclick="reRequestAccess(${c.id},'${plat}')">Wrong ${isYt?'email':'username'}? Change it</button>
+            </div>
+          </div>`;
+        }
+
+        if(acc.state==='approved'){
+          return `<div class="alert ok">
+            <div class="alert-t">✓ ${esc(acc.title)}</div>
+            <div>${esc(acc.body)}</div>
+            <div style="margin-top:.85rem">
+              ${isYt
+                ? `<a class="btn" href="${startUrl}">Connect YouTube</a>`
+                : `<button class="btn" onclick="openConnectGuide(${c.id},'${esc(c.name).replace(/'/g,"\\'")}')">Connect Instagram</button>`}
+            </div>
+          </div>`;
+        }
       }
 
       if(a.status==='needs_reauth'||a.status==='revoked'){
@@ -928,13 +948,34 @@
     };
     window.closeConnectGuide=function(){ document.getElementById('ig-back').classList.remove('open'); };
 
-    window.requestTesterAccess=async function(campaignId){
-      const input=document.getElementById('tr-username-'+campaignId);
-      const username=(input.value||'').trim();
-      if(!username){ toast('Enter your Instagram username',true); return; }
+    /* Step 1: tell ClipGrow which account to grant access to. Until an admin
+       approves it, the platform itself would reject any connect attempt, so
+       this has to come first. */
+    window.requestAccess=async function(campaignId,platform){
+      const input=document.getElementById(`ar-${platform}-${campaignId}`);
+      const identifier=((input&&input.value)||'').trim();
+      if(!identifier){ toast(platform==='youtube'?'Enter your Google account email':'Enter your Instagram username',true); return; }
       try{
-        await api('/api/clipper/tester-request',{method:'POST',body:JSON.stringify({ig_username:username,campaign_id:campaignId})});
-        toast('Request sent — we\'ll add you as a tester shortly');
+        await api('/api/clipper/access-request',{method:'POST',
+          body:JSON.stringify({identifier,platform,campaign_id:campaignId})});
+        toast('Request sent — ClipGrow will approve it shortly');
+        await loadCampaigns();
+        openCampaign(campaignId);
+      }catch(e){ toast(e.message,true); }
+    };
+
+    /* Lets a clipper correct a typo while still waiting. Re-submitting updates
+       the pending request rather than queuing a second one for the admin. */
+    window.reRequestAccess=async function(campaignId,platform){
+      const isYt=platform==='youtube';
+      const next=prompt(isYt?'Google account email for your channel:':'Your Instagram username:');
+      if(next===null) return;
+      const identifier=next.trim();
+      if(!identifier) return;
+      try{
+        await api('/api/clipper/access-request',{method:'POST',
+          body:JSON.stringify({identifier,platform,campaign_id:campaignId})});
+        toast('Updated — ClipGrow will approve it shortly');
         await loadCampaigns();
         openCampaign(campaignId);
       }catch(e){ toast(e.message,true); }
