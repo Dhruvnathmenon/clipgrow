@@ -260,6 +260,16 @@
           <button class="btn btn-ghost" onclick="loadPayable()">Reset selection</button>
         </div>
       </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Bulk Cleanup</h2>
+        <p class="note" style="margin-bottom:1rem">Closes every video that is currently under its campaign's minimum at ₹0, everywhere (or scoped below) — not just the clipper/window on screen above. These videos already earn nothing, so this changes no one's money; it just stops them sitting pending forever. Each one can be individually reopened afterwards from its row above.</p>
+        <div class="form-grid">
+          <div><label>Limit to campaign</label><select id="wo-campaign" class="form-control"><option value="">All campaigns</option></select></div>
+          <div><label>Limit to clipper</label><select id="wo-clipper" class="form-control"><option value="">All clippers</option></select></div>
+          <div style="display:flex;align-items:flex-end"><button class="btn btn-ghost" onclick="bulkWriteOffBelowMin()">Close all below-minimum clips now</button></div>
+        </div>
+      </div>
     </div>
 
     <!-- CLIENTS -->
@@ -513,8 +523,29 @@
           CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} (@${esc(c.username)})</option>`).join('');
         document.getElementById('po-campaign').innerHTML='<option value="">All campaigns</option>'+
           CAMPAIGNS.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        document.getElementById('wo-campaign').innerHTML='<option value="">All campaigns</option>'+
+          CAMPAIGNS.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        document.getElementById('wo-clipper').innerHTML='<option value="">All clippers</option>'+
+          CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} (@${esc(c.username)})</option>`).join('');
       }
     }
+
+    window.bulkWriteOffBelowMin=async function(){
+      const campaignId=document.getElementById('wo-campaign').value;
+      const clipperId=document.getElementById('wo-clipper').value;
+      const wc=campaignId&&CAMPAIGNS.find(c=>String(c.id)===campaignId);
+      const wl=clipperId&&CLIPPERS.find(c=>String(c.id)===clipperId);
+      const scope=[wc&&wc.name, wl&&wl.display_name].filter(Boolean).join(', ');
+      if(!confirm(`Close every below-minimum video${scope?` for ${scope}`:' across every clipper and campaign'} at ₹0?\n\nThis does not change anyone's payable amount — these videos already earn nothing. Each can be reopened individually afterwards.`)) return;
+      try{
+        const r=await api('/api/admin/payouts/write-off-below-min',{method:'POST',body:JSON.stringify({
+          campaign_id:campaignId?Number(campaignId):null,
+          clipper_id:clipperId?Number(clipperId):null
+        })});
+        toast(r.closed?`Closed ${r.closed} below-minimum video(s) across ${r.campaigns.length} campaign(s)`:'Nothing to close — no below-minimum videos found');
+        if(PAYABLE) await loadPayable();
+      }catch(e){ toast(e.message,true); }
+    };
 
     window.refreshClipperViews=async function(){
       const id=document.getElementById('po-clipper').value;
@@ -540,7 +571,7 @@
     };
 
     function renderPayable(){
-      const {clips,totals,write_off_after_days,by_platform}=PAYABLE;
+      const {clips,totals,by_platform}=PAYABLE;
       // Both platforms draw on one budget, so the split is informational --
       // shown because it is the first thing you want to know, not because the
       // money is separated.
@@ -558,7 +589,11 @@
       if(!clips.length){ tb.innerHTML='<tr><td colspan="9" class="empty">No videos in this period.</td></tr>'; }
       else tb.innerHTML=clips.map(c=>{
         const dis=!c.selectable && !c.write_off_due;
-        const checked=c.selectable?'checked':'';
+        // Both payable and below-minimum videos are ticked by default: paying
+        // and closing out are meant to happen together for whatever window is
+        // on screen, so nothing pending is left behind by accident. Untick to
+        // give a specific video more time before settling.
+        const checked=(c.selectable||c.write_off_due)?'checked':'';
         return `<tr class="${c.locked?'is-locked':''}">
           <td>${c.locked?'🔒':`<input type="checkbox" class="po-tick" data-id="${c.id}" data-kind="${c.selectable?'pay':'writeoff'}" data-amt="${c.earning}" ${checked} ${dis?'disabled':''} onchange="recalcPayout()" />`}</td>
           <td><a href="${esc(c.permalink)}" target="_blank" rel="noopener">video ↗</a>${c.account_username?`<div class="muted" style="font-size:.7rem">${c.platform==='youtube'?'':'@'}${esc(c.account_username)}</div>`:''}</td>
@@ -571,12 +606,12 @@
           <td class="money">${money(c.locked?c.locked_earning:c.earning)}
             ${c.capped?`<div class="muted" style="font-size:.68rem" title="Raw ${money(c.uncapped_earning)} capped at the campaign's per-video max">capped from ${money(c.uncapped_earning)}</div>`:''}</td>
           <td><span class="badge ${CLIP_BADGE[c.state]||'neutral'}">${CLIP_LABEL[c.state]||c.state}</span>
-            ${c.write_off_due?`<div class="muted" style="font-size:.68rem">dead ${write_off_after_days}d+ — tick to close at ₹0</div>`:''}
+            ${c.write_off_due?`<div class="muted" style="font-size:.68rem">under minimum — ticked to close at ₹0</div>`:''}
             ${c.locked&&c.lock_reason==='below_min'?`<button class="btn btn-ghost btn-sm" style="margin-top:.3rem" onclick="unlockClip(${c.id})">Reopen</button>`:''}</td>
         </tr>`;
       }).join('');
       document.getElementById('po-note').textContent=
-        `Ticked videos with an amount get paid and locked. Ticked videos worth ₹0 (past ${write_off_after_days} days and still under the campaign minimum) are closed out at zero so they stop showing as pending forever.`;
+        `Ticked videos with an amount get paid and locked. Videos still under the campaign minimum are ticked to close out at zero automatically -- this window is their grace period, so untick one first if it needs more time.`;
       document.getElementById('po-all').checked=false;
       recalcPayout();
     }

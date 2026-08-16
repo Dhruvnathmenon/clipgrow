@@ -14,8 +14,12 @@ import { reallocateCampaign } from './earnings.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Clips whose campaign minimum was never reached, this many days after posting. */
-export const WRITE_OFF_AFTER_DAYS = 30;
+// A clip that never reached the campaign minimum is closed the moment it is
+// looked at during a payout run -- not after some fixed grace period. The
+// grace period a clip effectively gets is however wide the admin's own payout
+// window is (they choose that cadence: weekly, monthly, whatever), so there
+// is no separate age threshold to track here. See settlePayment's write-off
+// path and writeOffAllBelowMin below.
 
 function clipAgeDays(row) {
   return daysSince(row.posted_at || row.created_at);
@@ -53,7 +57,15 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       ? Math.floor((r.views / 1000) * (r.cpm || 0))
       : 0;
     const ageDays = clipAgeDays(r);
-    const belowMin = !r.locked_at && (r.min_views || 0) > 0 && r.views < r.min_views;
+    // Mirrors clipState's own 'below_min' gate exactly (src/clipstate.js) --
+    // a clip only counts as "under the minimum" once it has actually been
+    // checked at least once and is otherwise a normal, earning-eligible clip.
+    // Without the eligible/status/last_ok_sync_at gates, a brand new clip
+    // that has never been synced (views defaults to 0) would look identical
+    // to one that was checked and genuinely fell short, which would have made
+    // it eligible for write-off before it ever got a real look.
+    const belowMin = !r.locked_at && r.status === 'active' && r.eligible !== 0 &&
+      !!r.last_ok_sync_at && (r.min_views || 0) > 0 && r.views < r.min_views;
 
     return {
       id: r.id,
@@ -82,10 +94,10 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       state_message: clipStateMessage(state, r),
       below_min: belowMin,
       age_days: ageDays,
-      // A clip that never reached the minimum and is now past the write-off
-      // window is dead: it should be closed at zero rather than left pending
-      // forever.
-      write_off_due: belowMin && ageDays != null && ageDays >= WRITE_OFF_AFTER_DAYS,
+      // Any clip still under the minimum is due for write-off the moment a
+      // payout is run over it -- the payout window itself is the grace
+      // period, so there is no extra age threshold on top of it.
+      write_off_due: belowMin,
       posted_at: r.posted_at,
       synced_at: r.created_at,
       last_ok_sync_at: r.last_ok_sync_at,
@@ -260,4 +272,55 @@ export async function reversePayment(db, paymentId) {
   for (const cid of campaigns) await reallocateCampaign(db, cid);
 
   return { ok: true, unlocked_clips: (subs || []).length };
+}
+
+/**
+ * Closes out every currently below-minimum, unlocked clip at zero, across as
+ * many clips as the (optional) campaign/clipper filters match. This is the
+ * "old ones" sweep: clips that fell short before the per-payout write-off
+ * existed, or that simply never came up in anyone's payout window. It is
+ * money-neutral by construction -- every clip it touches already had
+ * `earning = 0` (below the minimum never earns), so nothing owed to anyone
+ * changes. Locking with `lock_reason = 'below_min'` still leaves the normal
+ * escape hatch: an admin can reopen any of these individually from the
+ * Payouts tab, same as a write-off made through settlePayment.
+ *
+ * Uses the exact same gate as payableClips' `belowMin` (see above) so this
+ * can never sweep up a clip that simply hasn't been synced yet.
+ */
+export async function writeOffAllBelowMin(db, { campaignId = null, clipperId = null } = {}) {
+  const conds = [
+    's.locked_at IS NULL',
+    "s.status = 'active'",
+    's.eligible != 0',
+    's.last_ok_sync_at IS NOT NULL',
+    'c.min_views > 0',
+    's.views < c.min_views'
+  ];
+  const args = [];
+  if (campaignId) { conds.push('s.campaign_id = ?'); args.push(campaignId); }
+  if (clipperId) { conds.push('s.clipper_id = ?'); args.push(clipperId); }
+
+  const { results } = await db.prepare(
+    `SELECT s.id, s.campaign_id FROM submissions s
+     JOIN campaigns c ON c.id = s.campaign_id
+     WHERE ${conds.join(' AND ')}`
+  ).bind(...args).all();
+
+  const rows = results || [];
+  if (!rows.length) return { closed: 0, campaigns: [] };
+
+  const ts = now();
+  await db.batch(rows.map(r => db.prepare(
+    `UPDATE submissions SET locked_at = ?, locked_earning = 0, lock_reason = 'below_min', earning = 0
+     WHERE id = ? AND locked_at IS NULL`
+  ).bind(ts, r.id)));
+
+  // Closing these frees up nothing budget-wise (they were earning 0 already),
+  // but reallocating keeps every affected campaign's own bookkeeping in sync
+  // with the fact that these clips are now permanently out of the pool.
+  const campaigns = [...new Set(rows.map(r => r.campaign_id))];
+  for (const cid of campaigns) await reallocateCampaign(db, cid);
+
+  return { closed: rows.length, campaigns };
 }

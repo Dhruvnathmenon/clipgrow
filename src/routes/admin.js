@@ -6,7 +6,7 @@ import {
 } from '../db.js';
 import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
-import { payableClips, settlePayment, reversePayment, WRITE_OFF_AFTER_DAYS } from '../payouts.js';
+import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
 
@@ -485,7 +485,21 @@ export async function handleAdmin(request, env, url) {
       days,
       campaignId: campaignId ? Number(campaignId) : null
     });
-    return json({ ...data, days, write_off_after_days: WRITE_OFF_AFTER_DAYS });
+    return json({ ...data, days });
+  }
+
+  // One-click sweep: closes every currently below-minimum, unlocked clip at
+  // zero, scoped to a campaign/clipper if given or across everyone if not.
+  // Money-neutral (these clips already earn 0), so this is safe to run on
+  // demand -- it exists for clips that predate a clipper's own payout window,
+  // or that nobody has run a payout over yet.
+  if (pathname === '/api/admin/payouts/write-off-below-min' && method === 'POST') {
+    const body = await readJson(request).catch(() => ({}));
+    const result = await writeOffAllBelowMin(env.DB, {
+      campaignId: body.campaign_id ? Number(body.campaign_id) : null,
+      clipperId: body.clipper_id ? Number(body.clipper_id) : null
+    });
+    return json(result);
   }
 
   // Records the payment AND locks every clip it covers, in one call. Locking is
