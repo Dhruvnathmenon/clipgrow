@@ -435,15 +435,26 @@ export async function handleAdmin(request, env, url) {
   if (params && (method === 'PATCH' || method === 'DELETE')) {
     const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
     if (!sub) return err('Not found', 404);
-    // A settled clip is closed history: real money was sent against this exact
-    // amount. Editing or deleting it would rewrite the books and silently
-    // desync the payment ledger. Reverse the payment first if it was a mistake.
-    if (sub.locked_at) {
-      return err('This clip is locked because it has already been settled. Reverse its payment first if you need to change it.', 409);
+    // A clip attached to a real payment (payment_id set) is closed financial
+    // history: money was actually sent against this exact amount. Editing or
+    // deleting it would silently desync the payment ledger, so it is refused
+    // outright -- reverse the payment first if it was a mistake.
+    //
+    // A clip locked at zero with NO payment attached (lock_reason='below_min',
+    // written off through settlePayment or the write-off sweep) carries no
+    // money at all -- there is nothing to desync, so it can be deleted outright
+    // for exactly the case a locked-but-worthless test/trial clip needs. It
+    // still can't be PATCHed (paused/disqualified) while locked, since those
+    // are states for an open clip; unlock it first if it needs to change.
+    if (sub.locked_at && sub.payment_id) {
+      return err('This clip is locked because it has already been paid. Reverse that payment first if you need to change it.', 409);
     }
     if (method === 'DELETE') {
       await env.DB.prepare('DELETE FROM submissions WHERE id = ?').bind(params.id).run();
     } else {
+      if (sub.locked_at) {
+        return err('This clip is closed (settled at zero). Reopen it first if you need to change its status.', 409);
+      }
       // 'paused' = temporarily not monetised (under review, off-guidelines).
       // 'disqualified' = permanently rejected. Both earn nothing and hand their
       // share of the budget back; only 'active' accrues.
