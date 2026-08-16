@@ -9,7 +9,14 @@ import * as yt from './youtube.js';
 //   id                                     platform key stored on rows
 //   label                                  human name for UI and error text
 //   isConfigured(env)                      are the app credentials present?
-//   fetchViews(account, mediaIds, env)     -> Map(mediaId -> views)
+//   fetchViews(account, mediaIds, env)     -> Map(mediaId -> {ok:true, views} |
+//                                                             {ok:false, code, needsReauth?})
+//                                              An id absent from the map means it was
+//                                              genuinely missing from a successful
+//                                              response (deleted/private), not a fetch
+//                                              failure. Per-id isolation is mandatory:
+//                                              one id failing must never cost any other
+//                                              id in the same call its result.
 //   listRecent(account, {sinceTs}, env)    -> normalised media[]
 //   findByUrl(account, url, env)           -> normalised media | null
 //   refreshToken(account, env)             -> {access_token, expires_at, refresh_token?}
@@ -44,23 +51,44 @@ const instagramAdapter = {
     };
   },
 
-  // Instagram has no batch insights endpoint, so this is one call per clip.
-  // The Map shape is what lets YouTube batch 50 per call behind the same API.
-  async fetchViews(account, mediaIds) {
+  // Instagram has no batch insights endpoint, so this is one call per clip --
+  // and with N sequential network calls, at least one transiently failing
+  // (rate limit, momentary blip) on any given run is the expected case, not
+  // the exception. Each call is isolated in its own try/catch so one clip's
+  // failure can never cost every other clip on the account its view update.
+  //
+  // This is a fix for a real production incident: the previous version let a
+  // single throw abort the whole loop, discarding every result already
+  // fetched. One clip failing marked an entire account's clips with the same
+  // error and froze all of their views until a run happened to complete with
+  // zero failures across every clip -- which, for an account with a dozen
+  // clips, could go a long time between successes purely by bad luck.
+  // The fourth parameter exists so tests can substitute a fake fetch-one
+  // function and prove the isolation behaviour directly, without needing to
+  // mock the network or the instagram.js module. Production call sites never
+  // pass it, so the real API is always used there.
+  // `onAttempt`, when passed, fires once per real Instagram call made (see
+  // src/rate-budget.js) so the caller's rate-budget tracker stays accurate.
+  async fetchViews(account, mediaIds, env, { fetchOne = ig.fetchMediaViews, onAttempt } = {}) {
     const out = new Map();
     for (const id of mediaIds) {
-      out.set(id, await ig.fetchMediaViews(id, account.access_token));
+      try {
+        const views = await fetchOne(id, account.access_token, { onAttempt });
+        out.set(id, { ok: true, views });
+      } catch (e) {
+        out.set(id, { ok: false, code: (e && e.code) || 'UNKNOWN', needsReauth: !!(e && e.needsReauth) });
+      }
     }
     return out;
   },
 
-  async listRecent(account, { sinceTs = 0 } = {}) {
-    const raw = await ig.listRecentMedia(account.external_id, account.access_token, { sinceTs });
+  async listRecent(account, { sinceTs = 0, onAttempt } = {}) {
+    const raw = await ig.listRecentMedia(account.external_id, account.access_token, { sinceTs, onAttempt });
     return raw.filter(ig.isVideoMedia).map(m => this.normalise(m));
   },
 
-  async findByUrl(account, url) {
-    const m = await ig.findMediaByUrl(account.external_id, account.access_token, url);
+  async findByUrl(account, url, env, { onAttempt } = {}) {
+    const m = await ig.findMediaByUrl(account.external_id, account.access_token, url, { onAttempt });
     if (!m) throw ig.IG_ERRORS.MEDIA_NOT_FOUND();
     if (!ig.isVideoMedia(m)) throw ig.IG_ERRORS.NOT_VIDEO();
     return this.normalise(m);

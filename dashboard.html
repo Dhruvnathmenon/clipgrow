@@ -169,6 +169,25 @@
     .clip-e small { display:block; font-size:.58rem; color:var(--muted); font-weight:500; font-family:'Inter',sans-serif; text-transform:uppercase; letter-spacing:.4px; }
     .clip-link { display:block; text-align:center; margin-top:.6rem; padding:.35rem; border-top:1px solid var(--border); color:var(--muted-l); font-size:.7rem; text-decoration:none; }
     .clip-link:hover { color:var(--neon); }
+    .clip-actions { display:flex; align-items:stretch; margin-top:.6rem; border-top:1px solid var(--border); }
+    .clip-actions .clip-link { flex:1; margin-top:0; border-top:none; }
+    .clip-refresh-btn { background:none; border:none; border-left:1px solid var(--border); color:var(--muted-l); font-size:.85rem; padding:.35rem .7rem; cursor:pointer; font-family:'Inter',sans-serif; }
+    .clip-refresh-btn:hover:not(:disabled) { color:var(--neon); }
+    .clip-refresh-btn:disabled { opacity:.5; cursor:default; }
+
+    /* Instagram rate budget widget */
+    .ig-budget { margin-top:.75rem; padding:.75rem .85rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:8px; }
+    .budget-row { display:flex; gap:1.2rem; flex-wrap:wrap; }
+    .budget-stat { display:flex; flex-direction:column; }
+    .budget-stat b { font-family:'Space Grotesk',sans-serif; font-size:1.1rem; color:var(--white); line-height:1.15; }
+    .budget-stat span { font-size:.68rem; color:var(--muted-l); margin-top:.1rem; }
+    .ig-progress { margin-top:.7rem; padding:.75rem .85rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:8px; }
+    .prog-bar { height:7px; background:var(--card); border:1px solid var(--border-s); border-radius:5px; overflow:hidden; }
+    .prog-fill { height:100%; background:var(--neon); transition:width .25s ease; }
+    .prog-label { font-size:.78rem; color:var(--text); margin-top:.5rem; font-weight:600; }
+    .prog-log { margin-top:.5rem; max-height:130px; overflow-y:auto; font-size:.72rem; color:var(--muted-l); font-family:monospace; }
+    .prog-line { padding:.15rem 0; border-bottom:1px solid var(--border); }
+    .prog-line.bad { color:var(--gold); }
 
     table { width:100%; border-collapse:collapse; }
     th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.66rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
@@ -648,6 +667,14 @@
           <strong>New ${thing} are added automatically.</strong> Anything you post on ${handle} from now on shows up here on its own — you don't need to do anything.
           ${isYt?'<div class="note" style="margin-top:.4rem">Only Shorts earn on this campaign. Regular uploads still appear here, marked as not eligible.</div>':''}
         </div>`;
+        // Instagram has a real, per-account limit on how many times it can be
+        // asked for view counts each hour -- unlike YouTube, which batches 50
+        // clips into one call and has enormous headroom by comparison. This
+        // widget is what makes that limit visible and usable rather than an
+        // invisible wall a clipper hits with no explanation.
+        if(!isYt) out+=`
+          <div id="ig-budget-${c.id}" class="ig-budget"><span class="muted" style="font-size:.78rem">Loading refresh budget…</span></div>
+          <div id="ig-progress-${c.id}" class="ig-progress" style="display:none"></div>`;
       }
       return out;
     }
@@ -721,6 +748,110 @@
         ${(b.approval_steps||[]).length?`<div class="sec-title">Approval process</div><div class="card"><ol class="steps">${b.approval_steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol></div>`:''}
         ${(b.terms||[]).length?`<div class="sec-title">Terms &amp; liability</div><div class="card"><ul class="terms">${b.terms.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:''}`;
       go('detail');
+      if(document.getElementById('ig-budget-'+c.id)) loadBudget(c.id);
+    };
+
+    /* ── Instagram rate budget: real, dynamic, per-account ──
+       Instagram's 200-calls/hour limit cannot be worked around with batching
+       (Meta counts every call in a batch individually), so the only thing
+       that actually helps is spending it deliberately -- which starts with
+       being able to see it. */
+    window.loadBudget=async function(campaignId){
+      const el=document.getElementById('ig-budget-'+campaignId);
+      if(!el) return;
+      try{
+        const b=await api('/api/clipper/campaigns/'+campaignId+'/budget');
+        if(!b.applicable){ el.innerHTML=''; return; }
+        const mins=Math.ceil(b.reset_in_ms/60000);
+        el.innerHTML=`
+          <div class="budget-row">
+            <div class="budget-stat"><b>${num(b.remaining)}</b><span>of ${num(b.limit)} calls left this hour</span></div>
+            <div class="budget-stat"><b>${b.full_refreshes_available==null?'—':num(b.full_refreshes_available)}</b><span>full refreshes (${num(b.total_clips)} clips each)</span></div>
+            <div class="budget-stat"><b>${num(b.single_refreshes_available)}</b><span>single-clip refreshes</span></div>
+          </div>
+          ${b.remaining<b.limit?`<div class="muted" style="font-size:.72rem;margin-top:.35rem">Next call frees up in ${mins<1?'under a minute':mins+'m'} — budget refills continuously, not all at once.</div>`:''}
+          ${b.too_many_for_full_refresh?`<div class="alert bad" style="margin-top:.6rem;padding:.6rem .8rem;font-size:.78rem">This account has ${num(b.total_clips)} active clips — more than fit in one hour's budget (${b.limit}). A full refresh is disabled. Lock/pay down older clips, or refresh individual videos instead.</div>`
+            : b.eligible_now===0 ? `<div class="muted" style="font-size:.78rem;margin-top:.5rem">All clips synced within the last hour — nothing new to fetch yet.</div>`
+            : `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem" onclick="startLiveRefresh(${campaignId})" ${b.remaining<1?'disabled':''}>⚡ Full refresh — live progress (${num(b.eligible_now)} clip${b.eligible_now===1?'':'s'})</button>`}
+        `;
+      }catch(e){ el.innerHTML=`<span class="muted" style="font-size:.78rem">${esc(e.message)}</span>`; }
+    };
+
+    /* Streams one clip's result at a time via SSE, so the progress bar and
+       count reflect real work actually landing, not a guessed animation. */
+    window.startLiveRefresh=function(campaignId){
+      const box=document.getElementById('ig-progress-'+campaignId);
+      const budgetEl=document.getElementById('ig-budget-'+campaignId);
+      if(!box) return;
+      box.style.display='';
+      box.innerHTML=`<div class="prog-bar"><div class="prog-fill" id="prog-fill-${campaignId}" style="width:0%"></div></div>
+        <div class="prog-label" id="prog-label-${campaignId}">Starting…</div>
+        <div class="prog-log" id="prog-log-${campaignId}"></div>`;
+      if(budgetEl) budgetEl.querySelectorAll('button').forEach(b=>b.disabled=true);
+
+      const es=new EventSource('/api/clipper/campaigns/'+campaignId+'/refresh-live');
+      let okCount=0, failCount=0;
+      es.onmessage=(ev)=>{
+        const data=JSON.parse(ev.data);
+        const fill=document.getElementById('prog-fill-'+campaignId);
+        const label=document.getElementById('prog-label-'+campaignId);
+        const log=document.getElementById('prog-log-'+campaignId);
+
+        if(data.type==='blocked'){
+          label.textContent='Could not start: '+(data.reason==='TOO_MANY_ACTIVE_CLIPS'
+            ? `${data.eligible} active clips is more than fits in one hour's budget.`
+            : 'No refresh budget left this hour.');
+          es.close();
+          loadBudget(campaignId);
+          return;
+        }
+        if(data.type==='progress'){
+          if(data.ok) okCount++; else failCount++;
+          if(fill) fill.style.width=Math.round(100*data.done/data.total)+'%';
+          if(label) label.textContent=`${data.done} of ${data.total} — ${okCount} updated${failCount?`, ${failCount} skipped`:''}`;
+          if(log){
+            const line=document.createElement('div');
+            line.className='prog-line'+(data.ok?'':' bad');
+            line.textContent=data.ok?`Clip #${data.clip_id}: ${num(data.views)} views`:`Clip #${data.clip_id}: ${data.code||'failed'}`;
+            log.prepend(line);
+            while(log.children.length>8) log.removeChild(log.lastChild);
+          }
+          return;
+        }
+        if(data.type==='done'){
+          if(label) label.textContent=`Done — ${data.synced} updated${data.failed?`, ${data.failed} skipped`:''}${data.deferred?`, ${data.deferred} left for next time`:''}`;
+          es.close();
+          toast(`Refreshed ${data.synced} clip${data.synced===1?'':'s'}`);
+          loadBudget(campaignId);
+          loadCampaigns();
+        }
+        if(data.type==='error'){
+          if(label) label.textContent='Error: '+data.message;
+          es.close();
+          loadBudget(campaignId);
+        }
+      };
+      es.onerror=()=>{
+        es.close();
+        const label=document.getElementById('prog-label-'+campaignId);
+        if(label && !/^Done|^Could not/.test(label.textContent)) label.textContent='Connection lost — refresh the page to see what completed.';
+        loadBudget(campaignId);
+      };
+    };
+
+    /* Refreshes one clip for exactly one call's worth of budget. */
+    window.refreshOneClip=async function(clipId,btn){
+      if(btn){ btn.disabled=true; btn.textContent='…'; }
+      try{
+        const r=await api('/api/clipper/submissions/'+clipId+'/refresh',{method:'POST'});
+        toast(`${num(r.views)} views`);
+        // The button can be visible from either the home preview or the full
+        // My Clips grid -- both render from the same CLIPS array, so both
+        // need refreshing regardless of which one triggered this.
+        await loadClips();
+        renderClips();
+      }catch(e){ toast(e.message,true); }
+      finally{ if(btn){ btn.disabled=false; btn.textContent='↻'; } }
     };
 
     window.joinCampaign=async function(id){
@@ -832,7 +963,11 @@
           ${!c.locked&&c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
           ${!c.locked&&c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
           ${!c.locked&&c.state_message&&c.state!=='below_min'&&c.state!=='verified'?`<div class="clip-note">${esc(c.state_message)}</div>`:''}
-          <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
+          <div class="clip-actions">
+            <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
+            ${!c.locked&&c.platform==='instagram'&&(c.state==='tracking'||c.state==='below_min'||c.state==='verified')
+              ?`<button class="clip-refresh-btn" title="Refresh just this clip (1 call)" onclick="refreshOneClip(${c.id},this)">↻</button>`:''}
+          </div>
         </div></div>`;
     }
     window.placeholderHTML=()=>`<div class="clip-ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/></svg>No preview</div>`;

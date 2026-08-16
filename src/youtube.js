@@ -340,8 +340,19 @@ export function normaliseVideo(v) {
 
 // ------------------------------------------------------------------ videos
 
-/** Hydrates video ids with snippet/statistics/contentDetails, 50 per call. */
-async function fetchVideoDetails(ids, accessToken, apiKey) {
+/**
+ * Hydrates video ids with snippet/statistics/contentDetails, 50 per call.
+ *
+ * Each batch of 50 is isolated: if one batch's request fails, that failure is
+ * recorded only against the ids in that batch, and the loop still attempts
+ * every remaining batch. A channel with, say, 120 clips makes three calls
+ * here -- without this, one of those three failing (a transient blip) would
+ * discard the other two batches' results as well and mark all 120 clips with
+ * the same error, which is the exact bug this mirrors on the Instagram side.
+ */
+// `fetchOneBatch` is injectable so tests can prove the per-batch isolation
+// below without mocking the network. Production always uses the default.
+export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch = ytFetch) {
   const out = [];
   for (let i = 0; i < ids.length; i += VIEW_BATCH_SIZE) {
     const batch = ids.slice(i, i + VIEW_BATCH_SIZE);
@@ -353,23 +364,32 @@ async function fetchVideoDetails(ids, accessToken, apiKey) {
     const headers = {};
     if (apiKey) url.searchParams.set('key', apiKey);
     else Object.assign(headers, auth(accessToken));
-    const body = await ytFetch(url.toString(), { headers });
-    out.push(...(body.items || []));
+    try {
+      const body = await fetchOneBatch(url.toString(), { headers });
+      out.push(...(body.items || []));
+    } catch (e) {
+      for (const id of batch) out.push({ id, __batchError: (e && e.code) || 'UNKNOWN' });
+    }
   }
   return out;
 }
 
 /**
  * View counts for a set of video ids.
- * @returns Map(videoId -> views). Ids missing from the response are omitted,
- *          which the caller treats as "video no longer available".
+ * @returns Map(videoId -> {ok:true, views} | {ok:false, code}). An id missing
+ *          from the map entirely means it was genuinely absent from a
+ *          successful response -- the honest signal that the video is gone.
+ *          An id present with ok:false means the fetch itself failed for
+ *          just that id's batch, which the caller must not confuse with the
+ *          video not existing.
  */
 export async function fetchViews(account, mediaIds, env) {
   const items = await fetchVideoDetails(mediaIds, account.access_token, env && env.YT_API_KEY);
   const map = new Map();
   for (const v of items) {
+    if (v.__batchError) { map.set(v.id, { ok: false, code: v.__batchError }); continue; }
     const n = v.statistics && v.statistics.viewCount;
-    map.set(v.id, Number(n || 0) || 0);
+    map.set(v.id, { ok: true, views: Number(n || 0) || 0 });
   }
   return map;
 }

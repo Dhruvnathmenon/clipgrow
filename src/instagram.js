@@ -139,10 +139,17 @@ function classify(status, body) {
   return IG_ERRORS.UNKNOWN(msg);
 }
 
-async function igFetch(url, { method = 'GET', body, retries = 2 } = {}) {
+// `onAttempt` fires once per real outbound request to Instagram, including
+// retries -- Instagram's rate limit counts every attempt, successful or not.
+// This is how every function below reports its usage to the caller's budget
+// tracker without instagram.js needing to know D1 or the app's schema exist;
+// it stays a plain API client. Callers that don't care (token exchange during
+// login, for instance) simply omit it.
+async function igFetch(url, { method = 'GET', body, retries = 2, onAttempt } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
+    if (onAttempt) onAttempt();
     try {
       res = await fetch(url, { method, body });
     } catch {
@@ -277,7 +284,7 @@ function normalizePermalink(u) {
 }
 
 /** Finds a post on the connected account by its public permalink. */
-export async function findMediaByUrl(igUserId, accessToken, permalinkUrl) {
+export async function findMediaByUrl(igUserId, accessToken, permalinkUrl, { onAttempt } = {}) {
   const target = normalizePermalink(permalinkUrl);
   let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
   url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp,thumbnail_url,media_url,caption');
@@ -285,7 +292,7 @@ export async function findMediaByUrl(igUserId, accessToken, permalinkUrl) {
   url.searchParams.set('access_token', accessToken);
 
   for (let page = 0; page < 10; page++) {
-    const body = await igFetch(url.toString());
+    const body = await igFetch(url.toString(), { onAttempt });
     const match = (body.data || []).find(m => m.permalink && normalizePermalink(m.permalink) === target);
     if (match) return match;
     const next = body.paging && body.paging.next;
@@ -303,7 +310,7 @@ export async function findMediaByUrl(igUserId, accessToken, permalinkUrl) {
  * account with an old viral Reel and instantly claiming the whole budget --
  * only genuinely new posts are picked up automatically.
  */
-export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxPages = 3 } = {}) {
+export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxPages = 3, onAttempt } = {}) {
   let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
   url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp,thumbnail_url,media_url');
   url.searchParams.set('limit', '50');
@@ -311,7 +318,7 @@ export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxP
 
   const out = [];
   for (let page = 0; page < maxPages; page++) {
-    const body = await igFetch(url.toString());
+    const body = await igFetch(url.toString(), { onAttempt });
     const items = (body && body.data) || [];
     let hitOld = false;
     for (const m of items) {
@@ -338,14 +345,14 @@ export function isVideoMedia(media) {
 // fallbacks for older media so a metric rename doesn't zero everyone's earnings.
 const VIEW_METRICS = ['views', 'plays', 'video_views', 'impressions'];
 
-export async function fetchMediaViews(mediaId, accessToken) {
+export async function fetchMediaViews(mediaId, accessToken, { onAttempt } = {}) {
   let lastErr;
   for (const metric of VIEW_METRICS) {
     const url = new URL(`${GRAPH_BASE}/${mediaId}/insights`);
     url.searchParams.set('metric', metric);
     url.searchParams.set('access_token', accessToken);
     try {
-      const body = await igFetch(url.toString(), { retries: 1 });
+      const body = await igFetch(url.toString(), { retries: 1, onAttempt });
       const row = (body.data || []).find(d => d.name === metric);
       const value = row && row.values && row.values[0] ? row.values[0].value : null;
       if (value != null) return Number(value) || 0;

@@ -1,5 +1,6 @@
 import { maxPayoutPerVideo } from './db.js';
 import { getAdapter, campaignPlatforms } from './platforms.js';
+import { makeCallCounter, getBudget, MAX_CLIPS_FOR_FULL_REFRESH, CLIP_COOLDOWN_MS } from './rate-budget.js';
 
 const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -62,20 +63,52 @@ export async function refreshExpiringTokens(db, env) {
 }
 
 /**
- * Fetches views for one account's clips in a single batched call and writes
- * the results.
+ * Fetches views for one account's clips and writes the results.
  *
  * Batching is what makes YouTube affordable: videos.list returns up to 50 ids
  * for one quota unit, where Instagram costs one call per clip. Both go through
  * the same adapter interface, so this code does not care which is which.
  *
- * A clip whose id comes back missing from the response is reported as removed
- * rather than left silently stale -- that is the honest signal when a video has
- * been deleted or made private.
+ * Each clip's outcome is independent (`{ok:true, views}` / `{ok:false, code}`
+ * / absent-from-map = genuinely gone). The adapter is responsible for never
+ * letting one clip's failure erase another clip's result -- see the isolation
+ * comments in src/platforms.js and src/youtube.js. The outer try/catch here
+ * only fires for failures that happen BEFORE any clip could be attempted at
+ * all (e.g. a token refresh failing), where "every clip on this account
+ * failed identically" is actually true rather than an artifact of one bad
+ * item taking the rest down with it.
  */
-async function syncAccountClips(db, env, account, subs) {
-  let synced = 0, failed = 0;
+/**
+ * Which of an Instagram account's clips may actually be attempted right now,
+ * respecting both the per-clip 1-hour cooldown and the account's real,
+ * rolling-window rate budget. Shared by the plain sync path and the
+ * streaming per-clip refresh, so there is exactly one place this policy is
+ * decided rather than two that could quietly drift apart.
+ */
+export async function planInstagramSync(db, accountId, subs) {
+  const eligible = subs.filter(s => !s.last_ok_sync_at || (Date.now() - s.last_ok_sync_at) >= CLIP_COOLDOWN_MS);
 
+  if (eligible.length > MAX_CLIPS_FOR_FULL_REFRESH) {
+    // Hard refusal, not a partial or priority-ordered attempt: even a
+    // completely fresh hour of budget cannot cover this account in one pass,
+    // so nothing is attempted rather than silently doing part of the job.
+    // The account needs clips locked/paid down below the line, not a
+    // cleverer sync order.
+    return { attempt: [], blocked: 'TOO_MANY_ACTIVE_CLIPS', eligible: eligible.length, deferred: subs.length, budget: null };
+  }
+
+  const budget = await getBudget(db, accountId);
+  const attempt = eligible.slice(0, budget.remaining);
+  return {
+    attempt,
+    blocked: attempt.length === 0 && eligible.length > 0 ? 'BUDGET_EXHAUSTED' : null,
+    eligible: eligible.length,
+    deferred: subs.length - attempt.length,
+    budget
+  };
+}
+
+export async function syncAccountClips(db, env, account, subs) {
   if (!account.access_token || account.status === 'revoked') {
     for (const s of subs) {
       await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ?').bind('NO_ACCOUNT', s.id).run();
@@ -84,41 +117,175 @@ async function syncAccountClips(db, env, account, subs) {
   }
 
   const adapter = getAdapter(account.platform);
-  const ids = subs.map(s => s.ig_media_id);
+  const isInstagram = account.platform === 'instagram';
 
-  let views;
+  // Instagram's 200-calls/hour limit is real, per-account, and NOT reduced by
+  // batching (Meta counts every call in a batch individually -- see
+  // src/rate-budget.js). This is the one place both the 6-hourly cron and
+  // every manual refresh path funnel through, so gating it here protects all
+  // of them at once rather than needing the same logic duplicated per caller.
+  let attemptSubs = subs;
+  let counter = null;
+  let blocked = null;
+  let deferred = 0;
+
+  if (isInstagram) {
+    const plan = await planInstagramSync(db, account.id, subs);
+    attemptSubs = plan.attempt;
+    blocked = plan.blocked;
+    deferred = plan.deferred;
+    if (plan.blocked === 'TOO_MANY_ACTIVE_CLIPS') {
+      return { synced: 0, failed: 0, blocked: plan.blocked, eligible: plan.eligible, deferred: plan.deferred };
+    }
+    if (attemptSubs.length === 0) {
+      return { synced: 0, failed: 0, blocked, deferred };
+    }
+    counter = makeCallCounter(account.id);
+  }
+
+  const ids = attemptSubs.map(s => s.ig_media_id);
+  let results;
   try {
-    views = await withAccount(db, env, account, (acct) => adapter.fetchViews(acct, ids, env));
+    results = await withAccount(db, env, account,
+      (acct) => adapter.fetchViews(acct, ids, env, counter ? { onAttempt: counter.onAttempt } : {}));
   } catch (e) {
-    // The whole batch failed, so every clip in it carries the same reason.
+    // Nothing could even be attempted -- genuinely affects every clip equally.
     const code = (e && e.code) || 'UNKNOWN';
-    for (const s of subs) {
+    for (const s of attemptSubs) {
       await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
         .bind(code, Date.now(), s.id).run();
     }
     if (e && e.needsReauth) await markAccount(db, account.id, { status: 'needs_reauth', code });
-    return { synced: 0, failed: subs.length };
+    if (counter) await counter.flush(db);
+    return { synced: 0, failed: attemptSubs.length, deferred };
   }
+  if (counter) await counter.flush(db);
 
   const now = Date.now();
-  for (const s of subs) {
-    const v = views.get(s.ig_media_id);
-    if (v == null) {
+  let needsReauthCode = null;
+  let synced = 0, failed = 0;
+  for (const s of attemptSubs) {
+    const r = results.get(s.ig_media_id);
+
+    if (r == null) {
+      // Genuinely absent from a successful response: the honest signal that
+      // the post has been deleted or made private, not a fetch failure.
       await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
         .bind('MEDIA_NOT_FOUND', now, s.id).run();
       failed++;
       continue;
     }
+
+    if (!r.ok) {
+      // This clip's own fetch failed. Recorded against this clip alone --
+      // every other clip on the same account keeps updating normally this
+      // round, which is the entire point of this shape.
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+        .bind(r.code, now, s.id).run();
+      if (r.needsReauth) needsReauthCode = r.code;
+      failed++;
+      continue;
+    }
+
     await db.prepare(
       'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ?'
-    ).bind(v, now, now, s.id).run();
+    ).bind(r.views, now, now, s.id).run();
     synced++;
   }
 
-  if (synced > 0 && account.status !== 'connected') {
+  if (needsReauthCode) await markAccount(db, account.id, { status: 'needs_reauth', code: needsReauthCode });
+  else if (synced > 0 && account.status !== 'connected') {
     await markAccount(db, account.id, { status: 'connected', code: null });
   }
-  return { synced, failed };
+  return { synced, failed, blocked, deferred };
+}
+
+/**
+ * The live-progress version of an Instagram account refresh: fetches one
+ * clip at a time and yields a result immediately after each one completes,
+ * instead of resolving once at the end. Backs the SSE refresh endpoint so a
+ * clipper watching a 150-clip refresh sees real numbers land one by one with
+ * an accurate progress count, not a blank spinner for however long the whole
+ * batch takes.
+ *
+ * Shares planInstagramSync with the plain (non-streaming) path, so the same
+ * cooldown and budget rules apply identically either way -- there is exactly
+ * one decision of "what may be attempted right now," just two ways of
+ * running it.
+ *
+ * Yields: {type:'blocked', reason, eligible} once, or
+ *         {type:'progress', done, total, clip_id, ok, views?, code?} per clip, or
+ *         {type:'done', synced, failed, deferred}
+ */
+export async function* syncAccountClipsStream(db, env, account, subs, { fetchOne } = {}) {
+  if (!account.access_token || account.status === 'revoked') {
+    for (const s of subs) {
+      await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ?').bind('NO_ACCOUNT', s.id).run();
+    }
+    yield { type: 'done', synced: 0, failed: subs.length, deferred: 0 };
+    return;
+  }
+  if (account.platform !== 'instagram') {
+    // Streaming exists specifically for Instagram's tight per-account budget.
+    // YouTube's 50-per-call batching gives it no comparable pressure, so it
+    // is not worth the added complexity here -- callers use the plain path.
+    const r = await syncAccountClips(db, env, account, subs);
+    yield { type: 'done', ...r };
+    return;
+  }
+
+  const plan = await planInstagramSync(db, account.id, subs);
+  if (plan.blocked === 'TOO_MANY_ACTIVE_CLIPS' || plan.attempt.length === 0) {
+    yield { type: 'blocked', reason: plan.blocked, eligible: plan.eligible, deferred: plan.deferred };
+    return;
+  }
+
+  const adapter = getAdapter(account.platform);
+  const counter = makeCallCounter(account.id);
+  let synced = 0, failed = 0, needsReauthCode = null;
+
+  for (let i = 0; i < plan.attempt.length; i++) {
+    const s = plan.attempt[i];
+    const now = Date.now();
+    try {
+      const results = await withAccount(db, env, account,
+        (acct) => adapter.fetchViews(acct, [s.ig_media_id], env, { onAttempt: counter.onAttempt, fetchOne }));
+      const r = results.get(s.ig_media_id);
+
+      if (r == null) {
+        await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+          .bind('MEDIA_NOT_FOUND', now, s.id).run();
+        failed++;
+        yield { type: 'progress', done: i + 1, total: plan.attempt.length, clip_id: s.id, ok: false, code: 'MEDIA_NOT_FOUND' };
+      } else if (!r.ok) {
+        await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+          .bind(r.code, now, s.id).run();
+        if (r.needsReauth) needsReauthCode = r.code;
+        failed++;
+        yield { type: 'progress', done: i + 1, total: plan.attempt.length, clip_id: s.id, ok: false, code: r.code };
+      } else {
+        await db.prepare(
+          'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ?'
+        ).bind(r.views, now, now, s.id).run();
+        synced++;
+        yield { type: 'progress', done: i + 1, total: plan.attempt.length, clip_id: s.id, ok: true, views: r.views };
+      }
+    } catch (e) {
+      const code = (e && e.code) || 'UNKNOWN';
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+        .bind(code, now, s.id).run();
+      if (e && e.needsReauth) needsReauthCode = code;
+      failed++;
+      yield { type: 'progress', done: i + 1, total: plan.attempt.length, clip_id: s.id, ok: false, code };
+    }
+  }
+
+  await counter.flush(db);
+  if (needsReauthCode) await markAccount(db, account.id, { status: 'needs_reauth', code: needsReauthCode });
+  else if (synced > 0 && account.status !== 'connected') {
+    await markAccount(db, account.id, { status: 'connected', code: null });
+  }
+  yield { type: 'done', synced, failed, deferred: plan.deferred };
 }
 
 /** Groups submission rows by their account, so each account syncs in one batch. */
@@ -149,7 +316,7 @@ export async function syncSubmissionViews(db, campaignId, env) {
   // Locked clips are closed out: their amount is settled and further views
   // change nothing, so re-fetching them would only burn API quota.
   const { results } = await db.prepare(
-    `SELECT s.id, s.ig_media_id, s.account_id
+    `SELECT s.id, s.ig_media_id, s.account_id, s.last_ok_sync_at
      FROM submissions s
      WHERE s.campaign_id = ? AND s.status = 'active' AND s.locked_at IS NULL`
   ).bind(campaignId).all();
@@ -270,7 +437,7 @@ export async function syncClipperViews(db, clipperId, env = {}) {
   } catch { /* import failures must not block the view sync */ }
 
   const { results } = await db.prepare(
-    `SELECT s.id, s.ig_media_id, s.campaign_id, s.account_id
+    `SELECT s.id, s.ig_media_id, s.campaign_id, s.account_id, s.last_ok_sync_at
      FROM submissions s
      WHERE s.clipper_id = ? AND s.status = 'active' AND s.locked_at IS NULL
      ORDER BY s.created_at DESC
@@ -278,7 +445,8 @@ export async function syncClipperViews(db, clipperId, env = {}) {
   ).bind(clipperId, MANUAL_SYNC_MAX_CLIPS).all();
 
   const campaigns = new Set((results || []).map(r => r.campaign_id));
-  let synced = 0, failed = 0;
+  let synced = 0, failed = 0, deferred = 0;
+  const blocked = [];
 
   const { groups, orphans } = await groupByAccount(db, results);
   for (const o of orphans) {
@@ -288,7 +456,8 @@ export async function syncClipperViews(db, clipperId, env = {}) {
   for (const g of groups) {
     try {
       const r = await syncAccountClips(db, env, g.account, g.subs);
-      synced += r.synced; failed += r.failed;
+      synced += r.synced; failed += r.failed; deferred += r.deferred || 0;
+      if (r.blocked) blocked.push({ account_id: g.account.id, username: g.account.username, reason: r.blocked, eligible: r.eligible });
     } catch {
       failed += g.subs.length;
     }
@@ -300,7 +469,7 @@ export async function syncClipperViews(db, clipperId, env = {}) {
     await allocateCampaignEarnings(db, campaignId);
   }
 
-  return { synced, failed, clips: (results || []).length, imported: autoImported };
+  return { synced, failed, deferred, blocked, clips: (results || []).length, imported: autoImported };
 }
 
 /**

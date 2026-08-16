@@ -108,6 +108,7 @@
     .alert { border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem; font-size:.82rem; border:1px solid; }
     .alert.warn { background:rgba(255,215,0,.07); border-color:rgba(255,215,0,.4); color:var(--gold); }
     .alert.info { background:rgba(77,166,255,.07); border-color:rgba(77,166,255,.35); color:var(--blue); }
+    .alert.bad { background:rgba(255,77,77,.08); border-color:rgba(255,77,77,.4); color:var(--red); }
 
     #auth-overlay { position:fixed; inset:0; background:rgba(8,13,8,.96); display:flex; align-items:center; justify-content:center; z-index:9999; }
     .auth-box { background:var(--card); border:1px solid var(--border); padding:2.8rem; border-radius:12px; text-align:center; width:100%; max-width:390px; }
@@ -763,11 +764,24 @@
         <div class="stat"><div class="stat-val">${money(o.total_earned)}</div><div class="stat-lbl">Total Earned</div></div>
         <div class="stat"><div class="stat-val w">${money(o.total_paid)}</div><div class="stat-lbl">Total Paid</div></div>
         <div class="stat"><div class="stat-val g">${money(o.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>`;
-      const issues=[];
-      if(o.accounts_needing_reauth>0) issues.push(`${o.accounts_needing_reauth} Instagram account(s) need reconnecting by their clipper`);
-      if(o.submissions_with_errors>0) issues.push(`${o.submissions_with_errors} video(s) failed to sync views`);
-      document.getElementById('health').innerHTML = issues.length
-        ? `<div class="alert warn"><strong>Needs attention:</strong> ${issues.join(' · ')}</div>` : '';
+      // Two severities, deliberately not merged: a video with a sync_error
+      // that synced fine within the last 12h is just normal noise (a rate
+      // limit clearing on the next cron run) and would make this banner fire
+      // constantly if treated as urgent. "Stuck" -- failing for 12h+, at
+      // least two missed cron cycles -- is the signal that actually means
+      // something is broken and won't fix itself without action. This is
+      // what would have surfaced the sync batch-isolation bug immediately
+      // instead of it only being found by manually querying the database.
+      const urgent=[];
+      if(o.accounts_needing_reauth>0) urgent.push(`${o.accounts_needing_reauth} account(s) need reconnecting by their clipper`);
+      if(o.submissions_stuck>0) urgent.push(`${o.submissions_stuck} video(s) have not synced successfully in 12+ hours — investigate`);
+      const soft=[];
+      const passing=o.submissions_with_errors-o.submissions_stuck;
+      if(passing>0) soft.push(`${passing} video(s) hit a transient sync error, expected to clear on the next sync`);
+
+      document.getElementById('health').innerHTML =
+        (urgent.length?`<div class="alert bad"><strong>Needs attention:</strong> ${urgent.join(' · ')}</div>`:'') +
+        (soft.length?`<div class="alert info" style="margin-top:.6rem"><strong>FYI:</strong> ${soft.join(' · ')}</div>`:'');
     }
 
     /* ---------- blueprint upload ---------- */

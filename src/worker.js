@@ -110,6 +110,19 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(syncAllCampaigns(env.DB, env));
+    // syncAllCampaigns's return value used to be silently discarded here --
+    // its own error summary existed but nothing ever read it, so a sync
+    // problem was invisible short of manually querying the database. Now it
+    // is at minimum logged (visible via `wrangler tail` / the dashboard), and
+    // the admin Overview separately surfaces any clip stuck failing across
+    // several cron cycles, which is the signal that actually matters: a
+    // single transient error here is normal and expected, a clip still
+    // failing 12+ hours later is not.
+    ctx.waitUntil((async () => {
+      const summary = await syncAllCampaigns(env.DB, env);
+      if (summary.errors && summary.errors.length) {
+        console.error(`[cron sync] ${summary.errors.length} campaign-level error(s):`, summary.errors);
+      }
+    })());
   }
 };

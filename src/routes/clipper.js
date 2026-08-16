@@ -13,7 +13,8 @@ import {
 } from '../access.js';
 import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
-import { syncClipperViews } from '../earnings.js';
+import { syncClipperViews, syncAccountClips, syncAccountClipsStream, reallocateCampaign } from '../earnings.js';
+import { getBudget, CLIP_COOLDOWN_MS, MAX_CLIPS_FOR_FULL_REFRESH } from '../rate-budget.js';
 
 // Manual refresh cooldown. Instagram allows roughly 200 calls per user per
 // hour and each clip costs one call, so this keeps a clipper well inside it
@@ -324,6 +325,133 @@ export async function handleClipper(request, env, url) {
     const money = await clipperFinancials(env.DB, clipperId);
     const totals = await clipperTotals(env.DB, clipperId);
     return json({ ok: true, ...result, money, totals, cooldown_ms: MANUAL_SYNC_COOLDOWN_MS });
+  }
+
+  // --------------------------------------------------- Instagram call budget
+  // Real, dynamic usage for the specific Instagram account driving this
+  // campaign. The 200-calls/hour limit is per-account, so this is scoped to
+  // one campaign's connected account, not the clipper as a whole.
+  params = matchPath('/api/clipper/campaigns/:id/budget', pathname);
+  if (params && method === 'GET') {
+    const part = await getParticipation(env.DB, clipperId, params.id);
+    if (!part) return err('You have not joined this campaign', 404);
+    const account = await getParticipationAccount(env.DB, part.id, 'instagram');
+    if (!account) return json({ applicable: false });
+
+    const { results: subs } = await env.DB.prepare(
+      `SELECT id, last_ok_sync_at FROM submissions
+       WHERE clipper_id = ? AND campaign_id = ? AND account_id = ? AND status = 'active' AND locked_at IS NULL`
+    ).bind(clipperId, params.id, account.id).all();
+
+    const totalClips = (subs || []).length;
+    const eligibleNow = (subs || []).filter(
+      s => !s.last_ok_sync_at || (Date.now() - s.last_ok_sync_at) >= CLIP_COOLDOWN_MS
+    ).length;
+    const budget = await getBudget(env.DB, account.id);
+
+    return json({
+      applicable: true,
+      used: budget.used,
+      remaining: budget.remaining,
+      limit: budget.limit,
+      // Time until the OLDEST call currently counted ages out -- budget frees
+      // up continuously as calls roll out of the window, not in one lump at a
+      // fixed clock boundary, because Instagram's own limit does not reset
+      // that way either.
+      reset_in_ms: budget.reset_in_ms,
+      total_clips: totalClips,
+      eligible_now: eligibleNow,
+      too_many_for_full_refresh: totalClips > MAX_CLIPS_FOR_FULL_REFRESH,
+      full_refreshes_available: totalClips > 0 ? Math.floor(budget.remaining / totalClips) : null,
+      single_refreshes_available: budget.remaining
+    });
+  }
+
+  // ----------------------------------------------- individual clip refresh
+  // Refreshes exactly one clip, spending exactly one call -- the "just check
+  // this one" alternative to a full account refresh, for when a clipper only
+  // cares about a specific video's current number.
+  params = matchPath('/api/clipper/submissions/:id/refresh', pathname);
+  if (params && method === 'POST') {
+    const blocked = blockIfReadOnly();
+    if (blocked) return blocked;
+
+    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub || sub.clipper_id !== clipperId) return err('Not found', 404);
+    if (sub.locked_at) return err('This clip is locked and settled -- it no longer needs refreshing.');
+    if (sub.status !== 'active') return err('This clip is not currently active.');
+
+    const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
+    if (!account) return err('No connected account for this clip.', 404);
+
+    if (account.platform === 'instagram') {
+      if (sub.last_ok_sync_at && (Date.now() - sub.last_ok_sync_at) < CLIP_COOLDOWN_MS) {
+        const waitMs = CLIP_COOLDOWN_MS - (Date.now() - sub.last_ok_sync_at);
+        return json({
+          error: `This clip's views were checked less than an hour ago. Try again in ${Math.ceil(waitMs / 60000)}m.`,
+          retry_in_ms: waitMs
+        }, 429);
+      }
+      const budget = await getBudget(env.DB, account.id);
+      if (budget.remaining < 1) {
+        return json({
+          error: `This account has used its Instagram refresh budget for the hour. Frees up in ${Math.ceil(budget.reset_in_ms / 60000)}m.`,
+          retry_in_ms: budget.reset_in_ms
+        }, 429);
+      }
+    }
+
+    await syncAccountClips(env.DB, env, account,
+      [{ id: sub.id, ig_media_id: sub.ig_media_id, last_ok_sync_at: sub.last_ok_sync_at }]);
+    await reallocateCampaign(env.DB, sub.campaign_id);
+
+    const fresh = await env.DB.prepare('SELECT views, earning, sync_error FROM submissions WHERE id = ?').bind(sub.id).first();
+    return json({ ok: true, views: fresh.views, earning: fresh.earning, sync_error: fresh.sync_error });
+  }
+
+  // ------------------------------------------------- live full-account refresh
+  // Server-Sent Events: fetches this campaign's connected Instagram account's
+  // clips one at a time and streams each result as it lands, so a clipper
+  // watching a 100+ clip refresh sees real numbers arrive with real progress
+  // instead of a blank spinner for however long the whole batch takes.
+  params = matchPath('/api/clipper/campaigns/:id/refresh-live', pathname);
+  if (params && method === 'GET') {
+    const part = await getParticipation(env.DB, clipperId, params.id);
+    if (!part) return err('You have not joined this campaign', 404);
+    if (readOnly) return err('Your account is disabled, so this action is not available.', 403);
+    const account = await getParticipationAccount(env.DB, part.id, 'instagram');
+    if (!account) return err('No connected Instagram account for this campaign', 404);
+
+    const { results: subs } = await env.DB.prepare(
+      `SELECT id, ig_media_id, last_ok_sync_at FROM submissions
+       WHERE clipper_id = ? AND campaign_id = ? AND account_id = ? AND status = 'active' AND locked_at IS NULL`
+    ).bind(clipperId, params.id, account.id).all();
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        try {
+          for await (const event of syncAccountClipsStream(env.DB, env, account, subs || [])) {
+            send(event);
+            if (event.type === 'done') await reallocateCampaign(env.DB, Number(params.id));
+          }
+        } catch (e) {
+          send({ type: 'error', message: (e && e.message) || 'Sync failed' });
+        } finally {
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      }
+    });
   }
 
   if (pathname === '/api/clipper/submissions' && method === 'GET') {

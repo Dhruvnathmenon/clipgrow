@@ -2,11 +2,13 @@
   "name": "clipgrow",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:schema": "wrangler d1 execute clipgrow --file=schema.sql",
-    "db:schema:remote": "wrangler d1 execute clipgrow --remote --file=schema.sql"
+    "db:schema:remote": "wrangler d1 execute clipgrow --remote --file=schema.sql",
+    "test": "node --test"
   },
   "devDependencies": {
     "wrangler": "^3.99.0"

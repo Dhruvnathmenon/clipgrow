@@ -48,6 +48,13 @@ export async function handleAdmin(request, env, url) {
 
   // ------------------------------------------------------------- overview
   if (pathname === '/api/admin/overview' && method === 'GET') {
+    // A single sync_error is normal noise -- a transient rate limit clears on
+    // the next 6-hourly cycle. What actually needs a human is a clip that has
+    // gone TWO cycles (12h+) without a single successful sync despite
+    // presumably being retried each time: that is a genuinely stuck clip, not
+    // a blip, and this is the number that would have surfaced the batch-
+    // isolation bug immediately instead of only being found by hand.
+    const STUCK_AFTER_MS = 12 * 60 * 60 * 1000;
     const s = await env.DB.prepare(
       `SELECT
         (SELECT COUNT(*) FROM clippers WHERE status='active') AS active_clippers,
@@ -55,8 +62,11 @@ export async function handleAdmin(request, env, url) {
         (SELECT COALESCE(SUM(earning),0) FROM submissions WHERE status='active') AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
         (SELECT COUNT(*) FROM social_accounts WHERE status='needs_reauth') AS accounts_needing_reauth,
-        (SELECT COUNT(*) FROM submissions WHERE sync_error IS NOT NULL AND status='active') AS submissions_with_errors`
-    ).first();
+        (SELECT COUNT(*) FROM submissions WHERE sync_error IS NOT NULL AND status='active') AS submissions_with_errors,
+        (SELECT COUNT(*) FROM submissions
+           WHERE sync_error IS NOT NULL AND status='active' AND locked_at IS NULL
+             AND (last_ok_sync_at IS NULL OR last_ok_sync_at < ?)) AS submissions_stuck`
+    ).bind(Date.now() - STUCK_AFTER_MS).first();
     return json({ overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid || 0)) } });
   }
 
