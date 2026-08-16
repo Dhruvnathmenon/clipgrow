@@ -275,11 +275,21 @@ export async function reversePayment(db, paymentId) {
 }
 
 /**
- * Closes out every currently below-minimum, unlocked clip at zero, across as
- * many clips as the (optional) campaign/clipper filters match. This is the
- * "old ones" sweep: clips that fell short before the per-payout write-off
- * existed, or that simply never came up in anyone's payout window. It is
- * money-neutral by construction -- every clip it touches already had
+ * Closes out below-minimum, unlocked clips at zero -- but ONLY the ones whose
+ * window has already closed, never a clip that simply hasn't had a payout
+ * look at it yet. A clip only qualifies once its own clipper has at least one
+ * settled payment (for this campaign, or an all-campaigns payment) dated on
+ * or after the clip was posted -- proof a payout has already run that should
+ * have covered it. A clip posted after every existing payment is still in
+ * the clipper's *current*, not-yet-run window: it may still clear the
+ * minimum before the next payout, so it is deliberately left untouched here.
+ * (Closing below-minimum clips *within the window a payout is actively
+ * settling* is a separate, deliberate thing -- see settlePayment's write-off
+ * path, which the admin reviews clip-by-clip at the moment of paying.)
+ *
+ * This is the "old ones" sweep: clips that fell short before the per-payout
+ * write-off existed, or that a past payout should have closed but missed. It
+ * is money-neutral by construction -- every clip it touches already had
  * `earning = 0` (below the minimum never earns), so nothing owed to anyone
  * changes. Locking with `lock_reason = 'below_min'` still leaves the normal
  * escape hatch: an admin can reopen any of these individually from the
@@ -295,7 +305,16 @@ export async function writeOffAllBelowMin(db, { campaignId = null, clipperId = n
     's.eligible != 0',
     's.last_ok_sync_at IS NOT NULL',
     'c.min_views > 0',
-    's.views < c.min_views'
+    's.views < c.min_views',
+    // A payout already ran for this clipper, dated on or after this clip was
+    // posted -- so this clip's window has already closed once. `p.campaign_id
+    // IS NULL` covers an "all campaigns" payout run, which still counts.
+    `EXISTS (
+       SELECT 1 FROM payments p
+       WHERE p.clipper_id = s.clipper_id
+         AND (p.campaign_id = s.campaign_id OR p.campaign_id IS NULL)
+         AND p.paid_at >= COALESCE(s.posted_at, s.created_at)
+     )`
   ];
   const args = [];
   if (campaignId) { conds.push('s.campaign_id = ?'); args.push(campaignId); }

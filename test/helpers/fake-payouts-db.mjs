@@ -4,15 +4,15 @@
 // plain arrays, query handling matched by shape to the actual queries these
 // modules issue, so the real logic runs against real (if simplified) storage.
 
-export function makePayoutsDb({ campaigns = [], submissions = [], participations = [], socialAccounts = [] } = {}) {
+export function makePayoutsDb({ campaigns = [], submissions = [], participations = [], socialAccounts = [], payments = [] } = {}) {
   const state = {
     campaigns: campaigns.map(c => ({ ...c })),
     submissions: submissions.map(s => ({ ...s })),
     participations: participations.map(p => ({ ...p })),
     social_accounts: socialAccounts.map(a => ({ ...a })),
-    payments: []
+    payments: payments.map(p => ({ ...p }))
   };
-  let nextPaymentId = 1;
+  let nextPaymentId = (payments.reduce((max, p) => Math.max(max, p.id || 0), 0)) + 1;
 
   function campaignById(id) { return state.campaigns.find(c => c.id === id) || null; }
   function subById(id) { return state.submissions.find(s => s.id === id) || null; }
@@ -66,6 +66,13 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
         if (!s.last_ok_sync_at) return false;
         if (!(c.min_views > 0)) return false;
         if (!(s.views < c.min_views)) return false;
+        const cutoff = s.posted_at != null ? s.posted_at : s.created_at;
+        const hadPriorPayout = state.payments.some(p =>
+          p.clipper_id === s.clipper_id &&
+          (p.campaign_id === s.campaign_id || p.campaign_id == null) &&
+          p.paid_at >= cutoff
+        );
+        if (!hadPriorPayout) return false;
         if (campaignId != null && s.campaign_id !== campaignId) return false;
         if (clipperId != null && s.clipper_id !== clipperId) return false;
         return true;

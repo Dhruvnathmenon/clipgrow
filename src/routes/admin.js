@@ -488,11 +488,12 @@ export async function handleAdmin(request, env, url) {
     return json({ ...data, days });
   }
 
-  // One-click sweep: closes every currently below-minimum, unlocked clip at
-  // zero, scoped to a campaign/clipper if given or across everyone if not.
-  // Money-neutral (these clips already earn 0), so this is safe to run on
-  // demand -- it exists for clips that predate a clipper's own payout window,
-  // or that nobody has run a payout over yet.
+  // One-click sweep: closes below-minimum, unlocked clips at zero, scoped to
+  // a campaign/clipper if given or across everyone if not. Only touches a
+  // clip whose clipper already had a payout run that should have covered it
+  // (see writeOffAllBelowMin) -- a clip still waiting on its first-ever
+  // payout is left alone, since it may still clear the minimum before then.
+  // Money-neutral either way (these clips already earn 0).
   if (pathname === '/api/admin/payouts/write-off-below-min' && method === 'POST') {
     const body = await readJson(request).catch(() => ({}));
     const result = await writeOffAllBelowMin(env.DB, {

@@ -263,7 +263,7 @@
 
       <div class="panel">
         <h2 class="panel-title">Bulk Cleanup</h2>
-        <p class="note" style="margin-bottom:1rem">Closes every video that is currently under its campaign's minimum at ₹0, everywhere (or scoped below) — not just the clipper/window on screen above. These videos already earn nothing, so this changes no one's money; it just stops them sitting pending forever. Each one can be individually reopened afterwards from its row above.</p>
+        <p class="note" style="margin-bottom:1rem">Closes below-minimum videos at ₹0 — but only ones whose clipper already had a payout run that should have covered them. A video still waiting on its clipper's first-ever payout is left alone, since it may still clear the minimum before then. These videos already earn nothing, so this changes no one's money. Each one can be individually reopened afterwards from its row above.</p>
         <div class="form-grid">
           <div><label>Limit to campaign</label><select id="wo-campaign" class="form-control"><option value="">All campaigns</option></select></div>
           <div><label>Limit to clipper</label><select id="wo-clipper" class="form-control"><option value="">All clippers</option></select></div>
@@ -536,7 +536,7 @@
       const wc=campaignId&&CAMPAIGNS.find(c=>String(c.id)===campaignId);
       const wl=clipperId&&CLIPPERS.find(c=>String(c.id)===clipperId);
       const scope=[wc&&wc.name, wl&&wl.display_name].filter(Boolean).join(', ');
-      if(!confirm(`Close every below-minimum video${scope?` for ${scope}`:' across every clipper and campaign'} at ₹0?\n\nThis does not change anyone's payable amount — these videos already earn nothing. Each can be reopened individually afterwards.`)) return;
+      if(!confirm(`Close below-minimum videos${scope?` for ${scope}`:' across every clipper and campaign'} at ₹0 — only ones whose clipper already had a payout that should have covered them?\n\nVideos still waiting on their first payout are skipped. This does not change anyone's payable amount — these videos already earn nothing. Each can be reopened individually afterwards.`)) return;
       try{
         const r=await api('/api/admin/payouts/write-off-below-min',{method:'POST',body:JSON.stringify({
           campaign_id:campaignId?Number(campaignId):null,
