@@ -1047,15 +1047,16 @@
         box.innerHTML=`
           <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
           ${d.accounts.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Handle</th><th>Type</th><th>Status</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
+            <thead><tr><th>Handle</th><th>Platform</th><th>Type</th><th>Status</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
             <tbody>${d.accounts.map(a=>`<tr>
-              <td class="handle">@${esc(a.username)}</td>
+              <td class="handle">${a.platform==='youtube'?'':'@'}${esc(a.username)}</td>
+              <td><span class="badge ${a.platform==='youtube'?'budget_full':'neutral'}">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
               <td class="muted">${esc(a.account_type||'—')}</td>
               <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
               <td class="muted">${when(a.connected_at)}</td>
               <td class="muted">${when(a.expires_at)}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id})">Disconnect</button></td>
-            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No Instagram accounts connected.</p>'}
+              <td><button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}')">Disconnect</button></td>
+            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No accounts connected.</p>'}
 
           <div class="sub-h">Campaigns (${d.participations.length})</div>
           ${d.participations.length?`<div class="table-wrap"><table>
@@ -1098,10 +1099,17 @@
       try{ await api('/api/admin/clippers/'+id,{method:'DELETE'}); toast('Clipper deleted'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
-    window.revokeAccount=async function(id){
-      if(!confirm('Disconnect this Instagram account? View tracking stops until the clipper reconnects.')) return;
-      try{ await api('/api/admin/accounts/'+id,{method:'DELETE'}); toast('Account disconnected'); loadAll(); }
-      catch(e){ toast(e.message,true); }
+    window.revokeAccount=async function(id,platform,handle){
+      const what=`${platform||'this'} account${handle?' '+handle:''}`;
+      if(!confirm(`Disconnect ${what}?\n\nPending (unpaid) videos from this account are DELETED and their budget goes back to the campaign.\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThe clipper can then connect a different account.`)) return;
+      try{
+        const r=await api('/api/admin/accounts/'+id,{method:'DELETE'});
+        const bits=[];
+        if(r.deleted_pending) bits.push(`${r.deleted_pending} pending video(s) removed`);
+        if(r.kept_settled) bits.push(`${r.kept_settled} settled video(s) kept`);
+        toast(`Disconnected${bits.length?' — '+bits.join(', '):''}`);
+        loadAll();
+      }catch(e){ toast(e.message,true); }
     };
 
     // Mirrors normalizeUsername() on the server so the admin sees the exact

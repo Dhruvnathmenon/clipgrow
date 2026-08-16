@@ -365,27 +365,45 @@ export async function fetchMediaViews(mediaId, accessToken, { onAttempt } = {}) 
   throw lastErr || IG_ERRORS.INSIGHTS_UNAVAILABLE();
 }
 
-// Diagnostic only -- not part of the normal sync path (that path deliberately
-// stops at the first metric that answers, to spend exactly one call per clip
-// against the 200/hour budget). This tries every candidate metric Meta might
-// answer for a piece of media and returns all of them side by side, so a real
-// discrepancy between what Instagram's Graph API reports and what the app
-// displays can be diagnosed from actual data instead of guessed at. Also
-// pulls the media's own type/timestamp, since Reels insights behave
-// differently depending on when the post was made relative to Meta's own
-// metric changes.
-const DIAGNOSTIC_METRICS = ['views', 'total_views', 'plays', 'video_views', 'impressions', 'reach', 'ig_reels_video_view_total_time'];
+// ---------------------------------------------------------------- diagnostics
+// Not part of the normal sync path (that path deliberately stops at the first
+// metric that answers, so it spends exactly one call per clip against the
+// 200/hour budget). These exist to diagnose a genuine disagreement between
+// what the Graph API reports and what the Instagram app displays, from real
+// data rather than guesswork. Every call here is counted against the account's
+// budget like any other -- a diagnostic that quietly spent untracked quota
+// would corrupt the very ledger it is being used to investigate.
 
-export async function debugMediaInsights(mediaId, accessToken) {
+const DIAGNOSTIC_METRICS = [
+  'views', 'reach', 'total_interactions', 'likes', 'saved', 'shares',
+  // Reels-only. crossposted_views / facebook_views matter because a reel also
+  // shared to Facebook accrues views on a surface plain `views` may exclude.
+  'crossposted_views', 'facebook_views',
+  'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time', 'reels_skip_rate'
+];
+
+// like_count/comments_count are the discriminator: if those match what the app
+// shows while `views` does not, the media object itself is current and only
+// the insights aggregation has diverged. If they are ALSO stale/tiny, we are
+// reading a different object than the one on screen.
+const MEDIA_FIELDS_FULL = 'id,caption,media_type,media_product_type,permalink,timestamp,username,like_count,comments_count,is_shared_to_feed';
+const MEDIA_FIELDS_MIN = 'id,media_type,media_product_type,permalink,timestamp';
+
+export async function debugMediaInsights(mediaId, accessToken, { onAttempt } = {}) {
   const out = { media_id: mediaId, media: null, metrics: [] };
 
-  try {
+  // Fall back to a minimal field set if any single field is rejected, so one
+  // unsupported field cannot blank out the whole media lookup.
+  for (const fields of [MEDIA_FIELDS_FULL, MEDIA_FIELDS_MIN]) {
     const mediaUrl = new URL(`${GRAPH_BASE}/${mediaId}`);
-    mediaUrl.searchParams.set('fields', 'media_type,media_product_type,timestamp,permalink');
+    mediaUrl.searchParams.set('fields', fields);
     mediaUrl.searchParams.set('access_token', accessToken);
-    out.media = await igFetch(mediaUrl.toString(), { retries: 0 });
-  } catch (e) {
-    out.media = { error: e.code || 'UNKNOWN', message: e.message };
+    try {
+      out.media = await igFetch(mediaUrl.toString(), { retries: 0, onAttempt });
+      break;
+    } catch (e) {
+      out.media = { error: e.code || 'UNKNOWN', message: e.message, fields_tried: fields };
+    }
   }
 
   for (const metric of DIAGNOSTIC_METRICS) {
@@ -393,14 +411,13 @@ export async function debugMediaInsights(mediaId, accessToken) {
     url.searchParams.set('metric', metric);
     url.searchParams.set('access_token', accessToken);
     try {
-      const body = await igFetch(url.toString(), { retries: 0 });
+      const body = await igFetch(url.toString(), { retries: 0, onAttempt });
       const row = (body.data || []).find(d => d.name === metric);
       out.metrics.push({
         metric,
         ok: true,
         value: row && row.values && row.values[0] ? row.values[0].value : null,
-        title: row ? row.title : null,
-        raw: row || body
+        title: row ? row.title : null
       });
     } catch (e) {
       out.metrics.push({ metric, ok: false, code: e.code, message: e.message });
@@ -408,4 +425,29 @@ export async function debugMediaInsights(mediaId, accessToken) {
   }
 
   return out;
+}
+
+/**
+ * Lists the account's own recent media with identifying fields. The point is
+ * to detect the case where one permalink is backed by MORE THAN ONE media id
+ * -- which is what a co-authored ("collab") reel looks like from the API's
+ * side: each participating account holds its own media object for the single
+ * shared post, and those objects do not necessarily report the same insights.
+ * If that is what is happening, we may simply be holding the wrong one of the
+ * two ids for this clip.
+ */
+export async function debugListMedia(igUserId, accessToken, { maxPages = 2, onAttempt } = {}) {
+  const items = [];
+  let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
+  url.searchParams.set('fields', 'id,permalink,media_product_type,timestamp,like_count,comments_count,username');
+  url.searchParams.set('limit', '50');
+  url.searchParams.set('access_token', accessToken);
+
+  for (let page = 0; page < maxPages && url; page++) {
+    const body = await igFetch(url.toString(), { retries: 0, onAttempt });
+    for (const m of body.data || []) items.push(m);
+    const next = body.paging && body.paging.next;
+    url = next ? new URL(next) : null;
+  }
+  return items;
 }

@@ -2,14 +2,16 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
-  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify
+  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify,
+  disconnectSocialAccount
 } from '../db.js';
 import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
-import { debugMediaInsights } from '../instagram.js';
+import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
+import { makeCallCounter } from '../rate-budget.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -454,21 +456,17 @@ export async function handleAdmin(request, env, url) {
   }
 
   // --------------------------------------------------------------- accounts
+  // Fully disconnects an account so a different one can be connected in its
+  // place: unlinks it from the participation, deletes its pending clips, and
+  // keeps whatever was already settled. See disconnectSocialAccount.
   params = matchPath('/api/admin/accounts/:id', pathname);
   if (params && method === 'DELETE') {
-    const inUse = await env.DB.prepare('SELECT COUNT(*) AS n FROM submissions WHERE account_id = ?').bind(params.id).first();
-    if (inUse.n > 0) {
-      // Keep the row (submissions reference it) but strip the credential.
-      await env.DB.prepare(
-        "UPDATE social_accounts SET status='revoked', access_token=NULL, token_expires_at=NULL WHERE id = ?"
-      ).bind(params.id).run();
-      return json({ ok: true, revoked: true });
-    }
-    await env.DB.batch([
-      env.DB.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(params.id),
-      env.DB.prepare('DELETE FROM social_accounts WHERE id = ?').bind(params.id)
-    ]);
-    return json({ ok: true });
+    const result = await disconnectSocialAccount(env.DB, Number(params.id));
+    if (!result) return err('Account not found', 404);
+    // Those pending clips were holding budget; it has to be re-spread across
+    // whatever is still open in each affected campaign.
+    for (const cid of result.campaigns) await reallocateCampaign(env.DB, cid);
+    return json({ ok: true, ...result });
   }
 
   // ---------------------------------------------------------------- payouts
@@ -722,13 +720,142 @@ export async function handleAdmin(request, env, url) {
     const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
     if (!account || !account.access_token) return err('No connected Instagram account for this clip.', 404);
 
-    const diag = await debugMediaInsights(sub.ig_media_id, account.access_token);
+    // Diagnostic calls are real Instagram calls, so they are counted against
+    // the account's budget like any other. A diagnostic that spent untracked
+    // quota would corrupt the exact ledger it is being used to investigate.
+    const counter = makeCallCounter(account.id);
+    let diag, scan = null, scanError = null, callsSpent = 0;
+    try {
+      diag = await debugMediaInsights(sub.ig_media_id, account.access_token, { onAttempt: counter.onAttempt });
+      if (url.searchParams.get('scan') === '1' && account.external_id) {
+        try {
+          scan = await debugListMedia(account.external_id, account.access_token, { onAttempt: counter.onAttempt });
+        } catch (e) {
+          scanError = { code: e.code || 'UNKNOWN', message: e.message };
+        }
+      }
+    } finally {
+      // Read the count BEFORE flushing -- flush clears the buffer.
+      callsSpent = counter.count();
+      await counter.flush(env.DB);
+    }
+
+    // The specific thing worth knowing: is this clip's permalink backed by
+    // more than one media id on this account? That is the API-side signature
+    // of a co-authored reel, and would mean we may be holding the wrong id.
+    let permalinkMatches = null;
+    let duplicatePermalinks = null;
+    if (scan) {
+      const norm = (u) => String(u || '').split('?')[0].replace(/\/+$/, '');
+      const target = norm(sub.permalink);
+      permalinkMatches = scan
+        .filter(m => norm(m.permalink) === target)
+        .map(m => ({ id: m.id, permalink: m.permalink, timestamp: m.timestamp, like_count: m.like_count, comments_count: m.comments_count, username: m.username }));
+      const byPermalink = {};
+      for (const m of scan) {
+        const k = norm(m.permalink);
+        (byPermalink[k] = byPermalink[k] || []).push(m.id);
+      }
+      duplicatePermalinks = Object.entries(byPermalink)
+        .filter(([, ids]) => ids.length > 1)
+        .map(([permalink, ids]) => ({ permalink, media_ids: ids }));
+    }
+
     return json({
       submission_id: sub.id,
       permalink: sub.permalink,
       stored_views: sub.views,
       stored_last_ok_sync_at: sub.last_ok_sync_at,
-      ...diag
+      stored_media_id: sub.ig_media_id,
+      account_external_id: account.external_id,
+      account_username: account.username,
+      diagnostic_calls_spent: callsSpent,
+      ...diag,
+      scan_error: scanError,
+      scanned_media_count: scan ? scan.length : null,
+      permalink_matches: permalinkMatches,
+      duplicate_permalinks: duplicatePermalinks
+    });
+  }
+
+  // Media audit: everything this Instagram account has actually posted,
+  // cross-checked against what ClipGrow is tracking. This answers "is every
+  // video being synced?" at the only level that matters -- an UNTRACKED post
+  // is invisible to every sync path there is, so no amount of refresh logic
+  // would ever surface it, and the clipper silently never gets paid for it.
+  params = matchPath('/api/admin/debug/accounts/:id/media-audit', pathname);
+  if (params && method === 'GET') {
+    const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(params.id).first();
+    if (!account || !account.access_token) return err('No such connected account.', 404);
+    if (account.platform !== 'instagram') return err('This audit is Instagram-only.', 400);
+
+    // Views cost one call per media, so they are opt-in. like_count alone is
+    // usually enough to spot the outlier post.
+    const wantInsights = url.searchParams.get('insights') === '1';
+    const counter = makeCallCounter(account.id);
+    let media = [], callsSpent = 0, scanError = null;
+    try {
+      try {
+        media = await debugListMedia(account.external_id, account.access_token,
+          { maxPages: 4, onAttempt: counter.onAttempt });
+      } catch (e) {
+        scanError = { code: e.code || 'UNKNOWN', message: e.message };
+      }
+      if (wantInsights) {
+        for (const m of media) {
+          try {
+            m.views_from_api = await fetchMediaViews(m.id, account.access_token, { onAttempt: counter.onAttempt });
+          } catch (e) {
+            m.views_error = e.code || 'UNKNOWN';
+          }
+        }
+      }
+    } finally {
+      callsSpent = counter.count();
+      await counter.flush(env.DB);
+    }
+
+    const { results: subs } = await env.DB.prepare(
+      'SELECT id, ig_media_id, views, status, locked_at FROM submissions WHERE account_id = ?'
+    ).bind(params.id).all();
+    const byMediaId = new Map((subs || []).map(s => [String(s.ig_media_id), s]));
+
+    const rows = media.map(m => {
+      const s = byMediaId.get(String(m.id));
+      return {
+        media_id: m.id,
+        permalink: m.permalink,
+        timestamp: m.timestamp,
+        media_product_type: m.media_product_type,
+        like_count: m.like_count,
+        comments_count: m.comments_count,
+        views_from_api: m.views_from_api,
+        views_error: m.views_error,
+        tracked: !!s,
+        submission_id: s ? s.id : null,
+        stored_views: s ? s.views : null
+      };
+    }).sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+
+    // Tracked submissions whose media no longer appears on the account at all
+    // -- i.e. deleted-and-reposted, which is exactly how a tracked clip ends
+    // up frozen at a low number while the real post races ahead untracked.
+    const liveIds = new Set(media.map(m => String(m.id)));
+    const orphaned = (subs || [])
+      .filter(s => !liveIds.has(String(s.ig_media_id)))
+      .map(s => ({ submission_id: s.id, ig_media_id: s.ig_media_id, stored_views: s.views, status: s.status }));
+
+    return json({
+      account_id: account.id,
+      account_username: account.username,
+      diagnostic_calls_spent: callsSpent,
+      scan_error: scanError,
+      media_on_account: rows.length,
+      tracked_count: rows.filter(r => r.tracked).length,
+      untracked_count: rows.filter(r => !r.tracked).length,
+      tracked_submissions_total: (subs || []).length,
+      orphaned_submissions: orphaned,
+      media: rows
     });
   }
 

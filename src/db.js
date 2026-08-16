@@ -82,6 +82,70 @@ export async function unlinkParticipationAccount(db, participationId, platform) 
 }
 
 /**
+ * Disconnects a social account: unlinks it from every participation, deletes
+ * its still-pending clips, and keeps everything already settled.
+ *
+ * The split is the point. A locked clip is financial history -- it was paid,
+ * or formally closed at zero, and `locked_earning` is what the books say was
+ * owed. It survives, and the account row survives with it, so that history
+ * still resolves to a real account in exports and payout views instead of
+ * dangling. Everything unlocked is only tracking data with no money committed
+ * to it, so it goes, handing its share of the campaign budget back.
+ *
+ * Unlinking is what the old revoke-only path was missing: stripping the token
+ * left the participation_accounts row in place, so the account still resolved
+ * as "the account for this campaign" -- reading as connected, and blocking a
+ * different account from being connected in its place.
+ *
+ * Returns the affected campaign ids so the caller can re-run allocation;
+ * deleting pending clips changes what the remaining ones are owed.
+ */
+export async function disconnectSocialAccount(db, accountId) {
+  const account = await db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(accountId).first();
+  if (!account) return null;
+
+  const { results: subs } = await db.prepare(
+    'SELECT id, campaign_id, locked_at FROM submissions WHERE account_id = ?'
+  ).bind(accountId).all();
+
+  const rows = subs || [];
+  const pending = rows.filter(s => !s.locked_at);
+  const settled = rows.filter(s => s.locked_at);
+  const campaigns = [...new Set(rows.map(s => s.campaign_id))];
+
+  const stmts = [
+    db.prepare('DELETE FROM participation_accounts WHERE account_id = ?').bind(accountId),
+    db.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(accountId)
+  ];
+
+  if (pending.length) {
+    const ph = pending.map(() => '?').join(',');
+    stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
+  }
+
+  if (settled.length) {
+    // Settled clips still reference this row, so it stays -- stripped of
+    // anything that could still be used to call the platform.
+    stmts.push(db.prepare(
+      "UPDATE social_accounts SET status='revoked', access_token=NULL, refresh_token=NULL, token_expires_at=NULL WHERE id = ?"
+    ).bind(accountId));
+  } else {
+    stmts.push(db.prepare('DELETE FROM social_accounts WHERE id = ?').bind(accountId));
+  }
+
+  await db.batch(stmts);
+
+  return {
+    platform: account.platform,
+    username: account.username,
+    deleted_pending: pending.length,
+    kept_settled: settled.length,
+    account_row_kept: settled.length > 0,
+    campaigns
+  };
+}
+
+/**
  * Whether this external account is already driving a different LIVE campaign.
  *
  * Checked across every clipper, not just the one connecting, so two logins
