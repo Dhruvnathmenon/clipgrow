@@ -105,6 +105,32 @@ test('planInstagramSync: a clip synced within the last hour is skipped, not re-f
   assert.deepEqual(attemptedIds.sort(), ['never', 'stale']);
 });
 
+// `skipCooldown` is how a clipper's own single-clip refresh opts out of the
+// per-clip cooldown -- that cooldown exists to stop an automatic sweep
+// wastefully re-checking recent clips, not to stop a deliberate manual check.
+test('planInstagramSync: skipCooldown attempts a clip synced moments ago, unlike the default bulk-refresh behavior', async () => {
+  const db = makeFakeD1();
+  const now = Date.now();
+  const subs = [{ id: 1, ig_media_id: 'just_synced', last_ok_sync_at: now - 60 * 1000 }]; // 1 min ago
+
+  const normalPlan = await planInstagramSync(db, 1, subs);
+  assert.equal(normalPlan.attempt.length, 0, 'default behavior still skips a just-synced clip');
+
+  const skipPlan = await planInstagramSync(db, 1, subs, { skipCooldown: true });
+  assert.equal(skipPlan.attempt.length, 1, 'skipCooldown attempts it anyway');
+});
+
+test('planInstagramSync: skipCooldown does NOT bypass the account budget -- that limit still holds', async () => {
+  const db = makeFakeD1();
+  const now = Date.now();
+  for (let i = 0; i < HOURLY_LIMIT; i++) db._tables.ig_api_calls.push({ id: i, social_account_id: 6, called_at: now - i * 1000 });
+  const subs = [{ id: 1, ig_media_id: 'm1', last_ok_sync_at: now - 60 * 1000 }];
+
+  const plan = await planInstagramSync(db, 6, subs, { skipCooldown: true });
+  assert.equal(plan.attempt.length, 0);
+  assert.equal(plan.blocked, 'BUDGET_EXHAUSTED', 'skipping the per-clip cooldown is not the same as skipping the real budget');
+});
+
 test('planInstagramSync: with only partial budget left, attempts exactly that many and marks the rest deferred', async () => {
   const db = makeFakeD1();
   const now = Date.now();

@@ -384,14 +384,13 @@ export async function handleClipper(request, env, url) {
     const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
     if (!account) return err('No connected account for this clip.', 404);
 
+    // Deliberately no per-clip cooldown here. That cooldown exists to stop an
+    // AUTOMATIC full sweep from wastefully re-checking clips it only just
+    // looked at -- it was never meant to stop a clipper from choosing to
+    // spend one of their own calls on this specific clip right now. The
+    // account's real, shared 200/hour budget below is the actual limit; how
+    // to spend it is the clipper's call (see src/rate-budget.js).
     if (account.platform === 'instagram') {
-      if (sub.last_ok_sync_at && (Date.now() - sub.last_ok_sync_at) < CLIP_COOLDOWN_MS) {
-        const waitMs = CLIP_COOLDOWN_MS - (Date.now() - sub.last_ok_sync_at);
-        return json({
-          error: `This clip's views were checked less than an hour ago. Try again in ${Math.ceil(waitMs / 60000)}m.`,
-          retry_in_ms: waitMs
-        }, 429);
-      }
       const budget = await getBudget(env.DB, account.id);
       if (budget.remaining < 1) {
         return json({
@@ -402,7 +401,8 @@ export async function handleClipper(request, env, url) {
     }
 
     await syncAccountClips(env.DB, env, account,
-      [{ id: sub.id, ig_media_id: sub.ig_media_id, last_ok_sync_at: sub.last_ok_sync_at }]);
+      [{ id: sub.id, ig_media_id: sub.ig_media_id, last_ok_sync_at: sub.last_ok_sync_at }],
+      { skipCooldown: true });
     await reallocateCampaign(env.DB, sub.campaign_id);
 
     const fresh = await env.DB.prepare('SELECT views, earning, sync_error FROM submissions WHERE id = ?').bind(sub.id).first();

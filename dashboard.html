@@ -189,6 +189,15 @@
     .prog-line { padding:.15rem 0; border-bottom:1px solid var(--border); }
     .prog-line.bad { color:var(--gold); }
 
+    /* Per-campaign refresh budget, surfaced right on the Clips page itself
+       (not just inside each campaign's own detail view) -- this is the "how
+       many refreshes do I have left" answer, shown where a clipper is
+       actually looking when they hit refresh. */
+    .clips-budget-row { display:flex; flex-direction:column; gap:.7rem; margin-bottom:1.1rem; }
+    .clips-budget-card { padding:1rem 1.1rem; margin-bottom:0; }
+    .clips-budget-title { font-size:.78rem; font-weight:600; color:var(--muted-l); text-transform:uppercase; letter-spacing:.02em; margin-bottom:.2rem; }
+    .clips-budget-card .ig-budget { margin-top:.55rem; }
+
     table { width:100%; border-collapse:collapse; }
     th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.66rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
     td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.83rem; }
@@ -370,6 +379,7 @@
           <div class="note refresh-note">Updates automatically every 6 hours</div>
         </div>
       </div>
+      <div id="clips-budget-row" class="clips-budget-row"></div>
       <div class="plat-row" id="plat-row"></div>
       <div id="clip-grid"><div class="empty">Loading…</div></div>
     </section>
@@ -507,7 +517,7 @@
       document.getElementById('v-'+name).classList.add('on');
       if(btn){document.querySelectorAll('.sb-item').forEach(t=>t.classList.remove('on'));btn.classList.add('on');}
       window.scrollTo({top:0});
-      if(name==='clips') renderClips();
+      if(name==='clips'){ renderClips(); renderClipsBudget(); }
       if(name==='accounts') loadAccounts();
       if(name==='payments') loadPayments();
       if(name==='clippers') loadDirectory();
@@ -756,8 +766,16 @@
        (Meta counts every call in a batch individually), so the only thing
        that actually helps is spending it deliberately -- which starts with
        being able to see it. */
-    window.loadBudget=async function(campaignId){
-      const el=document.getElementById('ig-budget-'+campaignId);
+    // Both ids default to the campaign-detail page's original naming, so the
+    // existing call sites there (`loadBudget(c.id)`) keep working unchanged.
+    // The Clips page renders this same widget again per campaign under its
+    // own ids (see renderClipsBudget below), since an element id can only
+    // ever be claimed by one node -- reusing the detail page's ids there
+    // would silently update an invisible, off-screen copy instead.
+    window.loadBudget=async function(campaignId,budgetElId,progressElId){
+      budgetElId=budgetElId||('ig-budget-'+campaignId);
+      progressElId=progressElId||('ig-progress-'+campaignId);
+      const el=document.getElementById(budgetElId);
       if(!el) return;
       try{
         const b=await api('/api/clipper/campaigns/'+campaignId+'/budget');
@@ -772,37 +790,40 @@
           ${b.remaining<b.limit?`<div class="muted" style="font-size:.72rem;margin-top:.35rem">Next call frees up in ${mins<1?'under a minute':mins+'m'} — budget refills continuously, not all at once.</div>`:''}
           ${b.too_many_for_full_refresh?`<div class="alert bad" style="margin-top:.6rem;padding:.6rem .8rem;font-size:.78rem">This account has ${num(b.total_clips)} active clips — more than fit in one hour's budget (${b.limit}). A full refresh is disabled. Lock/pay down older clips, or refresh individual videos instead.</div>`
             : b.eligible_now===0 ? `<div class="muted" style="font-size:.78rem;margin-top:.5rem">All clips synced within the last hour — nothing new to fetch yet.</div>`
-            : `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem" onclick="startLiveRefresh(${campaignId})" ${b.remaining<1?'disabled':''}>⚡ Full refresh — live progress (${num(b.eligible_now)} clip${b.eligible_now===1?'':'s'})</button>`}
+            : `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem" onclick="startLiveRefresh(${campaignId},'${progressElId}','${budgetElId}')" ${b.remaining<1?'disabled':''}>⚡ Full refresh — live progress (${num(b.eligible_now)} clip${b.eligible_now===1?'':'s'})</button>`}
         `;
       }catch(e){ el.innerHTML=`<span class="muted" style="font-size:.78rem">${esc(e.message)}</span>`; }
     };
 
     /* Streams one clip's result at a time via SSE, so the progress bar and
        count reflect real work actually landing, not a guessed animation. */
-    window.startLiveRefresh=function(campaignId){
-      const box=document.getElementById('ig-progress-'+campaignId);
-      const budgetEl=document.getElementById('ig-budget-'+campaignId);
+    window.startLiveRefresh=function(campaignId,progressElId,budgetElId){
+      progressElId=progressElId||('ig-progress-'+campaignId);
+      budgetElId=budgetElId||('ig-budget-'+campaignId);
+      const box=document.getElementById(progressElId);
+      const budgetEl=document.getElementById(budgetElId);
       if(!box) return;
       box.style.display='';
-      box.innerHTML=`<div class="prog-bar"><div class="prog-fill" id="prog-fill-${campaignId}" style="width:0%"></div></div>
-        <div class="prog-label" id="prog-label-${campaignId}">Starting…</div>
-        <div class="prog-log" id="prog-log-${campaignId}"></div>`;
+      const fillId='prog-fill-'+progressElId, labelId='prog-label-'+progressElId, logId='prog-log-'+progressElId;
+      box.innerHTML=`<div class="prog-bar"><div class="prog-fill" id="${fillId}" style="width:0%"></div></div>
+        <div class="prog-label" id="${labelId}">Starting…</div>
+        <div class="prog-log" id="${logId}"></div>`;
       if(budgetEl) budgetEl.querySelectorAll('button').forEach(b=>b.disabled=true);
 
       const es=new EventSource('/api/clipper/campaigns/'+campaignId+'/refresh-live');
       let okCount=0, failCount=0;
       es.onmessage=(ev)=>{
         const data=JSON.parse(ev.data);
-        const fill=document.getElementById('prog-fill-'+campaignId);
-        const label=document.getElementById('prog-label-'+campaignId);
-        const log=document.getElementById('prog-log-'+campaignId);
+        const fill=document.getElementById(fillId);
+        const label=document.getElementById(labelId);
+        const log=document.getElementById(logId);
 
         if(data.type==='blocked'){
           label.textContent='Could not start: '+(data.reason==='TOO_MANY_ACTIVE_CLIPS'
             ? `${data.eligible} active clips is more than fits in one hour's budget.`
             : 'No refresh budget left this hour.');
           es.close();
-          loadBudget(campaignId);
+          loadBudget(campaignId,budgetElId,progressElId);
           return;
         }
         if(data.type==='progress'){
@@ -822,22 +843,52 @@
           if(label) label.textContent=`Done — ${data.synced} updated${data.failed?`, ${data.failed} skipped`:''}${data.deferred?`, ${data.deferred} left for next time`:''}`;
           es.close();
           toast(`Refreshed ${data.synced} clip${data.synced===1?'':'s'}`);
-          loadBudget(campaignId);
+          loadBudget(campaignId,budgetElId,progressElId);
           loadCampaigns();
+          if(document.getElementById('v-clips').classList.contains('on')) loadClips().then(renderClips);
         }
         if(data.type==='error'){
           if(label) label.textContent='Error: '+data.message;
           es.close();
-          loadBudget(campaignId);
+          loadBudget(campaignId,budgetElId,progressElId);
         }
       };
       es.onerror=()=>{
         es.close();
-        const label=document.getElementById('prog-label-'+campaignId);
+        const label=document.getElementById(labelId);
         if(label && !/^Done|^Could not/.test(label.textContent)) label.textContent='Connection lost — refresh the page to see what completed.';
-        loadBudget(campaignId);
+        loadBudget(campaignId,budgetElId,progressElId);
       };
     };
+
+    /* The Clips page aggregates every campaign's clips in one grid, but the
+       200-calls/hour budget is per Instagram account (i.e. per campaign) --
+       so this renders one compact budget card per joined, Instagram-connected
+       campaign right on the Clips page itself, instead of only inside each
+       campaign's own detail view. Same widget, same live data, just visible
+       where a clipper is actually looking when they hit refresh. */
+    async function renderClipsBudget(){
+      const wrap=document.getElementById('clips-budget-row');
+      if(!wrap) return;
+      const joined=(CAMPAIGNS||[]).filter(c=>c.participation&&c.participation.status!=='kicked');
+      if(!joined.length){ wrap.innerHTML=''; return; }
+      wrap.innerHTML=joined.map(c=>`
+        <div class="card clips-budget-card" id="clips-budget-card-${c.id}">
+          <div class="clips-budget-title">${esc(c.name)} — Instagram refresh budget</div>
+          <div id="clips-budget-${c.id}" class="ig-budget"><span class="muted" style="font-size:.78rem">Loading refresh budget…</span></div>
+          <div id="clips-progress-${c.id}" class="ig-progress" style="display:none"></div>
+        </div>`).join('');
+      // Each card hides itself entirely once we know its campaign has no
+      // Instagram account connected (loadBudget leaves the inner div empty
+      // via `applicable:false`), so a YouTube-only campaign never shows an
+      // empty shell here.
+      await Promise.all(joined.map(async c=>{
+        await loadBudget(c.id,'clips-budget-'+c.id,'clips-progress-'+c.id);
+        const inner=document.getElementById('clips-budget-'+c.id);
+        const card=document.getElementById('clips-budget-card-'+c.id);
+        if(card && inner && !inner.innerHTML.trim()) card.style.display='none';
+      }));
+    }
 
     /* Refreshes one clip for exactly one call's worth of budget. */
     window.refreshOneClip=async function(clipId,btn){
@@ -847,9 +898,11 @@
         toast(`${num(r.views)} views`);
         // The button can be visible from either the home preview or the full
         // My Clips grid -- both render from the same CLIPS array, so both
-        // need refreshing regardless of which one triggered this.
+        // need refreshing regardless of which one triggered this. Same for
+        // the budget row: this just spent one of the account's calls.
         await loadClips();
         renderClips();
+        renderClipsBudget();
       }catch(e){ toast(e.message,true); }
       finally{ if(btn){ btn.disabled=false; btn.textContent='↻'; } }
     };
@@ -910,9 +963,15 @@
         NEXT_REFRESH_AT=Date.now()+(r.cooldown_ms||300000);
         await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
         renderClips();
+        renderClipsBudget();
         const found=r.imported?` · ${r.imported} new clip${r.imported===1?'':'s'} found`:'';
-        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read${found}`
-                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}${found}`, !!r.failed);
+        // `deferred` is clips this run skipped purely for budget/cooldown
+        // reasons (not failures) -- worth saying explicitly, since otherwise
+        // "Refreshed 12 clips" reads as complete when a 30-clip account may
+        // have left 18 for next time on purpose.
+        const deferred=r.deferred?` · ${r.deferred} left for next refresh (hourly limit)`:'';
+        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read${found}${deferred}`
+                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}${found}${deferred}`, !!r.failed);
       }catch(e){
         // 429 carries retry_in_ms so the countdown stays honest.
         if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;

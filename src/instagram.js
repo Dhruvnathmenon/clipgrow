@@ -364,3 +364,48 @@ export async function fetchMediaViews(mediaId, accessToken, { onAttempt } = {}) 
   }
   throw lastErr || IG_ERRORS.INSIGHTS_UNAVAILABLE();
 }
+
+// Diagnostic only -- not part of the normal sync path (that path deliberately
+// stops at the first metric that answers, to spend exactly one call per clip
+// against the 200/hour budget). This tries every candidate metric Meta might
+// answer for a piece of media and returns all of them side by side, so a real
+// discrepancy between what Instagram's Graph API reports and what the app
+// displays can be diagnosed from actual data instead of guessed at. Also
+// pulls the media's own type/timestamp, since Reels insights behave
+// differently depending on when the post was made relative to Meta's own
+// metric changes.
+const DIAGNOSTIC_METRICS = ['views', 'total_views', 'plays', 'video_views', 'impressions', 'reach', 'ig_reels_video_view_total_time'];
+
+export async function debugMediaInsights(mediaId, accessToken) {
+  const out = { media_id: mediaId, media: null, metrics: [] };
+
+  try {
+    const mediaUrl = new URL(`${GRAPH_BASE}/${mediaId}`);
+    mediaUrl.searchParams.set('fields', 'media_type,media_product_type,timestamp,permalink');
+    mediaUrl.searchParams.set('access_token', accessToken);
+    out.media = await igFetch(mediaUrl.toString(), { retries: 0 });
+  } catch (e) {
+    out.media = { error: e.code || 'UNKNOWN', message: e.message };
+  }
+
+  for (const metric of DIAGNOSTIC_METRICS) {
+    const url = new URL(`${GRAPH_BASE}/${mediaId}/insights`);
+    url.searchParams.set('metric', metric);
+    url.searchParams.set('access_token', accessToken);
+    try {
+      const body = await igFetch(url.toString(), { retries: 0 });
+      const row = (body.data || []).find(d => d.name === metric);
+      out.metrics.push({
+        metric,
+        ok: true,
+        value: row && row.values && row.values[0] ? row.values[0].value : null,
+        title: row ? row.title : null,
+        raw: row || body
+      });
+    } catch (e) {
+      out.metrics.push({ metric, ok: false, code: e.code, message: e.message });
+    }
+  }
+
+  return out;
+}

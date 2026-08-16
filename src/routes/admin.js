@@ -9,6 +9,7 @@ import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
+import { debugMediaInsights } from '../instagram.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -705,6 +706,30 @@ export async function handleAdmin(request, env, url) {
   if (pathname === '/api/admin/sync' && method === 'POST') {
     const summary = await syncAllCampaigns(env.DB, env);
     return json({ ok: true, ...summary });
+  }
+
+  // Diagnostic: shows every Instagram insights metric Meta will answer for one
+  // clip's media, side by side, against the actual stored value. The access
+  // token itself is read and used entirely server-side and never appears in
+  // the response -- only the metric values Instagram returns do. Exists to
+  // tell apart "our sync has a bug" from "Instagram's own API disagrees with
+  // its own app" without ever having to extract a live credential by hand.
+  params = matchPath('/api/admin/debug/submissions/:id/ig-metrics', pathname);
+  if (params && method === 'GET') {
+    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub) return err('Not found', 404);
+    if (sub.platform !== 'instagram') return err('This diagnostic is Instagram-only.', 400);
+    const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
+    if (!account || !account.access_token) return err('No connected Instagram account for this clip.', 404);
+
+    const diag = await debugMediaInsights(sub.ig_media_id, account.access_token);
+    return json({
+      submission_id: sub.id,
+      permalink: sub.permalink,
+      stored_views: sub.views,
+      stored_last_ok_sync_at: sub.last_ok_sync_at,
+      ...diag
+    });
   }
 
   return null;

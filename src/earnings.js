@@ -85,8 +85,16 @@ export async function refreshExpiringTokens(db, env) {
  * streaming per-clip refresh, so there is exactly one place this policy is
  * decided rather than two that could quietly drift apart.
  */
-export async function planInstagramSync(db, accountId, subs) {
-  const eligible = subs.filter(s => !s.last_ok_sync_at || (Date.now() - s.last_ok_sync_at) >= CLIP_COOLDOWN_MS);
+export async function planInstagramSync(db, accountId, subs, { skipCooldown = false } = {}) {
+  // The per-clip cooldown exists to stop an AUTOMATIC sweep (cron, "full
+  // refresh") from wastefully re-checking clips it only just checked minutes
+  // ago. It was never meant to stop a clipper from deliberately spending one
+  // of their own calls on a specific clip right now -- that's their budget to
+  // spend, and the account-level check below is what actually protects it.
+  // `skipCooldown` is how the single-clip refresh route opts out of it.
+  const eligible = skipCooldown
+    ? subs
+    : subs.filter(s => !s.last_ok_sync_at || (Date.now() - s.last_ok_sync_at) >= CLIP_COOLDOWN_MS);
 
   if (eligible.length > MAX_CLIPS_FOR_FULL_REFRESH) {
     // Hard refusal, not a partial or priority-ordered attempt: even a
@@ -108,7 +116,7 @@ export async function planInstagramSync(db, accountId, subs) {
   };
 }
 
-export async function syncAccountClips(db, env, account, subs) {
+export async function syncAccountClips(db, env, account, subs, { skipCooldown = false } = {}) {
   if (!account.access_token || account.status === 'revoked') {
     for (const s of subs) {
       await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ?').bind('NO_ACCOUNT', s.id).run();
@@ -130,7 +138,7 @@ export async function syncAccountClips(db, env, account, subs) {
   let deferred = 0;
 
   if (isInstagram) {
-    const plan = await planInstagramSync(db, account.id, subs);
+    const plan = await planInstagramSync(db, account.id, subs, { skipCooldown });
     attemptSubs = plan.attempt;
     blocked = plan.blocked;
     deferred = plan.deferred;
