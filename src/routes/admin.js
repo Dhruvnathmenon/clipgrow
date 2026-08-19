@@ -68,7 +68,13 @@ export async function handleAdmin(request, env, url) {
         (SELECT COUNT(*) FROM submissions WHERE sync_error IS NOT NULL AND status='active') AS submissions_with_errors,
         (SELECT COUNT(*) FROM submissions
            WHERE sync_error IS NOT NULL AND status='active' AND locked_at IS NULL
-             AND (last_ok_sync_at IS NULL OR last_ok_sync_at < ?)) AS submissions_stuck`
+             -- A clip that has never had a successful sync has no
+             -- last_ok_sync_at to measure "12h+ stuck" from. The old
+             -- last_ok_sync_at IS NULL branch flagged one immediately
+             -- regardless of age, so a clip's very first failed attempt,
+             -- seconds old, read as "stuck 12+ hours". Falling back to
+             -- created_at measures from when tracking actually began.
+             AND COALESCE(last_ok_sync_at, created_at) < ?) AS submissions_stuck`
     ).bind(Date.now() - STUCK_AFTER_MS).first();
     return json({ overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid || 0)) } });
   }

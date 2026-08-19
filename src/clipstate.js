@@ -37,9 +37,17 @@ export function clipState(s) {
       return 'reconnect';
     }
     // Anything else (rate limits, transient Instagram faults) is only worth
-    // escalating once it has persisted long enough to stop being noise.
-    const lastOk = s.last_ok_sync_at || 0;
-    return (!lastOk || Date.now() - lastOk > STALE_AFTER_MS) ? 'unavailable' : 'issue';
+    // escalating once it has persisted long enough to stop being noise. A
+    // clip that has never had a successful sync has no `last_ok_sync_at` to
+    // measure from -- falling back to 0 there (instead of when the clip
+    // actually started being tracked) made `Date.now() - 0` enormous, so a
+    // brand-new clip's very first failed attempt was misread as having been
+    // stale for decades and escalated to 'unavailable' immediately. Falling
+    // back to `created_at` instead measures from when tracking actually
+    // began, so one transient failure reads as 'issue' (expected to clear on
+    // its own) until it has genuinely persisted for STALE_AFTER_MS.
+    const since = s.last_ok_sync_at || s.created_at || 0;
+    return (!since || Date.now() - since > STALE_AFTER_MS) ? 'unavailable' : 'issue';
   }
 
   if (!s.last_ok_sync_at) return 'verified';
