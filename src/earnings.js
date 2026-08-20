@@ -375,6 +375,7 @@ export async function autoImportClips(db, clipperId = null, env = {}) {
   ).bind(...(clipperId ? [clipperId] : [])).all();
 
   const campaigns = new Set();
+  const errors = [];
   let imported = 0;
 
   for (const row of results || []) {
@@ -384,13 +385,26 @@ export async function autoImportClips(db, clipperId = null, env = {}) {
 
     try {
       const adapter = getAdapter(row.platform);
+
+      // Everything already recorded for this account, handed to the adapter so
+      // it can skip the per-item work (YouTube probes each candidate video with
+      // its own external request) instead of the caller throwing that work away
+      // afterwards. Without this the cost of a run grows with the channel's
+      // whole history rather than with what is actually new.
+      const { results: existing } = await db.prepare(
+        'SELECT ig_media_id FROM submissions WHERE platform = ? AND account_id = ?'
+      ).bind(row.platform, row.account_id).all();
+      const knownIds = new Set((existing || []).map(r => String(r.ig_media_id)));
+
       // sinceTs is the guardrail: only media published strictly after the
       // account was connected. Without it, connecting an account that already
       // has an old viral post would claim a campaign's budget instantly.
       const media = await withAccount(db, env, row,
-        (acct) => adapter.listRecent(acct, { sinceTs: row.connected_at || 0 }, env));
+        (acct) => adapter.listRecent(acct, { sinceTs: row.connected_at || 0, knownIds }, env));
 
       for (const m of media) {
+        // knownIds covers this account; this catches the same media arriving
+        // under a different account, which the per-account set cannot see.
         const seen = await db.prepare(
           'SELECT id FROM submissions WHERE platform = ? AND ig_media_id = ?'
         ).bind(row.platform, m.external_id).first();
@@ -415,15 +429,36 @@ export async function autoImportClips(db, clipperId = null, env = {}) {
         imported++;
       }
     } catch (e) {
-      // One unreachable account must never stop the rest importing.
+      // One unreachable account must never stop the rest importing -- but it
+      // must never vanish either. This used to record NOTHING unless the error
+      // happened to be an auth failure, so an account whose import broke for
+      // any other reason kept reporting status='connected' with a clean error
+      // code while quietly importing nothing at all. That is exactly how a
+      // clipper's uploads can stop arriving for days with no signal anywhere:
+      // the view sync for already-imported clips keeps succeeding, so the only
+      // symptom is an absence, and nothing was watching for an absence.
       const code = (e && e.code) || 'UNKNOWN';
       if (e && e.needsReauth) {
         await markAccount(db, row.account_id, { status: 'needs_reauth', code });
+      } else {
+        // Leave the account connected -- this is not an auth problem and the
+        // next run may well succeed -- but leave a trace that it failed.
+        await db.prepare(
+          'UPDATE social_accounts SET last_error_code = ?, last_error_at = ? WHERE id = ?'
+        ).bind(`IMPORT_${code}`, Date.now(), row.account_id).run();
       }
+      errors.push({
+        account_id: row.account_id,
+        platform: row.platform,
+        clipper_id: row.clipper_id,
+        code,
+        message: (e && e.message) || String(e)
+      });
+      console.error(`[auto-import] account ${row.account_id} (${row.platform}) failed: ${code} - ${(e && e.message) || e}`);
     }
   }
 
-  return { imported, campaigns: [...campaigns] };
+  return { imported, campaigns: [...campaigns], errors };
 }
 
 /**
@@ -578,6 +613,13 @@ export async function syncAllCampaigns(db, env = {}) {
   try {
     const res = await autoImportClips(db, null, env);
     summary.imported = res.imported;
+    // Per-account import failures are non-fatal by design, but they are the
+    // one failure whose only symptom is "a clipper's uploads stopped
+    // appearing" -- so they have to reach the cron log rather than being
+    // absorbed into a successful-looking run.
+    for (const f of res.errors || []) {
+      summary.errors.push(`auto-import account ${f.account_id} (${f.platform}, clipper ${f.clipper_id}): ${f.code} - ${f.message}`);
+    }
   } catch (e) {
     summary.errors.push(`auto-import: ${e.message}`);
   }

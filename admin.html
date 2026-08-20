@@ -810,6 +810,9 @@
       const urgent=[];
       if(o.accounts_needing_reauth>0) urgent.push(`${o.accounts_needing_reauth} account(s) need reconnecting by their clipper`);
       if(o.submissions_stuck>0) urgent.push(`${o.submissions_stuck} video(s) have not synced successfully in 12+ hours — investigate`);
+      // An import failure is invisible by nature: existing clips keep syncing,
+      // so nothing looks broken while new uploads quietly stop arriving.
+      if(o.accounts_import_failing>0) urgent.push(`${o.accounts_import_failing} account(s) failed to import new videos — new uploads may not be appearing`);
       const soft=[];
       const passing=o.submissions_with_errors-o.submissions_stuck;
       if(passing>0) soft.push(`${passing} video(s) hit a transient sync error, expected to clear on the next sync`);

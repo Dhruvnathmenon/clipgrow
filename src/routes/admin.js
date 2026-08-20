@@ -65,6 +65,13 @@ export async function handleAdmin(request, env, url) {
         (SELECT COALESCE(SUM(earning),0) FROM submissions WHERE status='active') AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
         (SELECT COUNT(*) FROM social_accounts WHERE status='needs_reauth') AS accounts_needing_reauth,
+        -- Accounts whose last auto-import attempt failed for a non-auth
+        -- reason. These still read as 'connected' and their existing clips
+        -- keep syncing fine, so the ONLY symptom is new uploads silently not
+        -- arriving -- invisible until a clipper complains. Surfaced here so
+        -- an absence is something the dashboard can actually report.
+        (SELECT COUNT(*) FROM social_accounts
+           WHERE status='connected' AND last_error_code LIKE 'IMPORT!_%' ESCAPE '!') AS accounts_import_failing,
         (SELECT COUNT(*) FROM submissions WHERE sync_error IS NOT NULL AND status='active') AS submissions_with_errors,
         (SELECT COUNT(*) FROM submissions
            WHERE sync_error IS NOT NULL AND status='active' AND locked_at IS NULL

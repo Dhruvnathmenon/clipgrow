@@ -401,7 +401,7 @@ export async function fetchViews(account, mediaIds, env) {
  * video and instantly claiming a campaign's budget -- the same guardrail
  * Instagram auto-import uses.
  */
-export async function listRecent(account, { sinceTs = 0, maxPages = 3 } = {}, env) {
+export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds = null } = {}, env) {
   const meta = account.meta_json ? JSON.parse(account.meta_json) : {};
   const playlist = meta.uploads_playlist;
   if (!playlist) return [];
@@ -429,7 +429,20 @@ export async function listRecent(account, { sinceTs = 0, maxPages = 3 } = {}, en
   }
   if (!ids.length) return [];
 
-  const items = await fetchVideoDetails(ids, account.access_token, env && env.YT_API_KEY);
+  // Drop anything already recorded BEFORE the expensive work below.
+  //
+  // This matters far more than it looks. `sinceTs` is connected_at, so this
+  // function returns EVERY video posted since the channel was connected --
+  // a set that only grows. Each one then costs an isShortVideo() probe, which
+  // is a separate external HTTP request per video. The caller used to dedup
+  // afterwards, so a channel with 27 videos since connect burned 27 probes on
+  // every single run to import maybe one new clip, and a Worker invocation has
+  // a hard per-invocation subrequest ceiling shared with everything else the
+  // sync does. Past a certain channel size the import simply stops fitting.
+  const fresh = knownIds ? ids.filter(id => !knownIds.has(String(id))) : ids;
+  if (!fresh.length) return [];
+
+  const items = await fetchVideoDetails(fresh, account.access_token, env && env.YT_API_KEY);
   const out = [];
   for (const v of items) {
     if (v.status && v.status.privacyStatus && v.status.privacyStatus !== 'public') continue;

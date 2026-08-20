@@ -310,7 +310,7 @@ export async function findMediaByUrl(igUserId, accessToken, permalinkUrl, { onAt
  * account with an old viral Reel and instantly claiming the whole budget --
  * only genuinely new posts are picked up automatically.
  */
-export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxPages = 3, onAttempt } = {}) {
+export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxPages = 3, onAttempt, knownIds = null } = {}) {
   let url = new URL(`${GRAPH_BASE}/${igUserId}/media`);
   url.searchParams.set('fields', 'id,permalink,media_type,media_product_type,timestamp,thumbnail_url,media_url');
   url.searchParams.set('limit', '50');
@@ -324,6 +324,9 @@ export async function listRecentMedia(igUserId, accessToken, { sinceTs = 0, maxP
     for (const m of items) {
       const ts = m.timestamp ? Date.parse(m.timestamp) : 0;
       if (ts && ts <= sinceTs) { hitOld = true; continue; }
+      // Already recorded -- still counts as "seen" for paging purposes, but
+      // there is no reason to hand it back to the importer again.
+      if (knownIds && knownIds.has(String(m.id))) continue;
       out.push(m);
     }
     // Results are newest-first, so the first old item means we're done.

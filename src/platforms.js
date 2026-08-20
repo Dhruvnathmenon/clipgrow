@@ -82,8 +82,8 @@ const instagramAdapter = {
     return out;
   },
 
-  async listRecent(account, { sinceTs = 0, onAttempt } = {}) {
-    const raw = await ig.listRecentMedia(account.external_id, account.access_token, { sinceTs, onAttempt });
+  async listRecent(account, { sinceTs = 0, onAttempt, knownIds = null } = {}) {
+    const raw = await ig.listRecentMedia(account.external_id, account.access_token, { sinceTs, onAttempt, knownIds });
     return raw.filter(ig.isVideoMedia).map(m => this.normalise(m));
   },
 
