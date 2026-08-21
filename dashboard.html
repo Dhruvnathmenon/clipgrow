@@ -67,6 +67,25 @@
     @keyframes flicker { 0%,100%{transform:scale(1)} 50%{transform:scale(1.14)} }
     .streak-n { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:.92rem; }
     .streak-l { font-size:.66rem; color:var(--muted); }
+
+    /* Leaderboard consistency badges. A live streak earns colour; a lapsed one
+       stays deliberately grey rather than red -- this board is visible to every
+       clipper, so a quiet day should read as "not counting yet", not a public
+       telling-off. */
+    .streak-pill { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .5rem; border-radius:999px;
+      background:var(--bg-mid); border:1px solid var(--border-s); font-family:'Space Grotesk',sans-serif;
+      font-weight:800; font-size:.82rem; color:var(--muted-l); line-height:1; white-space:nowrap; }
+    .streak-pill.on { color:var(--neon); border-color:rgba(61,255,122,.35); background:rgba(61,255,122,.08); }
+    .streak-pill.hot { color:var(--gold); border-color:rgba(255,215,0,.4); background:rgba(255,215,0,.1); }
+    .streak-pill .ic { font-size:.8rem; filter:grayscale(1) opacity(.5); }
+    .streak-pill.on .ic, .streak-pill.hot .ic { filter:none; }
+    .streak-best { font-size:.63rem; color:var(--muted); margin-top:.22rem; }
+    /* Recency: only genuinely stale gets a warning colour. */
+    .ago { font-size:.78rem; color:var(--text); white-space:nowrap; }
+    .ago.fresh { color:var(--neon); }
+    .ago.warn { color:var(--gold); }
+    .ago.cold { color:var(--red); }
+    .ago.never { color:var(--muted); }
     .sb-out { display:block; width:100%; margin-top:.6rem; padding:.5rem; background:none; border:1px solid var(--border-s); border-radius:7px; color:var(--muted); font-size:.75rem; cursor:pointer; font-family:'Inter',sans-serif; }
     .sb-out:hover { border-color:var(--red); color:var(--red); }
 
@@ -1095,19 +1114,39 @@
     let DIRECTORY=[];
     const MEDALS={1:'🥇',2:'🥈',3:'🥉'};
 
+    /* One place that decides how a streak and a last-post date look, so the
+       leaderboard row and the profile card can never describe the same clipper
+       differently. */
+    function streakPill(c){
+      const n=c.streak||0;
+      const cls=n===0?'':(n>=7?'hot':'on');
+      const title=n===0?'No active streak — post today to start one'
+        :`${n} day${n===1?'':'s'} in a row`+(c.best_streak>n?` · personal best ${c.best_streak}`:'');
+      return `<span class="streak-pill ${cls}" title="${esc(title)}"><span class="ic">🔥</span>${n}</span>`;
+    }
+    function lastPostCell(c){
+      const d=c.days_since_last_post;
+      if(d==null) return '<span class="ago never">no posts yet</span>';
+      const cls=d===0?'fresh':d===1?'':d<=3?'warn':'cold';
+      const label=d===0?'today':d===1?'yesterday':`${d} days ago`;
+      return `<span class="ago ${cls}">${label}</span>`;
+    }
+
     async function loadDirectory(){
       const el=document.getElementById('dir-body');
       try{
         const {clippers}=await api('/api/clipper/directory');
         DIRECTORY=clippers;
         el.innerHTML=clippers.length?`<div class="card"><div class="table-wrap"><table>
-          <thead><tr><th>Rank</th><th>Clipper</th><th>Total Views</th><th>Total Earned</th></tr></thead>
+          <thead><tr><th>Rank</th><th>Clipper</th><th>Streak</th><th>Last Post</th><th>Total Views</th><th>Total Earned</th></tr></thead>
           <tbody>${clippers.map(c=>`<tr class="dir-row ${c.is_me?'me-row':''}" onclick="openProfile(${c.id})">
             <td class="rank-cell ${c.rank<=3?'medal':''}">${MEDALS[c.rank]||('#'+c.rank)}</td>
             <td><strong style="color:var(--white)">${esc(c.display_name)}</strong>${c.is_me?' <span class="chip">you</span>':''}</td>
+            <td>${streakPill(c)}${c.best_streak>c.streak?`<div class="streak-best">best ${c.best_streak}</div>`:''}</td>
+            <td>${lastPostCell(c)}</td>
             <td>${num(c.views)}</td><td class="money">${money(c.earned)}</td>
           </tr>`).join('')}</tbody></table></div>
-          <p class="muted" style="font-size:.73rem;margin-top:.8rem">Ranked by total earned. Tap a name for their totals.</p>
+          <p class="muted" style="font-size:.73rem;margin-top:.8rem">Ranked by total earned. 🔥 is consecutive days posted — counted from when a video went live, not when it appeared here. Tap a name for their totals.</p>
           </div>`:'<div class="empty">No clippers yet.</div>';
       }catch(e){ el.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
     }
@@ -1125,6 +1164,8 @@
         <div class="stats" style="margin:1.2rem 0 0">
           <div class="stat"><div class="stat-val w">${num(c.views)}</div><div class="stat-lbl">Total Views Generated</div></div>
           <div class="stat"><div class="stat-val">${money(c.earned)}</div><div class="stat-lbl">Total Money Earned</div></div>
+          <div class="stat"><div class="stat-val">${streakPill(c)}</div><div class="stat-lbl">Current Streak${c.best_streak?` · best ${c.best_streak}`:''}</div></div>
+          <div class="stat"><div class="stat-val">${lastPostCell(c)}</div><div class="stat-lbl">Last Posted</div></div>
         </div>`;
       document.getElementById('pf-back').classList.add('open');
     };

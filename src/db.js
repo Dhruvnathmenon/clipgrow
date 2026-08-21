@@ -309,15 +309,28 @@ function istDayNumber(ts) {
  * Consecutive-day posting streak. A streak stays alive if the clipper posted
  * today or yesterday; anything older has lapsed and reads as zero.
  */
-export async function clipperStreak(db, clipperId) {
-  const { results } = await db
-    .prepare("SELECT created_at FROM submissions WHERE clipper_id = ? AND status = 'active' ORDER BY created_at DESC")
-    .bind(clipperId).all();
-  if (!results || !results.length) return { current: 0, best: 0, last_post_at: null };
+/**
+ * Streak maths for one clipper's posting timestamps.
+ *
+ * MUST be fed the time a clip was POSTED on the platform, never the time
+ * ClipGrow imported it. Import lag is real and large -- auto-import runs on a
+ * six-hourly cron and has historically backed up for days, so one import pass
+ * can land a week of uploads at a single instant. Measured on import time, a
+ * clipper posting reliably every day reads as a broken streak, and a backlog
+ * flush collapses several days of work into one. Hence COALESCE(posted_at,
+ * created_at) at every call site: posted_at is the truth, created_at is only
+ * a fallback for rows that predate it being recorded.
+ */
+function streakFromTimestamps(timestamps) {
+  if (!timestamps || !timestamps.length) {
+    return { current: 0, best: 0, last_post_at: null, days_since_last_post: null };
+  }
 
-  const days = [...new Set(results.map(r => istDayNumber(r.created_at)))].sort((a, b) => b - a);
+  const days = [...new Set(timestamps.map(istDayNumber))].sort((a, b) => b - a);
   const today = istDayNumber(Date.now());
 
+  // A streak survives today OR yesterday: someone who has not posted yet today
+  // has not broken anything, they just have not posted yet today.
   let current = 0;
   if (days[0] === today || days[0] === today - 1) {
     current = 1;
@@ -334,7 +347,54 @@ export async function clipperStreak(db, clipperId) {
     if (run > best) best = run;
   }
 
-  return { current, best, last_post_at: results[0].created_at };
+  const lastPostAt = Math.max(...timestamps);
+  return {
+    current,
+    best,
+    last_post_at: lastPostAt,
+    // Whole IST days since the last post: 0 = today, 1 = yesterday. Derived
+    // from day boundaries rather than elapsed hours, so "yesterday" means
+    // yesterday's date rather than "between 24 and 48 hours ago".
+    days_since_last_post: today - istDayNumber(lastPostAt)
+  };
+}
+
+/**
+ * Consecutive-day posting streak. A streak stays alive if the clipper posted
+ * today or yesterday; anything older has lapsed and reads as zero.
+ */
+export async function clipperStreak(db, clipperId) {
+  const { results } = await db
+    .prepare(`SELECT COALESCE(posted_at, created_at) AS ts
+              FROM submissions WHERE clipper_id = ? AND status = 'active'`)
+    .bind(clipperId).all();
+  return streakFromTimestamps((results || []).map(r => Number(r.ts)));
+}
+
+/**
+ * Streaks for every active clipper in ONE query.
+ *
+ * The directory ranks everyone at once, so doing this per clipper would mean a
+ * query per row -- fine at five clippers, a problem at fifty. One scan grouped
+ * in memory keeps the leaderboard a fixed cost regardless of roster size.
+ */
+export async function allClipperStreaks(db) {
+  const { results } = await db.prepare(
+    `SELECT s.clipper_id, COALESCE(s.posted_at, s.created_at) AS ts
+     FROM submissions s
+     JOIN clippers cl ON cl.id = s.clipper_id
+     WHERE s.status = 'active' AND cl.status = 'active'`
+  ).all();
+
+  const byClipper = new Map();
+  for (const r of results || []) {
+    if (!byClipper.has(r.clipper_id)) byClipper.set(r.clipper_id, []);
+    byClipper.get(r.clipper_id).push(Number(r.ts));
+  }
+
+  const out = new Map();
+  for (const [id, stamps] of byClipper) out.set(id, streakFromTimestamps(stamps));
+  return out;
 }
 
 export async function clipperTotals(db, clipperId) {

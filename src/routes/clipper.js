@@ -3,7 +3,7 @@ import { createSessionCookie, requireClipper, verifyPassword, clearCookieHeader 
 import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
-  clipperStreak, clipperTotals, listParticipationAccounts, getParticipationAccount,
+  clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
   unlinkParticipationAccount
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
@@ -629,15 +629,27 @@ export async function handleClipper(request, env, url) {
        ORDER BY earned DESC, views DESC, cl.display_name ASC`
     ).all();
 
+    // Consistency streaks for the whole board in one query -- see
+    // allClipperStreaks. Measured on when clips were POSTED, not when they
+    // were imported, so a slow import can never cost someone their streak.
+    const streaks = await allClipperStreaks(env.DB);
+
     return json({
-      clippers: (results || []).map((c, i) => ({
-        id: c.id,
-        rank: i + 1,
-        display_name: c.display_name || c.username,
-        views: c.views,
-        earned: c.earned,
-        is_me: c.id === clipperId
-      }))
+      clippers: (results || []).map((c, i) => {
+        const s = streaks.get(c.id) || { current: 0, best: 0, last_post_at: null, days_since_last_post: null };
+        return {
+          id: c.id,
+          rank: i + 1,
+          display_name: c.display_name || c.username,
+          views: c.views,
+          earned: c.earned,
+          streak: s.current,
+          best_streak: s.best,
+          last_post_at: s.last_post_at,
+          days_since_last_post: s.days_since_last_post,
+          is_me: c.id === clipperId
+        };
+      })
     });
   }
 
