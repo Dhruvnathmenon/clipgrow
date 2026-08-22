@@ -692,10 +692,19 @@
       let out=`<div class="acct"><span class="plat-ic">${platIcon(plat)}</span><span class="badge connected">✓ Verified</span>Posting from <strong style="color:var(--white)">${handle}</strong>
         <span class="chip">${esc(a.account_type||(isYt?'channel':'professional'))}</span></div>`;
       if(p.status==='active'&&c.status==='active'){
-        out+=`<div class="auto-note">
-          <strong>New ${thing} are added automatically.</strong> Anything you post on ${handle} from now on shows up here on its own — you don't need to do anything.
-          ${isYt?'<div class="note" style="margin-top:.4rem">Only Shorts earn on this campaign. Regular uploads still appear here, marked as not eligible.</div>':''}
-        </div>`;
+        // A paste-only account tracks NOTHING on its own. Saying "added
+        // automatically" here would be actively false and would cost the
+        // clipper real money -- they would post, assume it was counted, and
+        // silently earn nothing on it.
+        out+=a.auto_import===false
+          ? `<div class="auto-note">
+              <strong>Add each ${isYt?'Short':'Reel'} yourself.</strong> This account is set to manual, because you also post videos here that are not for this campaign — so nothing is picked up on its own. Paste the link to each campaign ${isYt?'Short':'Reel'} below once it is live, and only those get tracked.
+              ${isYt?'<div class="note" style="margin-top:.4rem">Only Shorts earn on this campaign.</div>':''}
+            </div>`
+          : `<div class="auto-note">
+              <strong>New ${thing} are added automatically.</strong> Anything you post on ${handle} from now on shows up here on its own — you don't need to do anything.
+              ${isYt?'<div class="note" style="margin-top:.4rem">Only Shorts earn on this campaign. Regular uploads still appear here, marked as not eligible.</div>':''}
+            </div>`;
         // Instagram has a real, per-account limit on how many times it can be
         // asked for view counts each hour -- unlike YouTube, which batches 50
         // clips into one call and has enormous headroom by comparison. This
@@ -737,15 +746,24 @@
         });
         if(anyConnected&&p.status==='active'&&c.status==='active'){
           const what=plats.length>1?'Reel or Short':'Reel';
+          // When every connected account here is paste-only, adding links is
+          // the ONLY way clips get tracked -- so it stops being an afterthought
+          // for old posts and becomes the main action on the page.
+          const manualOnly=plats.every(plat=>{
+            const a=accounts[plat];
+            return !a || a.status!=='connected' || a.auto_import===false;
+          });
           // One refresh control for the whole campaign, not one per platform.
           action+=`<div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
-              <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Check for new clips &amp; views</button>
+              <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ ${manualOnly?'Refresh views':'Check for new clips &amp; views'}</button>
               <div class="note refresh-note">Updates automatically every 6 hours</div>
             </div>
             <div class="submit-row">
-              <input type="url" id="d-url" placeholder="Paste a link to add an older ${what}" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
+              <input type="url" id="d-url" placeholder="${manualOnly?`Paste your campaign ${what} link here`:`Paste a link to add an older ${what}`}" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
               <button class="btn" id="d-btn" onclick="submitClip(${c.id},'d-url')">Add Clip</button></div>
-              <p class="muted" style="font-size:.73rem;margin-top:.45rem">Only needed for posts made before you connected the account. We work out the platform from the link and check it really belongs to your connected account.</p>`;
+              <p class="muted" style="font-size:.73rem;margin-top:.45rem">${manualOnly
+                ? `This is how every ${what} gets counted on this campaign — paste each one once it is live. We check the link really belongs to your connected account.`
+                : 'Only needed for posts made before you connected the account. We work out the platform from the link and check it really belongs to your connected account.'}</p>`;
         } else if(c.status==='budget_full'){
           action+=alertBox('info','Budget fully allocated','New clips can no longer earn on this campaign.','Your existing clips keep their earnings.');
         }

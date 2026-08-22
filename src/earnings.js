@@ -361,6 +361,15 @@ export async function autoImportClips(db, clipperId = null, env = {}) {
   // Reads the participation_accounts join table (migration 012) rather than
   // participations.account_id, so a campaign can pull from an Instagram
   // account and a YouTube channel at the same time.
+  //
+  // `auto_import = 0` accounts are skipped entirely (migration 015). That is
+  // for a clipper working from their MAIN account, where campaign videos and
+  // their own unrelated posts sit side by side -- auto-import lists everything
+  // the account published and cannot tell the two apart, so it would sweep
+  // personal videos into the campaign. Those accounts submit by pasting a link
+  // instead, which goes through findByUrl and still proves the post belongs to
+  // the connected account. Gating it here covers the 6-hourly cron and the
+  // clipper's own manual refresh in one place, since both funnel through here.
   const { results } = await db.prepare(
     `SELECT a.id AS account_id, a.platform, a.external_id, a.access_token, a.refresh_token,
             a.token_expires_at, a.meta_json, a.connected_at, a.status,
@@ -370,6 +379,7 @@ export async function autoImportClips(db, clipperId = null, env = {}) {
      JOIN participations p ON p.id = pa.participation_id
      JOIN campaigns c ON c.id = p.campaign_id
      WHERE a.status = 'connected' AND a.access_token IS NOT NULL
+       AND a.auto_import != 0
        AND p.status = 'active' AND c.status != 'completed'
        ${clipperId ? 'AND p.clipper_id = ?' : ''}`
   ).bind(...(clipperId ? [clipperId] : [])).all();

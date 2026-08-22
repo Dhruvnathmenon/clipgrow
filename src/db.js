@@ -192,7 +192,11 @@ export function publicAccount(row) {
     status: row.status,
     last_error_code: row.last_error_code,
     expires_at: row.token_expires_at,
-    connected_at: row.connected_at
+    connected_at: row.connected_at,
+    // false = this account only tracks videos the clipper pastes in by hand
+    // (migration 015). The clipper needs to know, or they will assume their
+    // posts are being picked up automatically and quietly earn nothing.
+    auto_import: row.auto_import !== 0
   };
 }
 

@@ -1050,16 +1050,19 @@
         box.innerHTML=`
           <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
           ${d.accounts.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Handle</th><th>Platform</th><th>Type</th><th>Status</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
+            <thead><tr><th>Handle</th><th>Platform</th><th>Type</th><th>Status</th><th>Tracking</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
             <tbody>${d.accounts.map(a=>`<tr>
               <td class="handle">${a.platform==='youtube'?'':'@'}${esc(a.username)}</td>
               <td><span class="badge ${a.platform==='youtube'?'budget_full':'neutral'}">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
               <td class="muted">${esc(a.account_type||'—')}</td>
               <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
+              <td><span class="badge ${a.auto_import?'active':'paused'}">${a.auto_import?'automatic':'paste only'}</span>
+                <div><button class="btn btn-ghost btn-sm" style="margin-top:.3rem" onclick="toggleAutoImport(${a.id},${a.auto_import?'false':'true'},'${esc(a.username).replace(/'/g,'')}')">${a.auto_import?'Switch to paste-only':'Switch to automatic'}</button></div></td>
               <td class="muted">${when(a.connected_at)}</td>
               <td class="muted">${when(a.expires_at)}</td>
               <td><button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}')">Disconnect</button></td>
-            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No accounts connected.</p>'}
+            </tr>`).join('')}</tbody></table></div>
+            <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
 
           <div class="sub-h">Campaigns (${d.participations.length})</div>
           ${d.participations.length?`<div class="table-wrap"><table>
@@ -1102,6 +1105,18 @@
       try{ await api('/api/admin/clippers/'+id,{method:'DELETE'}); toast('Clipper deleted'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
+    window.toggleAutoImport=async function(id,turnOn,handle){
+      const msg=turnOn
+        ? `Turn AUTOMATIC tracking on for ${handle}?\n\nEvery new video this account posts will be picked up and tracked, including ones that have nothing to do with a campaign.`
+        : `Switch ${handle} to PASTE-ONLY?\n\nNothing this account posts will be tracked automatically. The clipper must paste each campaign video's link themselves.\n\nVideos already being tracked are not affected.`;
+      if(!confirm(msg)) return;
+      try{
+        await api('/api/admin/accounts/'+id,{method:'PATCH',body:JSON.stringify({auto_import:turnOn})});
+        toast(turnOn?'Automatic tracking on':'Switched to paste-only');
+        loadAll();
+      }catch(e){ toast(e.message,true); }
+    };
+
     window.revokeAccount=async function(id,platform,handle){
       const what=`${platform||'this'} account${handle?' '+handle:''}`;
       if(!confirm(`Disconnect ${what}?\n\nPending (unpaid) videos from this account are DELETED and their budget goes back to the campaign.\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThe clipper can then connect a different account.`)) return;

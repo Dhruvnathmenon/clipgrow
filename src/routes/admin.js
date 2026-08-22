@@ -480,10 +480,23 @@ export async function handleAdmin(request, env, url) {
   }
 
   // --------------------------------------------------------------- accounts
+  // Switches an account between automatic tracking and paste-only. Used when a
+  // clipper posts campaign work from their MAIN account, where auto-import
+  // would otherwise sweep in their unrelated personal videos.
+  params = matchPath('/api/admin/accounts/:id', pathname);
+  if (params && method === 'PATCH') {
+    const body = await readJson(request);
+    if (typeof body.auto_import !== 'boolean') return err('auto_import must be true or false');
+    const account = await env.DB.prepare('SELECT id FROM social_accounts WHERE id = ?').bind(params.id).first();
+    if (!account) return err('Account not found', 404);
+    await env.DB.prepare('UPDATE social_accounts SET auto_import = ? WHERE id = ?')
+      .bind(body.auto_import ? 1 : 0, params.id).run();
+    return json({ ok: true, auto_import: body.auto_import });
+  }
+
   // Fully disconnects an account so a different one can be connected in its
   // place: unlinks it from the participation, deletes its pending clips, and
   // keeps whatever was already settled. See disconnectSocialAccount.
-  params = matchPath('/api/admin/accounts/:id', pathname);
   if (params && method === 'DELETE') {
     const result = await disconnectSocialAccount(env.DB, Number(params.id));
     if (!result) return err('Account not found', 404);

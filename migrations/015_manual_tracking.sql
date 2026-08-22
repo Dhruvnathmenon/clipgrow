@@ -1,0 +1,11 @@
+-- Per-account auto-import switch.
+--
+-- Scoped to the ACCOUNT rather than the clipper, because the problem is a
+-- property of the account: a clipper posting campaign work from their main
+-- channel has campaign videos and personal videos living side by side there,
+-- and auto-import cannot tell them apart. The same clipper may still have a
+-- dedicated clipping account elsewhere that SHOULD auto-import, so the switch
+-- has to sit where the mixing actually happens.
+--
+-- Default 1 preserves today's behaviour for every existing account.
+ALTER TABLE social_accounts ADD COLUMN auto_import INTEGER NOT NULL DEFAULT 1;
