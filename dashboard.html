@@ -864,6 +864,31 @@
       }catch(e){ el.innerHTML=`<span class="muted" style="font-size:.78rem">${esc(e.message)}</span>`; }
     };
 
+    /* The My Clips page shows one budget card per joined campaign, under its
+       own ids so it never collides with the campaign-detail copy above. */
+    async function renderClipsBudget(){
+      const wrap=document.getElementById('clips-budget-row');
+      if(!wrap) return;
+      const joined=(CAMPAIGNS||[]).filter(c=>c.participation&&c.participation.status!=='kicked');
+      if(!joined.length){ wrap.innerHTML=''; return; }
+      wrap.innerHTML=joined.map(c=>`
+        <div class="card clips-budget-card" id="clips-budget-card-${c.id}">
+          <div class="clips-budget-title">${esc(c.name)} — Instagram refresh budget</div>
+          <div id="clips-budget-${c.id}" class="ig-budget"><span class="muted" style="font-size:.78rem">Loading refresh budget…</span></div>
+          <div id="clips-progress-${c.id}" class="ig-progress" style="display:none"></div>
+        </div>`).join('');
+      // Each card hides itself entirely once we know its campaign has no
+      // Instagram account connected (loadBudget leaves the inner div empty
+      // via `applicable:false`), so a YouTube-only campaign never shows an
+      // empty shell here.
+      await Promise.all(joined.map(async c=>{
+        await loadBudget(c.id,'clips-budget-'+c.id,'clips-progress-'+c.id);
+        const inner=document.getElementById('clips-budget-'+c.id);
+        const card=document.getElementById('clips-budget-card-'+c.id);
+        if(card && inner && !inner.innerHTML.trim()) card.style.display='none';
+      }));
+    }
+
     /* Refreshes one clip for exactly one call's worth of budget. */
     window.refreshOneClip=async function(clipId,btn){
       if(btn){ btn.disabled=true; btn.textContent='…'; }
@@ -981,6 +1006,33 @@
         </div>
         ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
     }
+
+    /* Shown the instant a refresh button is clicked, before the server has
+       replied. The first chunk runs inline in that POST, so the response can
+       take many seconds -- without this the UI looked frozen and there was no
+       way to tell a click from a network stall. */
+    window.showJobStarting=function(title){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">${esc(title||'Starting refresh…')}</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-bar"><div class="prog-fill indet" style="width:35%"></div></div>
+        <div class="prog-label">Working out what needs refreshing…</div>`;
+    };
+
+    window.showJobError=function(msg){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">Refresh failed to start</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-label" style="color:var(--gold)">${esc(msg||'Something went wrong')}</div>`;
+    };
 
     window.retryJob=async function(jobId){
       try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
