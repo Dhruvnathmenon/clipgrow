@@ -1146,7 +1146,7 @@
           ? accounts.map(a=>`<div class="card"><div class="card-top">
               <div style="display:flex;align-items:center;gap:.6rem">
                 <span class="plat-ic" style="color:var(--neon)">${platIcon(a.platform)}</span>
-                <div><div class="card-name">@${esc(a.username)}</div>
+                <div><div class="card-name">${a.platform==='youtube'?esc(a.username):'@'+esc(a.username)}</div>
                   <div class="card-meta">${a.campaign_name?'Working '+esc(a.campaign_name):'Not linked to a campaign'} · ${esc(a.account_type||'professional')}</div></div>
               </div>
               <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">

@@ -105,12 +105,25 @@ export async function handleClipper(request, env, url) {
   }
 
   // Every social account this clipper has linked, and which campaign each drives.
+  //
+  // Resolved through participation_accounts, not the legacy participations.account_id
+  // column -- that column is only ever kept in sync for Instagram (see
+  // linkParticipationAccount in db.js), so joining on it here reported every
+  // YouTube account as "not linked to a campaign" even when it genuinely was,
+  // because none of them ever touch that column. A correlated subquery avoids
+  // duplicate rows for the rare account linked to more than one participation.
   if (pathname === '/api/clipper/accounts' && method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT a.*, c.name AS campaign_name, c.id AS campaign_id
+      `SELECT a.*,
+         (SELECT c.id FROM participation_accounts pa
+          JOIN participations p ON p.id = pa.participation_id
+          JOIN campaigns c ON c.id = p.campaign_id
+          WHERE pa.account_id = a.id ORDER BY pa.linked_at DESC LIMIT 1) AS campaign_id,
+         (SELECT c.name FROM participation_accounts pa
+          JOIN participations p ON p.id = pa.participation_id
+          JOIN campaigns c ON c.id = p.campaign_id
+          WHERE pa.account_id = a.id ORDER BY pa.linked_at DESC LIMIT 1) AS campaign_name
        FROM social_accounts a
-       LEFT JOIN participations p ON p.account_id = a.id
-       LEFT JOIN campaigns c ON c.id = p.campaign_id
        WHERE a.clipper_id = ? ORDER BY a.connected_at DESC`
     ).bind(clipperId).all();
     return json({
