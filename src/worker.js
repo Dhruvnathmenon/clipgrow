@@ -109,6 +109,20 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
+  // Continuation consumer for chained refresh jobs.
+  //
+  // Phase 0 stub: the binding and queue exist so the infrastructure is live
+  // and deployable, but nothing enqueues yet and no job engine is wired in.
+  // Messages are acknowledged rather than left to retry, so a stray message
+  // can never build up a redlivery backlog against the free-tier op budget
+  // while the engine is still being built.
+  async queue(batch, env, ctx) {
+    for (const message of batch.messages) {
+      console.log('[refresh-queue] stub received (engine not yet wired):', JSON.stringify(message.body));
+      message.ack();
+    }
+  },
+
   async scheduled(event, env, ctx) {
     // syncAllCampaigns's return value used to be silently discarded here --
     // its own error summary existed but nothing ever read it, so a sync

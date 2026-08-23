@@ -99,6 +99,14 @@ export const YT_ERRORS = {
     'This is usually temporary — try again in a minute.',
     { retryable: true }
   ),
+  // See IG_ERRORS.SUBREQUEST_LIMIT in instagram.js -- same reasoning, kept
+  // distinct from NETWORK so the two are never indistinguishable again.
+  SUBREQUEST_LIMIT: () => new YtError(
+    'SUBREQUEST_LIMIT',
+    'This sync ran out of request budget for this batch.',
+    'Not an account problem -- it will be picked up on the next sync.',
+    { retryable: false }
+  ),
   UNKNOWN: (msg) => new YtError('UNKNOWN', msg || 'Something went wrong talking to YouTube.',
     'Try again — if it keeps happening, tell the ClipGrow admin.', { retryable: true })
 };
@@ -134,7 +142,8 @@ async function ytFetch(url, { headers = {}, retries = 2 } = {}) {
     let res;
     try {
       res = await fetch(url, { headers });
-    } catch {
+    } catch (e) {
+      if (e && /too many subrequests/i.test(e.message || '')) throw YT_ERRORS.SUBREQUEST_LIMIT();
       lastErr = YT_ERRORS.NETWORK();
       await sleep(300 * Math.pow(2, attempt));
       continue;

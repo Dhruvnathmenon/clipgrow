@@ -88,6 +88,20 @@ export const IG_ERRORS = {
     'This is usually temporary — try again in a minute.',
     { retryable: true }
   ),
+  // Distinct from NETWORK on purpose. Before this, ANY thrown fetch() -- a
+  // real connectivity blip OR the Workers runtime itself refusing a call
+  // because this invocation hit Cloudflare's per-invocation subrequest cap --
+  // landed in the same generic NETWORK bucket, indistinguishable after the
+  // fact. That ambiguity is exactly what made an earlier "did we hit the
+  // limit or not" question impossible to answer from stored data alone.
+  // Retrying is also pointless here (the cap doesn't lift mid-invocation), so
+  // this fails fast instead of burning the retry/backoff sleep for nothing.
+  SUBREQUEST_LIMIT: () => new IgError(
+    'SUBREQUEST_LIMIT',
+    'This sync ran out of request budget for this batch.',
+    'Not an account problem -- it will be picked up on the next sync.',
+    { retryable: false }
+  ),
   UNKNOWN: (msg) => new IgError('UNKNOWN', msg || 'Something went wrong talking to Instagram.', 'Try again — if it keeps happening, tell the ClipGrow admin.', { retryable: true })
 };
 
@@ -152,7 +166,10 @@ async function igFetch(url, { method = 'GET', body, retries = 2, onAttempt } = {
     if (onAttempt) onAttempt();
     try {
       res = await fetch(url, { method, body });
-    } catch {
+    } catch (e) {
+      // Cloudflare throws this synchronously from fetch() itself once an
+      // invocation's subrequest budget is spent -- see IG_ERRORS.SUBREQUEST_LIMIT.
+      if (e && /too many subrequests/i.test(e.message || '')) throw IG_ERRORS.SUBREQUEST_LIMIT();
       lastErr = IG_ERRORS.NETWORK();
       await sleep(300 * Math.pow(2, attempt));
       continue;

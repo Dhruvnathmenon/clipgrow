@@ -1,0 +1,13 @@
+-- Carries the auto-import choice from approval time into the account that
+-- gets created once the clipper actually connects.
+--
+-- Without this, an admin approving someone they know posts campaign work on
+-- their main account has no way to say so until AFTER the account exists --
+-- there is a real window between "Approve" and the clipper connecting (and
+-- then posting) where the account defaults to automatic and could sweep in
+-- unrelated videos before anyone remembers to flip the toggle.
+--
+-- NOT NULL DEFAULT 1 mirrors social_accounts.auto_import: every existing and
+-- future request behaves exactly as today unless the admin explicitly opts
+-- a specific request into paste-only at approval time.
+ALTER TABLE tester_requests ADD COLUMN auto_import INTEGER NOT NULL DEFAULT 1;

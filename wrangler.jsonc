@@ -33,6 +33,28 @@
       "database_id": "5d78f12c-23f6-4abb-83f6-2574a7ea60b1"
     }
   ],
+  // Chained refresh handoff. A refresh job that cannot finish inside one
+  // invocation's external-subrequest budget saves its remaining work and
+  // enqueues a continuation here, which wakes a fresh invocation with a fresh
+  // budget. max_batch_size 1 keeps one message === one job continuation, so a
+  // slow job can never starve or delay an unrelated one by being batched with
+  // it. Queues are included on the Workers free plan (10k ops/day).
+  "queues": {
+    "producers": [
+      { "queue": "clipgrow-refresh", "binding": "REFRESH_QUEUE" }
+    ],
+    "consumers": [
+      {
+        "queue": "clipgrow-refresh",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        // Queues retries a message whose consumer invocation died outright,
+        // which is the free automatic recovery that picking Queues over
+        // synchronous self-chaining buys us.
+        "max_retries": 3
+      }
+    ]
+  },
   "triggers": {
     "crons": ["0 */6 * * *"]
   }
