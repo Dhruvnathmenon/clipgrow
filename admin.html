@@ -567,7 +567,12 @@
       const pct=total>0?Math.round(100*done/total):(j.status==='done'?100:0);
       const finished=j.status==='done';
 
-      const title=finished?'Refresh complete'
+      // A job with no work at all is a real outcome (everything already
+      // paid/locked, or nothing connected yet) -- saying "0 of 0" leaves
+      // someone wondering whether it silently failed.
+      const nothingToDo=finished&&total===0;
+      const title=nothingToDo?'Nothing to refresh'
+        :finished?'Refresh complete'
         :j.stalled?'Refresh stalled'
         :j.kind==='global'?'Refreshing every account':'Refreshing your videos';
 
@@ -595,10 +600,10 @@
           <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
         </div>
         <div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>
-        <div class="prog-label">${num(done)} of ${num(total)} videos checked${finished?'':` · ${num(j.remaining||0)} to go`}</div>
+        <div class="prog-label">${nothingToDo?'No videos needed checking right now':`${num(done)} of ${num(total)} videos checked${finished?'':` · ${num(j.remaining||0)} to go`}`}</div>
         ${rows?`<div class="job-rows">${rows}</div>`:''}
         <div class="job-foot">
-          ${finished?`${num(j.clips_fetched)} updated`:`${num(j.invocations)} batch${j.invocations===1?'':'es'} so far`}
+          ${nothingToDo?'Everything here is already up to date or settled':finished?`${num(j.clips_fetched)} updated`:`${num(j.invocations)} batch${j.invocations===1?'':'es'} so far`}
           ${j.imported?` · ${num(j.imported)} new video${j.imported===1?'':'s'} found`:''}
           ${j.clips_failed?` · ${num(j.clips_failed)} couldn't be read`:''}
           ${j.clips_skipped?` · ${num(j.clips_skipped)} skipped`:''}

@@ -217,6 +217,9 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   const counters = new Map();
   let calls = 0;
   let blockedThisRound = false;
+  // Accounts already pushed to the back of the queue this invocation, so the
+  // loop can tell "try the next account" from "we have cycled the whole list".
+  const deferredAccounts = new Set();
 
   while (pending.length) {
     const item = pending[0];
@@ -233,15 +236,22 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
       continue;
     }
 
+    // Already deferred this account once this invocation, and it is back at
+    // the head: every account still queued is blocked, so there is nothing
+    // left to make progress on. Without this the deferral cycles forever --
+    // with two blocked accounts, moving each to the end just swaps which one
+    // is in front, and the invocation spins until the platform kills it.
+    if (deferredAccounts.has(String(item.a))) break;
+
     if (!(await claimAccount(db, item.a, jobId))) {
-      // Another live job holds this account. Defer its items to the END of the
-      // list rather than dropping or blocking on them, so the rest of this job
-      // still makes progress and these get retried later in the same run.
+      // Another live job holds this account. Move its items to the END rather
+      // than dropping or blocking on them, so the rest of this job still makes
+      // progress and these get retried on a later invocation.
+      deferredAccounts.add(String(item.a));
       const deferred = [];
-      pending = pending.filter(x => (x.a === item.a ? (deferred.push(x), false) : true));
+      pending = pending.filter(x => (String(x.a) === String(item.a) ? (deferred.push(x), false) : true));
       pending = pending.concat(deferred);
       blockedThisRound = true;
-      if (pending.every(x => x.a === item.a)) break;  // nothing else left to do
       continue;
     }
 
