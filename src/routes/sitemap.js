@@ -15,7 +15,14 @@ export async function handleSitemap(request, env, url) {
   if (request.method !== 'GET' || url.pathname !== '/sitemap.xml') return null;
 
   const origin = url.origin;
-  const entries = [urlEntry(`${origin}/`, { changefreq: 'daily' })];
+  const entries = [
+    urlEntry(`${origin}/`, { changefreq: 'daily' }),
+    // Legal pages are listed so Meta and Google reviewers -- and crawlers --
+    // can always find them from a single canonical place.
+    urlEntry(`${origin}/privacy`, { changefreq: 'yearly' }),
+    urlEntry(`${origin}/terms`, { changefreq: 'yearly' }),
+    urlEntry(`${origin}/data-deletion`, { changefreq: 'yearly' })
+  ];
 
   const { results: campaigns } = await env.DB.prepare(
     "SELECT slug, created_at FROM campaigns WHERE slug IS NOT NULL AND status IN ('active', 'budget_full', 'completed') ORDER BY created_at DESC"
