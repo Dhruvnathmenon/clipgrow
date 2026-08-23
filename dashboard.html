@@ -217,6 +217,26 @@
     .clips-budget-title { font-size:.78rem; font-weight:600; color:var(--muted-l); text-transform:uppercase; letter-spacing:.02em; margin-bottom:.2rem; }
     .clips-budget-card .ig-budget { margin-top:.55rem; }
 
+    /* Refresh job panel. Polls rather than streaming: the work happens across
+       independent invocations regardless of any open connection, so a dropped
+       connection or a closed tab can never lose progress -- reopening just
+       resumes polling the same job id. */
+    .job-panel { position:fixed; right:1rem; bottom:1rem; width:min(380px,calc(100vw - 2rem)); z-index:400;
+      background:var(--card); border:1px solid var(--border-s); border-radius:12px; padding:1rem 1.1rem;
+      box-shadow:0 18px 44px rgba(0,0,0,.55); display:none; }
+    .job-panel.on { display:block; }
+    .job-head { display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin-bottom:.6rem; }
+    .job-title { font-size:.82rem; font-weight:700; color:var(--white); }
+    .job-x { background:none; border:none; color:var(--muted); font-size:1.1rem; cursor:pointer; line-height:1; padding:0 .2rem; }
+    .job-x:hover { color:var(--white); }
+    .job-stats { display:flex; flex-wrap:wrap; gap:.9rem; margin-top:.6rem; }
+    .job-stat b { display:block; font-family:'Space Grotesk',sans-serif; font-size:1rem; color:var(--white); line-height:1.15; }
+    .job-stat span { font-size:.63rem; color:var(--muted-l); }
+    .job-accts { margin-top:.7rem; border-top:1px solid var(--border); padding-top:.6rem; max-height:150px; overflow-y:auto; }
+    .job-acct { display:flex; justify-content:space-between; gap:.6rem; font-size:.7rem; padding:.18rem 0; color:var(--muted-l); }
+    .job-acct b { color:var(--text); font-weight:600; }
+    .job-acct .warn { color:var(--gold); }
+
     table { width:100%; border-collapse:collapse; }
     th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.66rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
     td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.83rem; }
@@ -825,107 +845,10 @@
             <div class="budget-stat"><b>${num(b.single_refreshes_available)}</b><span>single-clip refreshes</span></div>
           </div>
           ${b.remaining<b.limit?`<div class="muted" style="font-size:.72rem;margin-top:.35rem">Next call frees up in ${mins<1?'under a minute':mins+'m'} — budget refills continuously, not all at once.</div>`:''}
-          ${b.too_many_for_full_refresh?`<div class="alert bad" style="margin-top:.6rem;padding:.6rem .8rem;font-size:.78rem">This account has ${num(b.total_clips)} active clips — more than fit in one hour's budget (${b.limit}). A full refresh is disabled. Lock/pay down older clips, or refresh individual videos instead.</div>`
-            : b.eligible_now===0 ? `<div class="muted" style="font-size:.78rem;margin-top:.5rem">All clips synced within the last hour — nothing new to fetch yet.</div>`
-            : `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem" onclick="startLiveRefresh(${campaignId},'${progressElId}','${budgetElId}')" ${b.remaining<1?'disabled':''}>⚡ Full refresh — live progress (${num(b.eligible_now)} clip${b.eligible_now===1?'':'s'})</button>`}
+          ${b.full_refresh_fits===false?`<div class="alert bad" style="margin-top:.6rem;padding:.6rem .8rem;font-size:.78rem">A full refresh of this account needs ${num(b.full_refresh_cost)} calls but only ${num(b.remaining)} are left this hour. It will refresh what fits and finish the rest after the budget frees up${mins>0?` (about ${mins}m)`:''} — or refresh individual videos now.</div>`:''}
         `;
       }catch(e){ el.innerHTML=`<span class="muted" style="font-size:.78rem">${esc(e.message)}</span>`; }
     };
-
-    /* Streams one clip's result at a time via SSE, so the progress bar and
-       count reflect real work actually landing, not a guessed animation. */
-    window.startLiveRefresh=function(campaignId,progressElId,budgetElId){
-      progressElId=progressElId||('ig-progress-'+campaignId);
-      budgetElId=budgetElId||('ig-budget-'+campaignId);
-      const box=document.getElementById(progressElId);
-      const budgetEl=document.getElementById(budgetElId);
-      if(!box) return;
-      box.style.display='';
-      const fillId='prog-fill-'+progressElId, labelId='prog-label-'+progressElId, logId='prog-log-'+progressElId;
-      box.innerHTML=`<div class="prog-bar"><div class="prog-fill" id="${fillId}" style="width:0%"></div></div>
-        <div class="prog-label" id="${labelId}">Starting…</div>
-        <div class="prog-log" id="${logId}"></div>`;
-      if(budgetEl) budgetEl.querySelectorAll('button').forEach(b=>b.disabled=true);
-
-      const es=new EventSource('/api/clipper/campaigns/'+campaignId+'/refresh-live');
-      let okCount=0, failCount=0;
-      es.onmessage=(ev)=>{
-        const data=JSON.parse(ev.data);
-        const fill=document.getElementById(fillId);
-        const label=document.getElementById(labelId);
-        const log=document.getElementById(logId);
-
-        if(data.type==='blocked'){
-          label.textContent='Could not start: '+(data.reason==='TOO_MANY_ACTIVE_CLIPS'
-            ? `${data.eligible} active clips is more than fits in one hour's budget.`
-            : 'No refresh budget left this hour.');
-          es.close();
-          loadBudget(campaignId,budgetElId,progressElId);
-          return;
-        }
-        if(data.type==='progress'){
-          if(data.ok) okCount++; else failCount++;
-          if(fill) fill.style.width=Math.round(100*data.done/data.total)+'%';
-          if(label) label.textContent=`${data.done} of ${data.total} — ${okCount} updated${failCount?`, ${failCount} skipped`:''}`;
-          if(log){
-            const line=document.createElement('div');
-            line.className='prog-line'+(data.ok?'':' bad');
-            line.textContent=data.ok?`Clip #${data.clip_id}: ${num(data.views)} views`:`Clip #${data.clip_id}: ${data.code||'failed'}`;
-            log.prepend(line);
-            while(log.children.length>8) log.removeChild(log.lastChild);
-          }
-          return;
-        }
-        if(data.type==='done'){
-          if(label) label.textContent=`Done — ${data.synced} updated${data.failed?`, ${data.failed} skipped`:''}${data.deferred?`, ${data.deferred} left for next time`:''}`;
-          es.close();
-          toast(`Refreshed ${data.synced} clip${data.synced===1?'':'s'}`);
-          loadBudget(campaignId,budgetElId,progressElId);
-          loadCampaigns();
-          if(document.getElementById('v-clips').classList.contains('on')) loadClips().then(renderClips);
-        }
-        if(data.type==='error'){
-          if(label) label.textContent='Error: '+data.message;
-          es.close();
-          loadBudget(campaignId,budgetElId,progressElId);
-        }
-      };
-      es.onerror=()=>{
-        es.close();
-        const label=document.getElementById(labelId);
-        if(label && !/^Done|^Could not/.test(label.textContent)) label.textContent='Connection lost — refresh the page to see what completed.';
-        loadBudget(campaignId,budgetElId,progressElId);
-      };
-    };
-
-    /* The Clips page aggregates every campaign's clips in one grid, but the
-       200-calls/hour budget is per Instagram account (i.e. per campaign) --
-       so this renders one compact budget card per joined, Instagram-connected
-       campaign right on the Clips page itself, instead of only inside each
-       campaign's own detail view. Same widget, same live data, just visible
-       where a clipper is actually looking when they hit refresh. */
-    async function renderClipsBudget(){
-      const wrap=document.getElementById('clips-budget-row');
-      if(!wrap) return;
-      const joined=(CAMPAIGNS||[]).filter(c=>c.participation&&c.participation.status!=='kicked');
-      if(!joined.length){ wrap.innerHTML=''; return; }
-      wrap.innerHTML=joined.map(c=>`
-        <div class="card clips-budget-card" id="clips-budget-card-${c.id}">
-          <div class="clips-budget-title">${esc(c.name)} — Instagram refresh budget</div>
-          <div id="clips-budget-${c.id}" class="ig-budget"><span class="muted" style="font-size:.78rem">Loading refresh budget…</span></div>
-          <div id="clips-progress-${c.id}" class="ig-progress" style="display:none"></div>
-        </div>`).join('');
-      // Each card hides itself entirely once we know its campaign has no
-      // Instagram account connected (loadBudget leaves the inner div empty
-      // via `applicable:false`), so a YouTube-only campaign never shows an
-      // empty shell here.
-      await Promise.all(joined.map(async c=>{
-        await loadBudget(c.id,'clips-budget-'+c.id,'clips-progress-'+c.id);
-        const inner=document.getElementById('clips-budget-'+c.id);
-        const card=document.getElementById('clips-budget-card-'+c.id);
-        if(card && inner && !inner.innerHTML.trim()) card.style.display='none';
-      }));
-    }
 
     /* Refreshes one clip for exactly one call's worth of budget. */
     window.refreshOneClip=async function(clipId,btn){
@@ -967,6 +890,98 @@
       }finally{ if(btn){btn.disabled=false;btn.textContent='Verify & Add Clip';} }
     };
 
+
+    /* ══════════════ refresh job panel ══════════════
+       A refresh is a chained job: it runs across as many Worker invocations as
+       it needs, each staying under Cloudflare's per-invocation external-call
+       ceiling. So this POLLS the job rather than holding a stream open -- the
+       work continues regardless of this page, and closing the tab loses only
+       the view, never the job. */
+    let JOB_POLL=null, JOB_STATUS_URL=null, JOB_HOVER=false;
+
+    function jobPanelEl(){
+      let el=document.getElementById('job-panel');
+      if(!el){
+        el=document.createElement('div');
+        el.id='job-panel'; el.className='job-panel';
+        el.addEventListener('mouseenter',()=>{JOB_HOVER=true;});
+        el.addEventListener('mouseleave',()=>{JOB_HOVER=false;});
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    window.closeJobPanel=function(){
+      const el=document.getElementById('job-panel');
+      if(el) el.classList.remove('on');
+      if(JOB_POLL){ clearInterval(JOB_POLL); JOB_POLL=null; }
+    };
+
+    function renderJob(j){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      const total=j.total||0, done=(j.clips_fetched||0)+(j.clips_failed||0)+(j.clips_skipped||0);
+      const pct=total>0?Math.round(100*done/total):(j.status==='done'?100:0);
+      const label=j.status==='done'?'Refresh complete'
+        :j.stalled?'Refresh stalled'
+        :j.kind==='global'?'Refreshing every account…':'Refreshing your videos…';
+
+      const accts=Object.entries(j.accounts||{}).map(([id,a])=>{
+        const budget=a.limit!=null
+          ? `${num(a.used)}/${num(a.limit)} used · ${num(a.remaining)} left`
+          : (a.platform==='youtube'?'batched':'—');
+        return `<div class="job-acct"><b>${esc(a.label||('#'+id))}</b>
+          <span class="${a.error?'warn':''}">${a.error?esc(a.error):budget}</span></div>`;
+      }).join('');
+
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">${esc(label)}</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>
+        <div class="prog-label">${done} of ${total} videos${j.remaining?` · ${j.remaining} queued`:''}</div>
+        <div class="job-stats">
+          <div class="job-stat"><b>${num(j.invocations)}</b><span>invocations</span></div>
+          <div class="job-stat"><b>${num(j.clips_fetched)}</b><span>refreshed</span></div>
+          ${j.imported?`<div class="job-stat"><b>${num(j.imported)}</b><span>new found</span></div>`:''}
+          ${j.clips_failed?`<div class="job-stat"><b>${num(j.clips_failed)}</b><span>failed</span></div>`:''}
+          ${j.clips_skipped?`<div class="job-stat"><b>${num(j.clips_skipped)}</b><span>skipped</span></div>`:''}
+        </div>
+        ${accts?`<div class="job-accts">${accts}</div>`:''}
+        ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
+    }
+
+    window.retryJob=async function(jobId){
+      try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    /* baseUrl e.g. '/api/clipper/refresh' or '/api/admin/refresh' */
+    function trackJob(jobId, baseUrl){
+      JOB_STATUS_URL=baseUrl+'/'+jobId;
+      if(JOB_POLL) clearInterval(JOB_POLL);
+      const tick=async()=>{
+        try{
+          const {job}=await api(baseUrl+'/'+jobId);
+          if(!job) return;
+          renderJob(job);
+          if(job.status==='done'||job.status==='failed'){
+            clearInterval(JOB_POLL); JOB_POLL=null;
+            if(typeof onJobFinished==='function') onJobFinished(job);
+            // Auto-dismiss, but never yank the panel out from under someone
+            // who is actively reading it.
+            setTimeout(function drop(){
+              if(JOB_HOVER) return setTimeout(drop,2000);
+              closeJobPanel();
+            },12000);
+          }
+        }catch(e){ clearInterval(JOB_POLL); JOB_POLL=null; }
+      };
+      tick();
+      JOB_POLL=setInterval(tick,1500);
+    }
+
     /* ── clips ── */
     async function loadClips(){ const {clips}=await api('/api/clipper/submissions'); CLIPS=clips; renderHomeClips(); }
 
@@ -992,27 +1007,30 @@
       }
     }
 
+    // Called by the panel when the chained job finishes, so the numbers on
+    // the page catch up with what the job just wrote.
+    async function onJobFinished(){
+      await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
+      renderClips(); renderClipsBudget(); paintRefresh();
+    }
+
     window.manualRefresh=async function(){
       document.querySelectorAll('.refresh-btn').forEach(b=>b.disabled=true);
-      document.querySelectorAll('.refresh-note').forEach(n=>n.textContent='Fetching latest views…');
+      document.querySelectorAll('.refresh-note').forEach(n=>n.textContent='Starting refresh…');
       try{
         const r=await api('/api/clipper/refresh',{method:'POST'});
         NEXT_REFRESH_AT=Date.now()+(r.cooldown_ms||300000);
-        await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
-        renderClips();
-        renderClipsBudget();
-        const found=r.imported?` · ${r.imported} new clip${r.imported===1?'':'s'} found`:'';
-        // `deferred` is clips this run skipped purely for budget/cooldown
-        // reasons (not failures) -- worth saying explicitly, since otherwise
-        // "Refreshed 12 clips" reads as complete when a 30-clip account may
-        // have left 18 for next time on purpose.
-        const deferred=r.deferred?` · ${r.deferred} left for next refresh (hourly limit)`:'';
-        toast(r.failed ? `Refreshed ${r.synced} clip${r.synced===1?'':'s'}, ${r.failed} could not be read${found}${deferred}`
-                       : `Refreshed ${r.synced} clip${r.synced===1?'':'s'}${found}${deferred}`, !!r.failed);
+        // The job may already be finished if it fit in the first chunk; the
+        // panel handles both cases identically.
+        trackJob(r.job_id,'/api/clipper/refresh');
       }catch(e){
-        // 429 carries retry_in_ms so the countdown stays honest.
-        if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;
-        toast(e.message,true);
+        // 409 means a refresh is already running -- show THAT one rather than
+        // reporting an error for what is really just "already in progress".
+        if(e.job_id){ trackJob(e.job_id,'/api/clipper/refresh'); }
+        else{
+          if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;
+          toast(e.message,true);
+        }
       }
       paintRefresh();
     };

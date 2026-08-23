@@ -8,7 +8,8 @@ import { handleMedia } from './routes/media.js';
 import { handleCampaignPage } from './routes/campaigns.js';
 import { handleSitemap } from './routes/sitemap.js';
 import { handleGuide } from './routes/guides.js';
-import { syncAllCampaigns } from './earnings.js';
+import { reallocateAll } from './earnings.js';
+import { createRefreshJob, advanceJob } from './refresh-jobs.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
@@ -111,15 +112,27 @@ export default {
 
   // Continuation consumer for chained refresh jobs.
   //
-  // Phase 0 stub: the binding and queue exist so the infrastructure is live
-  // and deployable, but nothing enqueues yet and no job engine is wired in.
-  // Messages are acknowledged rather than left to retry, so a stray message
-  // can never build up a redlivery backlog against the free-tier op budget
-  // while the engine is still being built.
+  // Each message is one leg of a relay: run as much of the job as this fresh
+  // invocation's external-subrequest budget allows, then advanceJob enqueues
+  // the next leg if work remains. max_batch_size is 1, so a message is always
+  // exactly one continuation.
+  //
+  // retry() rather than ack() on a thrown error is what makes Queues worth
+  // using over synchronous self-chaining: a leg that dies is redelivered
+  // automatically, and because the job's remaining work is persisted in
+  // pending_json, the retry re-does nothing that already succeeded.
   async queue(batch, env, ctx) {
     for (const message of batch.messages) {
-      console.log('[refresh-queue] stub received (engine not yet wired):', JSON.stringify(message.body));
-      message.ack();
+      const jobId = message.body && message.body.jobId;
+      if (!jobId) { message.ack(); continue; }
+      try {
+        const r = await advanceJob(env.DB, env, jobId, { onFinish: () => reallocateAll(env.DB) });
+        if (r.error) console.error(`[refresh-queue] job ${jobId}: ${r.error}`);
+        message.ack();
+      } catch (e) {
+        console.error(`[refresh-queue] job ${jobId} leg failed:`, e.stack || e.message);
+        message.retry();
+      }
     }
   },
 
@@ -133,10 +146,21 @@ export default {
     // single transient error here is normal and expected, a clip still
     // failing 12+ hours later is not.
     ctx.waitUntil((async () => {
-      const summary = await syncAllCampaigns(env.DB, env);
-      if (summary.errors && summary.errors.length) {
-        console.error(`[cron sync] ${summary.errors.length} campaign-level error(s):`, summary.errors);
+      // respectCooldown TRUE, unlike a human-triggered refresh. Without it an
+      // account with 60 clips would need 240 calls/hour from routine syncing
+      // alone -- past Instagram's own 200/hour ceiling before anyone even
+      // asks for a refresh. The cron is upkeep; humans get the full sweep.
+      const created = await createRefreshJob(env.DB, {
+        kind: 'global', triggeredBy: 'cron', respectCooldown: true
+      });
+      if (created.error) {
+        // A global refresh is already in flight (admin-triggered, or a slow
+        // previous cron). Skipping is correct -- it is already doing this work.
+        console.log(`[cron sync] skipped: ${created.error}`);
+        return;
       }
+      const r = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+      console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} calls, ${r.remaining} remaining`);
     })());
   }
 };

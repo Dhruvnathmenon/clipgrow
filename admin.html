@@ -54,6 +54,26 @@
     select.form-control { cursor:pointer; }
     .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.9rem; align-items:end; }
 
+    /* Refresh job panel. Polls rather than streaming: the work happens across
+       independent invocations regardless of any open connection, so a dropped
+       connection or a closed tab can never lose progress -- reopening just
+       resumes polling the same job id. */
+    .job-panel { position:fixed; right:1rem; bottom:1rem; width:min(380px,calc(100vw - 2rem)); z-index:400;
+      background:var(--card); border:1px solid var(--border-s); border-radius:12px; padding:1rem 1.1rem;
+      box-shadow:0 18px 44px rgba(0,0,0,.55); display:none; }
+    .job-panel.on { display:block; }
+    .job-head { display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin-bottom:.6rem; }
+    .job-title { font-size:.82rem; font-weight:700; color:var(--white); }
+    .job-x { background:none; border:none; color:var(--muted); font-size:1.1rem; cursor:pointer; line-height:1; padding:0 .2rem; }
+    .job-x:hover { color:var(--white); }
+    .job-stats { display:flex; flex-wrap:wrap; gap:.9rem; margin-top:.6rem; }
+    .job-stat b { display:block; font-family:'Space Grotesk',sans-serif; font-size:1rem; color:var(--white); line-height:1.15; }
+    .job-stat span { font-size:.63rem; color:var(--muted-l); }
+    .job-accts { margin-top:.7rem; border-top:1px solid var(--border); padding-top:.6rem; max-height:150px; overflow-y:auto; }
+    .job-acct { display:flex; justify-content:space-between; gap:.6rem; font-size:.7rem; padding:.18rem 0; color:var(--muted-l); }
+    .job-acct b { color:var(--text); font-weight:600; }
+    .job-acct .warn { color:var(--gold); }
+
     table { width:100%; border-collapse:collapse; }
     th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.68rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
     td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.84rem; vertical-align:middle; }
@@ -501,6 +521,98 @@
       if(name==='guides') loadGuides();
     };
 
+
+    /* ══════════════ refresh job panel ══════════════
+       A refresh is a chained job: it runs across as many Worker invocations as
+       it needs, each staying under Cloudflare's per-invocation external-call
+       ceiling. So this POLLS the job rather than holding a stream open -- the
+       work continues regardless of this page, and closing the tab loses only
+       the view, never the job. */
+    let JOB_POLL=null, JOB_STATUS_URL=null, JOB_HOVER=false;
+
+    function jobPanelEl(){
+      let el=document.getElementById('job-panel');
+      if(!el){
+        el=document.createElement('div');
+        el.id='job-panel'; el.className='job-panel';
+        el.addEventListener('mouseenter',()=>{JOB_HOVER=true;});
+        el.addEventListener('mouseleave',()=>{JOB_HOVER=false;});
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    window.closeJobPanel=function(){
+      const el=document.getElementById('job-panel');
+      if(el) el.classList.remove('on');
+      if(JOB_POLL){ clearInterval(JOB_POLL); JOB_POLL=null; }
+    };
+
+    function renderJob(j){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      const total=j.total||0, done=(j.clips_fetched||0)+(j.clips_failed||0)+(j.clips_skipped||0);
+      const pct=total>0?Math.round(100*done/total):(j.status==='done'?100:0);
+      const label=j.status==='done'?'Refresh complete'
+        :j.stalled?'Refresh stalled'
+        :j.kind==='global'?'Refreshing every account…':'Refreshing your videos…';
+
+      const accts=Object.entries(j.accounts||{}).map(([id,a])=>{
+        const budget=a.limit!=null
+          ? `${num(a.used)}/${num(a.limit)} used · ${num(a.remaining)} left`
+          : (a.platform==='youtube'?'batched':'—');
+        return `<div class="job-acct"><b>${esc(a.label||('#'+id))}</b>
+          <span class="${a.error?'warn':''}">${a.error?esc(a.error):budget}</span></div>`;
+      }).join('');
+
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">${esc(label)}</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>
+        <div class="prog-label">${done} of ${total} videos${j.remaining?` · ${j.remaining} queued`:''}</div>
+        <div class="job-stats">
+          <div class="job-stat"><b>${num(j.invocations)}</b><span>invocations</span></div>
+          <div class="job-stat"><b>${num(j.clips_fetched)}</b><span>refreshed</span></div>
+          ${j.imported?`<div class="job-stat"><b>${num(j.imported)}</b><span>new found</span></div>`:''}
+          ${j.clips_failed?`<div class="job-stat"><b>${num(j.clips_failed)}</b><span>failed</span></div>`:''}
+          ${j.clips_skipped?`<div class="job-stat"><b>${num(j.clips_skipped)}</b><span>skipped</span></div>`:''}
+        </div>
+        ${accts?`<div class="job-accts">${accts}</div>`:''}
+        ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
+    }
+
+    window.retryJob=async function(jobId){
+      try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
+      catch(e){ toast(e.message,true); }
+    };
+
+    /* baseUrl e.g. '/api/clipper/refresh' or '/api/admin/refresh' */
+    function trackJob(jobId, baseUrl){
+      JOB_STATUS_URL=baseUrl+'/'+jobId;
+      if(JOB_POLL) clearInterval(JOB_POLL);
+      const tick=async()=>{
+        try{
+          const {job}=await api(baseUrl+'/'+jobId);
+          if(!job) return;
+          renderJob(job);
+          if(job.status==='done'||job.status==='failed'){
+            clearInterval(JOB_POLL); JOB_POLL=null;
+            if(typeof onJobFinished==='function') onJobFinished(job);
+            // Auto-dismiss, but never yank the panel out from under someone
+            // who is actively reading it.
+            setTimeout(function drop(){
+              if(JOB_HOVER) return setTimeout(drop,2000);
+              closeJobPanel();
+            },12000);
+          }
+        }catch(e){ clearInterval(JOB_POLL); JOB_POLL=null; }
+      };
+      tick();
+      JOB_POLL=setInterval(tick,1500);
+    }
+
     /* ══════════════ payouts ══════════════
        Paying LOCKS the ticked videos: the amount freezes, they grey out for
        the clipper, and they can never be paid for twice. The amount field is
@@ -552,8 +664,13 @@
       if(!id) return toast('Pick a clipper first',true);
       const btn=document.getElementById('po-refresh');
       btn.disabled=true; btn.textContent='Refreshing…';
-      try{ await api('/api/admin/sync',{method:'POST'}); toast('Views refreshed from Instagram'); await loadPayable(); }
-      catch(e){ toast(e.message,true); }
+      try{
+        const r=await api('/api/admin/refresh/clipper/'+id,{method:'POST'});
+        trackJob(r.job_id,'/api/admin/refresh');
+      }catch(e){
+        if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
+        else toast(e.message,true);
+      }
       finally{ btn.disabled=false; btn.textContent='Refresh views first'; }
     };
 
@@ -781,13 +898,31 @@
       }catch(e){ toast(e.message,true); }
     });
 
+    // Called by the job panel once a chained refresh finishes.
+    function onJobFinished(){ loadAll(); if(PAYABLE) loadPayable(); }
+
+    // Tier 1: every account, every campaign, every clipper -- as a chained job.
     window.runSync=async function(){
-      toast('Syncing views from Instagram…');
       try{
-        const r=await api('/api/admin/sync',{method:'POST'});
-        toast(r.errors && r.errors.length ? `Synced ${r.campaigns} campaign(s), ${r.errors.length} issue(s)` : `Synced ${r.campaigns} campaign(s)`, r.errors && r.errors.length>0);
-        loadAll();
-      }catch(e){ toast(e.message,true); }
+        const r=await api('/api/admin/refresh/global',{method:'POST'});
+        trackJob(r.job_id,'/api/admin/refresh');
+      }catch(e){
+        // Already running: show that job instead of erroring.
+        if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
+        else toast(e.message,true);
+      }
+    };
+
+    // Tier 2 on behalf of one clipper -- same job kind and same lock as the
+    // clipper's own button, so the two can never run twice for one person.
+    window.refreshClipper=async function(clipperId){
+      try{
+        const r=await api('/api/admin/refresh/clipper/'+clipperId,{method:'POST'});
+        trackJob(r.job_id,'/api/admin/refresh');
+      }catch(e){
+        if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
+        else toast(e.message,true);
+      }
     };
 
     /* ---------- overview ---------- */
@@ -1029,6 +1164,7 @@
           <td class="gold">${money(c.money.pending!=null?c.money.pending:c.money.outstanding)}</td>
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
             <button class="btn btn-ghost btn-sm" onclick="resetPassword(${c.id})">Reset Pass</button>
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>

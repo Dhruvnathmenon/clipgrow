@@ -286,6 +286,77 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   };
 }
 
+/**
+ * Runs one chunk and, if work remains, puts a continuation on the queue.
+ *
+ * Kept separate from runChunk so the engine itself stays a pure state machine
+ * that tests can drive with no queue binding present.
+ *
+ * When a job finishes, every non-completed campaign is re-allocated. That is
+ * pure D1 work with no external calls, so it costs nothing against the
+ * subrequest budget this whole design exists to respect -- and running it for
+ * all campaigns rather than tracking which ones a job touched removes a whole
+ * class of "we forgot to reprice that one" bug for no meaningful cost.
+ */
+export async function advanceJob(db, env, jobId, opts = {}) {
+  const r = await runChunk(db, env, jobId, opts);
+
+  if (r.enqueue && env && env.REFRESH_QUEUE) {
+    await env.REFRESH_QUEUE.send({ jobId });
+  }
+
+  if (r.done && !r.alreadyFinished && !r.error && typeof opts.onFinish === 'function') {
+    await opts.onFinish(jobId);
+  }
+  return r;
+}
+
+/** Shape the progress panel polls. Budget figures are read live, never cached. */
+export function publicJob(row) {
+  if (!row) return null;
+  let pendingCount = 0;
+  try { pendingCount = JSON.parse(row.pending_json || '[]').length; } catch { pendingCount = 0; }
+
+  const done = row.clips_fetched + row.clips_failed + row.clips_skipped;
+  return {
+    id: row.id,
+    kind: row.kind,
+    clipper_id: row.clipper_id,
+    triggered_by: row.triggered_by,
+    status: row.status,
+    invocations: row.invocations,
+    clips_fetched: row.clips_fetched,
+    clips_failed: row.clips_failed,
+    clips_skipped: row.clips_skipped,
+    imported: row.imported,
+    remaining: pendingCount,
+    total: done + pendingCount,
+    accounts: JSON.parse(row.accounts_json || '{}'),
+    error: row.error,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    finished_at: row.finished_at,
+    // A job whose status says 'running' but which has not moved in this long
+    // has almost certainly lost its invocation outright (Queues retries a
+    // failed consumer, but an invocation killed mid-write leaves no trace).
+    stalled: row.status === 'running' && (Date.now() - row.updated_at) > STALL_AFTER_MS
+  };
+}
+
+export const STALL_AFTER_MS = 10 * 60 * 1000;
+
+/** Puts a stalled or failed job back on the queue, resuming from pending_json. */
+export async function retryJob(db, env, jobId) {
+  const job = await getJob(db, jobId);
+  if (!job) return { error: 'Job not found', status: 404 };
+  if (job.status === 'done') return { error: 'That refresh already finished.', status: 400 };
+
+  await db.prepare("UPDATE refresh_jobs SET status = 'queued', error = NULL, updated_at = ? WHERE id = ?")
+    .bind(Date.now(), jobId).run();
+  if (env && env.REFRESH_QUEUE) await env.REFRESH_QUEUE.send({ jobId });
+  return { ok: true, job_id: jobId };
+}
+
 /* ─────────────────────────── item handlers ─────────────────────────── */
 
 async function loadAccount(db, accountId, cache) {

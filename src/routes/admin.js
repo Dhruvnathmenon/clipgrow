@@ -5,7 +5,8 @@ import {
   campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify,
   disconnectSocialAccount
 } from '../db.js';
-import { syncAllCampaigns, reallocateCampaign } from '../earnings.js';
+import { reallocateCampaign, reallocateAll } from '../earnings.js';
+import { createRefreshJob, advanceJob, getJob, publicJob, retryJob } from '../refresh-jobs.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
@@ -738,9 +739,59 @@ export async function handleAdmin(request, env, url) {
   }
 
   // ------------------------------------------------------------------- sync
-  if (pathname === '/api/admin/sync' && method === 'POST') {
-    const summary = await syncAllCampaigns(env.DB, env);
-    return json({ ok: true, ...summary });
+  //
+  // Tier 1: every account in every campaign for every clipper, as a chained
+  // job. A single flat pass could not fit inside one invocation's external
+  // subrequest budget -- the accounts last in the loop were being silently
+  // truncated, which is what sync_error = 'SUBREQUEST_LIMIT' recorded.
+  if ((pathname === '/api/admin/sync' || pathname === '/api/admin/refresh/global') && method === 'POST') {
+    const created = await createRefreshJob(env.DB, {
+      kind: 'global', triggeredBy: 'admin', respectCooldown: false
+    });
+    if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
+
+    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    return json({
+      ok: true, job_id: created.job_id,
+      job: publicJob(await getJob(env.DB, created.job_id)),
+      first_chunk: { calls: first.calls, done: first.done }
+    });
+  }
+
+  // Tier 2 triggered by the admin instead of the clipper. Deliberately the
+  // SAME job kind and the same lock, so admin and clipper cannot both start
+  // one for the same person at the same time.
+  params = matchPath('/api/admin/refresh/clipper/:id', pathname);
+  if (params && method === 'POST') {
+    const clipper = await env.DB.prepare('SELECT id FROM clippers WHERE id = ?').bind(params.id).first();
+    if (!clipper) return err('Clipper not found', 404);
+
+    const created = await createRefreshJob(env.DB, {
+      kind: 'clipper', clipperId: Number(params.id), triggeredBy: 'admin', respectCooldown: false
+    });
+    if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
+
+    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    return json({
+      ok: true, job_id: created.job_id,
+      job: publicJob(await getJob(env.DB, created.job_id)),
+      first_chunk: { calls: first.calls, done: first.done }
+    });
+  }
+
+  params = matchPath('/api/admin/refresh/:jobId', pathname);
+  if (params && method === 'GET') {
+    const job = await getJob(env.DB, Number(params.jobId));
+    if (!job) return err('Not found', 404);
+    return json({ job: publicJob(job) });
+  }
+
+  params = matchPath('/api/admin/refresh/:jobId/retry', pathname);
+  if (params && method === 'POST') {
+    const r = await retryJob(env.DB, env, Number(params.jobId));
+    if (r.error) return err(r.error, r.status || 400);
+    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: () => reallocateAll(env.DB) });
+    return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
   }
 
   // Diagnostic: shows every Instagram insights metric Meta will answer for one

@@ -13,8 +13,9 @@ import {
 } from '../access.js';
 import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
-import { syncClipperViews, syncAccountClips, syncAccountClipsStream, reallocateCampaign } from '../earnings.js';
-import { getBudget, CLIP_COOLDOWN_MS, MAX_CLIPS_FOR_FULL_REFRESH } from '../rate-budget.js';
+import { syncAccountClips, reallocateCampaign, reallocateAll } from '../earnings.js';
+import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
+import { createRefreshJob, advanceJob, getJob, publicJob, retryJob } from '../refresh-jobs.js';
 
 // Manual refresh cooldown. Instagram allows roughly 200 calls per user per
 // hour and each clip costs one call, so this keeps a clipper well inside it
@@ -321,10 +322,47 @@ export async function handleClipper(request, env, url) {
     await env.DB.prepare('UPDATE clippers SET last_manual_sync_at = ? WHERE id = ?')
       .bind(Date.now(), clipperId).run();
 
-    const result = await syncClipperViews(env.DB, clipperId, env);
-    const money = await clipperFinancials(env.DB, clipperId);
-    const totals = await clipperTotals(env.DB, clipperId);
-    return json({ ok: true, ...result, money, totals, cooldown_ms: MANUAL_SYNC_COOLDOWN_MS });
+    // Tier 2: a chained job over every campaign this clipper is active in and
+    // every account under each. respectCooldown false -- a human pressing
+    // Refresh is asking for the truth right now, not a cheap top-up.
+    const created = await createRefreshJob(env.DB, {
+      kind: 'clipper', clipperId, triggeredBy: 'clipper', respectCooldown: false
+    });
+    if (created.error) {
+      return json({ error: created.error, job_id: created.job_id }, created.status || 409);
+    }
+
+    // Run the first chunk inline so the UI has real progress immediately
+    // instead of showing an empty job while the first queue message lands.
+    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    const job = await getJob(env.DB, created.job_id);
+
+    return json({
+      ok: true, job_id: created.job_id, job: publicJob(job),
+      first_chunk: { calls: first.calls, done: first.done },
+      cooldown_ms: MANUAL_SYNC_COOLDOWN_MS
+    });
+  }
+
+  // Progress for a refresh job. Polled by the panel; a clipper may only read
+  // their own jobs.
+  params = matchPath('/api/clipper/refresh/:jobId', pathname);
+  if (params && method === 'GET') {
+    const job = await getJob(env.DB, Number(params.jobId));
+    if (!job || job.clipper_id !== clipperId) return err('Not found', 404);
+    return json({ job: publicJob(job), money: await clipperFinancials(env.DB, clipperId) });
+  }
+
+  params = matchPath('/api/clipper/refresh/:jobId/retry', pathname);
+  if (params && method === 'POST') {
+    const blocked = blockIfReadOnly();
+    if (blocked) return blocked;
+    const job = await getJob(env.DB, Number(params.jobId));
+    if (!job || job.clipper_id !== clipperId) return err('Not found', 404);
+    const r = await retryJob(env.DB, env, Number(params.jobId));
+    if (r.error) return err(r.error, r.status || 400);
+    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: () => reallocateAll(env.DB) });
+    return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
   }
 
   // --------------------------------------------------- Instagram call budget
@@ -361,7 +399,11 @@ export async function handleClipper(request, env, url) {
       reset_in_ms: budget.reset_in_ms,
       total_clips: totalClips,
       eligible_now: eligibleNow,
-      too_many_for_full_refresh: totalClips > MAX_CLIPS_FOR_FULL_REFRESH,
+      // A full refresh now checks EVERY clip (no cooldown), so what it costs
+      // is the whole clip count -- and whether it fits is a live comparison
+      // against the real remaining budget, not a fixed 200-clip cutoff.
+      full_refresh_cost: totalClips,
+      full_refresh_fits: budget.remaining >= totalClips,
       full_refreshes_available: totalClips > 0 ? Math.floor(budget.remaining / totalClips) : null,
       single_refreshes_available: budget.remaining
     });
@@ -407,51 +449,6 @@ export async function handleClipper(request, env, url) {
 
     const fresh = await env.DB.prepare('SELECT views, earning, sync_error FROM submissions WHERE id = ?').bind(sub.id).first();
     return json({ ok: true, views: fresh.views, earning: fresh.earning, sync_error: fresh.sync_error });
-  }
-
-  // ------------------------------------------------- live full-account refresh
-  // Server-Sent Events: fetches this campaign's connected Instagram account's
-  // clips one at a time and streams each result as it lands, so a clipper
-  // watching a 100+ clip refresh sees real numbers arrive with real progress
-  // instead of a blank spinner for however long the whole batch takes.
-  params = matchPath('/api/clipper/campaigns/:id/refresh-live', pathname);
-  if (params && method === 'GET') {
-    const part = await getParticipation(env.DB, clipperId, params.id);
-    if (!part) return err('You have not joined this campaign', 404);
-    if (readOnly) return err('Your account is disabled, so this action is not available.', 403);
-    const account = await getParticipationAccount(env.DB, part.id, 'instagram');
-    if (!account) return err('No connected Instagram account for this campaign', 404);
-
-    const { results: subs } = await env.DB.prepare(
-      `SELECT id, ig_media_id, last_ok_sync_at FROM submissions
-       WHERE clipper_id = ? AND campaign_id = ? AND account_id = ? AND status = 'active' AND locked_at IS NULL`
-    ).bind(clipperId, params.id, account.id).all();
-
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        try {
-          for await (const event of syncAccountClipsStream(env.DB, env, account, subs || [])) {
-            send(event);
-            if (event.type === 'done') await reallocateCampaign(env.DB, Number(params.id));
-          }
-        } catch (e) {
-          send({ type: 'error', message: (e && e.message) || 'Sync failed' });
-        } finally {
-          controller.close();
-        }
-      }
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-store',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      }
-    });
   }
 
   if (pathname === '/api/clipper/submissions' && method === 'GET') {
@@ -600,7 +597,12 @@ export async function handleClipper(request, env, url) {
     // it just sits at 0 until the next sync (manual or 6-hourly) picks it up.
     let liveViews = 0, liveEarning = 0;
     try {
-      await syncClipperViews(env.DB, clipperId, env);
+      // Just this clip -- syncing the whole clipper here would spend one call
+      // per existing clip to learn one new number, and on a large account
+      // could not fit inside this invocation's budget at all.
+      await syncAccountClips(env.DB, env, account,
+        [{ id: res.meta.last_row_id, ig_media_id: media.external_id, last_ok_sync_at: null }],
+        { skipCooldown: true });
       const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?')
         .bind(res.meta.last_row_id).first();
       if (fresh) { liveViews = fresh.views; liveEarning = fresh.earning; }
