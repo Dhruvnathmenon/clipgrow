@@ -120,9 +120,21 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
 export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy, respectCooldown = true }) {
   const accounts = await jobAccounts(db, { clipperId });
 
+  // Every account is listed up front with its full video count, so the panel
+  // reads as a checklist from the first poll rather than accounts popping into
+  // existence as the job happens to reach them.
   let pending = [];
+  const acctStats = {};
   for (const acct of accounts) {
-    pending = pending.concat(await buildAccountItems(db, acct, { respectCooldown }));
+    const items = await buildAccountItems(db, acct, { respectCooldown });
+    acctStats[String(acct.account_id)] = {
+      label: acct.username,
+      platform: acct.platform,
+      total: items.reduce((n, i) => n + countClips(i), 0),
+      done: 0,
+      state: 'waiting'
+    };
+    pending = pending.concat(items);
   }
 
   const ts = Date.now();
@@ -130,9 +142,10 @@ export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy
   try {
     res = await db.prepare(
       `INSERT INTO refresh_jobs (kind, clipper_id, triggered_by, respect_cooldown, status,
-         pending_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)`
-    ).bind(kind, clipperId, triggeredBy, respectCooldown ? 1 : 0, JSON.stringify(pending), ts, ts).run();
+         pending_json, accounts_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`
+    ).bind(kind, clipperId, triggeredBy, respectCooldown ? 1 : 0, JSON.stringify(pending),
+           JSON.stringify(acctStats), ts, ts).run();
   } catch (e) {
     if (/UNIQUE constraint/i.test(e.message || '')) {
       const existing = await db.prepare(
@@ -236,6 +249,10 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
     const counter = counters.get(item.a);
     const before = counter.count();
 
+    const acctKey = String(item.a);
+    acctStats[acctKey] = acctStats[acctKey] || { label: account.username, platform: account.platform, total: 0, done: 0 };
+    acctStats[acctKey].state = 'working';
+
     try {
       if (item.t === 'import') {
         stats.imported += await runImport(db, env, account, counter, adapters);
@@ -244,6 +261,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
         stats.fetched += r.ok;
         stats.failed += r.failed;
         stats.skipped += r.skipped;
+        acctStats[acctKey].done += r.ok + r.failed + r.skipped;
       }
     } catch (e) {
       // One item's failure never halts the chain -- same isolation principle
@@ -261,6 +279,14 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   for (const c of counters.values()) await c.flush(db);
   for (const [accountId] of counters) {
     await updateAccountBudget(db, acctStats, accountId, accountCache);
+  }
+
+  // An account is finished when nothing of its work is left in the queue.
+  // Errors are sticky so a failure is not overwritten by a later 'done'.
+  const stillQueued = new Set(pending.map(x => String(x.a)));
+  for (const [key, st] of Object.entries(acctStats)) {
+    if (st.error) { st.state = 'error'; continue; }
+    st.state = stillQueued.has(key) ? (st.done > 0 ? 'working' : 'waiting') : 'done';
   }
 
   const finished = pending.length === 0;

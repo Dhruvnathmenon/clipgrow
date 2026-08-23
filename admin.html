@@ -69,6 +69,18 @@
     .job-stats { display:flex; flex-wrap:wrap; gap:.9rem; margin-top:.6rem; }
     .job-stat b { display:block; font-family:'Space Grotesk',sans-serif; font-size:1rem; color:var(--white); line-height:1.15; }
     .job-stat span { font-size:.63rem; color:var(--muted-l); }
+    .job-rows { margin-top:.75rem; border-top:1px solid var(--border); padding-top:.55rem; max-height:190px; overflow-y:auto; }
+    .job-row { display:grid; grid-template-columns:16px 1fr auto; gap:.1rem .5rem; align-items:baseline; padding:.28rem 0; font-size:.75rem; }
+    .job-ic { color:var(--muted); font-size:.8rem; line-height:1.3; }
+    .job-row.done .job-ic { color:var(--neon); }
+    .job-row.working .job-ic { color:var(--gold); animation:spin 1.4s linear infinite; display:inline-block; }
+    .job-row.error .job-ic { color:var(--red); }
+    @keyframes spin { to { transform:rotate(360deg) } }
+    .job-name { color:var(--white); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .job-count { color:var(--muted-l); white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .job-note { grid-column:2/4; font-size:.66rem; color:var(--muted); }
+    .job-row.error .job-note { color:var(--gold); }
+    .job-foot { margin-top:.6rem; padding-top:.5rem; border-top:1px solid var(--border); font-size:.7rem; color:var(--muted-l); }
     .job-accts { margin-top:.7rem; border-top:1px solid var(--border); padding-top:.6rem; max-height:150px; overflow-y:auto; }
     .job-acct { display:flex; justify-content:space-between; gap:.6rem; font-size:.7rem; padding:.18rem 0; color:var(--muted-l); }
     .job-acct b { color:var(--text); font-weight:600; }
@@ -553,62 +565,46 @@
       el.classList.add('on');
       const total=j.total||0, done=(j.clips_fetched||0)+(j.clips_failed||0)+(j.clips_skipped||0);
       const pct=total>0?Math.round(100*done/total):(j.status==='done'?100:0);
-      const label=j.status==='done'?'Refresh complete'
-        :j.stalled?'Refresh stalled'
-        :j.kind==='global'?'Refreshing every account…':'Refreshing your videos…';
+      const finished=j.status==='done';
 
-      const accts=Object.entries(j.accounts||{}).map(([id,a])=>{
-        const budget=a.limit!=null
-          ? `${num(a.used)}/${num(a.limit)} used · ${num(a.remaining)} left`
-          : (a.platform==='youtube'?'batched':'—');
-        return `<div class="job-acct"><b>${esc(a.label||('#'+id))}</b>
-          <span class="${a.error?'warn':''}">${a.error?esc(a.error):budget}</span></div>`;
+      const title=finished?'Refresh complete'
+        :j.stalled?'Refresh stalled'
+        :j.kind==='global'?'Refreshing every account':'Refreshing your videos';
+
+      // One line per account, as a checklist. The video count is what actually
+      // means something to a person; the Instagram call budget is shown only
+      // where it exists (YouTube batches 50 videos per call, so it has no
+      // comparable per-account figure and used to render as a bare "batched").
+      const rows=Object.entries(j.accounts||{}).map(([id,a])=>{
+        const st=a.error?'error':(a.state||'waiting');
+        const icon=st==='done'?'✓':st==='error'?'!':st==='working'?'⟳':'○';
+        const count=a.total?`${num(a.done||0)}/${num(a.total)} videos`:'no videos';
+        const note=a.error?esc(a.error)
+          :(a.limit!=null?`${num(a.remaining)} of ${num(a.limit)} calls left`:'');
+        return `<div class="job-row ${st}">
+          <span class="job-ic">${icon}</span>
+          <span class="job-name">${esc(a.label||('#'+id))}</span>
+          <span class="job-count">${count}</span>
+          ${note?`<span class="job-note">${note}</span>`:''}
+        </div>`;
       }).join('');
 
       el.innerHTML=`
         <div class="job-head">
-          <div class="job-title">${esc(label)}</div>
+          <div class="job-title">${esc(title)}</div>
           <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
         </div>
         <div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>
-        <div class="prog-label">${done} of ${total} videos${j.remaining?` · ${j.remaining} queued`:''}</div>
-        <div class="job-stats">
-          <div class="job-stat"><b>${num(j.invocations)}</b><span>invocations</span></div>
-          <div class="job-stat"><b>${num(j.clips_fetched)}</b><span>refreshed</span></div>
-          ${j.imported?`<div class="job-stat"><b>${num(j.imported)}</b><span>new found</span></div>`:''}
-          ${j.clips_failed?`<div class="job-stat"><b>${num(j.clips_failed)}</b><span>failed</span></div>`:''}
-          ${j.clips_skipped?`<div class="job-stat"><b>${num(j.clips_skipped)}</b><span>skipped</span></div>`:''}
+        <div class="prog-label">${num(done)} of ${num(total)} videos checked${finished?'':` · ${num(j.remaining||0)} to go`}</div>
+        ${rows?`<div class="job-rows">${rows}</div>`:''}
+        <div class="job-foot">
+          ${finished?`${num(j.clips_fetched)} updated`:`${num(j.invocations)} batch${j.invocations===1?'':'es'} so far`}
+          ${j.imported?` · ${num(j.imported)} new video${j.imported===1?'':'s'} found`:''}
+          ${j.clips_failed?` · ${num(j.clips_failed)} couldn't be read`:''}
+          ${j.clips_skipped?` · ${num(j.clips_skipped)} skipped`:''}
         </div>
-        ${accts?`<div class="job-accts">${accts}</div>`:''}
         ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
     }
-
-    /* Shown the instant a refresh button is clicked, before the server has
-       replied. The first chunk runs inline in that POST, so the response can
-       take many seconds -- without this the UI looked frozen and there was no
-       way to tell a click from a network stall. */
-    window.showJobStarting=function(title){
-      const el=jobPanelEl();
-      el.classList.add('on');
-      el.innerHTML=`
-        <div class="job-head">
-          <div class="job-title">${esc(title||'Starting refresh…')}</div>
-          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
-        </div>
-        <div class="prog-bar"><div class="prog-fill indet" style="width:35%"></div></div>
-        <div class="prog-label">Working out what needs refreshing…</div>`;
-    };
-
-    window.showJobError=function(msg){
-      const el=jobPanelEl();
-      el.classList.add('on');
-      el.innerHTML=`
-        <div class="job-head">
-          <div class="job-title">Refresh failed to start</div>
-          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
-        </div>
-        <div class="prog-label" style="color:var(--gold)">${esc(msg||'Something went wrong')}</div>`;
-    };
 
     window.retryJob=async function(jobId){
       try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
