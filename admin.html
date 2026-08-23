@@ -583,6 +583,33 @@
         ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
     }
 
+    /* Shown the instant a refresh button is clicked, before the server has
+       replied. The first chunk runs inline in that POST, so the response can
+       take many seconds -- without this the UI looked frozen and there was no
+       way to tell a click from a network stall. */
+    window.showJobStarting=function(title){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">${esc(title||'Starting refresh…')}</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-bar"><div class="prog-fill indet" style="width:35%"></div></div>
+        <div class="prog-label">Working out what needs refreshing…</div>`;
+    };
+
+    window.showJobError=function(msg){
+      const el=jobPanelEl();
+      el.classList.add('on');
+      el.innerHTML=`
+        <div class="job-head">
+          <div class="job-title">Refresh failed to start</div>
+          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
+        </div>
+        <div class="prog-label" style="color:var(--gold)">${esc(msg||'Something went wrong')}</div>`;
+    };
+
     window.retryJob=async function(jobId){
       try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
       catch(e){ toast(e.message,true); }
@@ -669,7 +696,7 @@
         trackJob(r.job_id,'/api/admin/refresh');
       }catch(e){
         if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
-        else toast(e.message,true);
+        else { showJobError(e.message); toast(e.message,true); }
       }
       finally{ btn.disabled=false; btn.textContent='Refresh views first'; }
     };
@@ -903,25 +930,27 @@
 
     // Tier 1: every account, every campaign, every clipper -- as a chained job.
     window.runSync=async function(){
+      showJobStarting('Refreshing every account…');
       try{
         const r=await api('/api/admin/refresh/global',{method:'POST'});
         trackJob(r.job_id,'/api/admin/refresh');
       }catch(e){
         // Already running: show that job instead of erroring.
         if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
-        else toast(e.message,true);
+        else { showJobError(e.message); toast(e.message,true); }
       }
     };
 
     // Tier 2 on behalf of one clipper -- same job kind and same lock as the
     // clipper's own button, so the two can never run twice for one person.
     window.refreshClipper=async function(clipperId){
+      showJobStarting('Refreshing this clipper…');
       try{
         const r=await api('/api/admin/refresh/clipper/'+clipperId,{method:'POST'});
         trackJob(r.job_id,'/api/admin/refresh');
       }catch(e){
         if(e.job_id) trackJob(e.job_id,'/api/admin/refresh');
-        else toast(e.message,true);
+        else { showJobError(e.message); toast(e.message,true); }
       }
     };
 

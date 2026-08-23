@@ -20,6 +20,7 @@
 //     file defers to it rather than reimplementing it.
 
 import { getAdapter } from './platforms.js';
+import { withAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
 
@@ -380,10 +381,16 @@ async function runImport(db, env, account, counter, adapters) {
   ).bind(account.platform, account.id).all();
   const knownIds = new Set((existing || []).map(r => String(r.ig_media_id)));
 
-  const media = await adapter.listRecent(
-    account,
-    { sinceTs: account.connected_at || 0, knownIds, onAttempt: counter.onAttempt },
-    env
+  // withAccount, not a bare adapter call. Google access tokens last about an
+  // hour, so a stored token is very often already stale by the time a job
+  // reaches this account -- calling the adapter directly reports TOKEN_EXPIRED
+  // for every YouTube account instead of just renewing and continuing.
+  const media = await withAccount(db, env, account, (acct) =>
+    adapter.listRecent(
+      acct,
+      { sinceTs: account.connected_at || 0, knownIds, onAttempt: counter.onAttempt },
+      env
+    )
   );
   return (media || []).length;
 }
@@ -402,7 +409,10 @@ async function runViews(db, env, account, item, counter, adapters) {
   const ids = item.t === 'yt_views' ? item.m : [item.m];
   const subIds = item.t === 'yt_views' ? item.s : [item.s];
 
-  const results = await adapter.fetchViews(account, ids, env, { onAttempt: counter.onAttempt });
+  // Same token-renewal wrapper as the import path above.
+  const results = await withAccount(db, env, account, (acct) =>
+    adapter.fetchViews(acct, ids, env, { onAttempt: counter.onAttempt })
+  );
 
   const now = Date.now();
   let ok = 0, failed = 0, skipped = 0;

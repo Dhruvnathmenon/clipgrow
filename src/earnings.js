@@ -29,7 +29,7 @@ async function saveRefreshedToken(db, accountId, fresh) {
  * first if the platform needs that. Keeps token mechanics out of every call
  * site, and means a mid-sync expiry never surfaces as a broken clip.
  */
-function withAccount(db, env, account, fn) {
+export function withAccount(db, env, account, fn) {
   const adapter = getAdapter(account.platform);
   return adapter.withFreshToken(
     account,
