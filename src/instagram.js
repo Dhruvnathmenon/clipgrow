@@ -2,11 +2,20 @@ const AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
 const TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
 const GRAPH_BASE = 'https://graph.instagram.com';
 
-// Scopes for "Instagram API with Instagram Login". Must match the permissions
-// enabled on the app's Instagram product page -- Meta's own generated embed URL
-// requests exactly these five, so we mirror it to avoid any grant mismatch.
+// Scopes for "Instagram API with Instagram Login" -- trimmed to exactly what
+// the code calls: profile/media reads (basic) and view-count insights
+// (manage_insights). Verified by grepping the whole src/ tree for any use of
+// the messaging, comments, or content-publish endpoints -- there is none.
+// This used to also request instagram_business_manage_messages,
+// instagram_business_manage_comments and instagram_business_content_publish,
+// which Meta's own embed URL includes by default but this app never calls.
+// Requesting a permission with no demonstrated use in the app is a documented
+// App Review rejection reason, so trimming this is a real risk reduction, not
+// just cleanup. Requesting FEWER scopes than the app's dashboard has enabled
+// is always safe -- the failure mode Meta's authorize call actually guards
+// against is requesting MORE than what is enabled, which this cannot do.
 // Override with the IG_SCOPES var if the app's permission set changes.
-const DEFAULT_SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights';
+const DEFAULT_SCOPES = 'instagram_business_basic,instagram_business_manage_insights';
 
 // Instagram accounts must be Professional to expose insights at all.
 const PROFESSIONAL_TYPES = new Set(['BUSINESS', 'MEDIA_CREATOR', 'CREATOR']);

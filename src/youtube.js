@@ -219,6 +219,30 @@ export async function exchangeCodeForToken(env, code, redirectUri) {
   };
 }
 
+/**
+ * Actually revokes the grant on Google's side, not just our own copy of it.
+ *
+ * Google's YouTube API data policy (developer policies III.D.2.iii.1,
+ * III.E.4.g) requires API data tied to a revoked grant to be deleted within 7
+ * calendar days of revocation. Only clearing our local access_token/
+ * refresh_token columns leaves the actual OAuth grant active on the user's
+ * Google account -- ClipGrow would still show up under
+ * myaccount.google.com/permissions as authorized, and a leaked/cached copy of
+ * either token would still work. Best-effort: if Google's endpoint is
+ * unreachable or the token is already invalid, the local disconnect must
+ * still proceed rather than being blocked by it.
+ */
+export async function revokeToken(token) {
+  if (!token) return;
+  try {
+    await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token })
+    });
+  } catch { /* best-effort -- the local disconnect proceeds regardless */ }
+}
+
 export async function refreshAccessToken(account, env) {
   if (!account.refresh_token) throw YT_ERRORS.NO_REFRESH_TOKEN();
   const form = new URLSearchParams({

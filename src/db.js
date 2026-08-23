@@ -1,3 +1,5 @@
+import { revokeToken as revokeGoogleToken } from './youtube.js';
+
 export const now = () => Date.now();
 
 /**
@@ -103,6 +105,15 @@ export async function unlinkParticipationAccount(db, participationId, platform) 
 export async function disconnectSocialAccount(db, accountId) {
   const account = await db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(accountId).first();
   if (!account) return null;
+
+  // Actually revoke the grant on Google's side, not just null our own copy of
+  // it -- see revokeToken's own comment. Instagram tokens don't have an
+  // equivalent user-facing revoke endpoint in this flow, so this only applies
+  // to YouTube. Best-effort and done before the local nulling below, while
+  // the token this account actually held is still in hand.
+  if (account.platform === 'youtube') {
+    await revokeGoogleToken(account.refresh_token || account.access_token);
+  }
 
   const { results: subs } = await db.prepare(
     'SELECT id, campaign_id, locked_at FROM submissions WHERE account_id = ?'
