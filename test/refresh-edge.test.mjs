@@ -39,7 +39,14 @@ function makeDb({ job, submissions = [], accounts = [], lockedBy = {} } = {}) {
   }
   function first(sql,a){
     if (/FROM refresh_jobs WHERE id/.test(sql)) return { ...state.job };
-    if (/^SELECT \* FROM social_accounts WHERE id/.test(sql)) return state.accounts.find(x=>x.id===a[0])||null;
+    // loadAccount joins in the campaign this account works for, so match the
+    // new query shape too and supply the fields it aliases.
+    if (/FROM social_accounts/.test(sql)) {
+      const acct = state.accounts.find(x => x.id === a[0]) || null;
+      return acct ? { ...acct, account_id: acct.id,
+                      campaign_id: acct.campaign_id == null ? 1 : acct.campaign_id,
+                      allowed_platforms: acct.allowed_platforms || 'instagram,youtube' } : null;
+    }
     return null;
   }
   function all(sql,a){

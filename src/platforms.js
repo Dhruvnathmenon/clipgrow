@@ -114,7 +114,10 @@ const youtubeAdapter = {
   label: 'YouTube',
   isConfigured: (env) => !!(env.YT_CLIENT_ID && env.YT_CLIENT_SECRET),
   normalise: (m, env) => yt.normaliseVideo(m, env),
-  fetchViews: (account, mediaIds, env) => yt.fetchViews(account, mediaIds, env),
+  // opts carries onAttempt. Dropping it made every YouTube call invisible to
+  // the per-invocation counter, so a job believed it had its full budget while
+  // already spending against Cloudflare's subrequest cap.
+  fetchViews: (account, mediaIds, env, opts) => yt.fetchViews(account, mediaIds, env, opts),
   listRecent: (account, opts, env) => yt.listRecent(account, opts, env),
   findByUrl: (account, url, env) => yt.findByUrl(account, url, env),
   refreshToken: (account, env) => yt.refreshAccessToken(account, env),

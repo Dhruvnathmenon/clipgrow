@@ -136,11 +136,15 @@ function classify(status, body) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function ytFetch(url, { headers = {}, retries = 2 } = {}) {
+async function ytFetch(url, { headers = {}, retries = 2, onAttempt } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
     try {
+      // Counted BEFORE the call and once per attempt, retries included: what the
+      // budget protects is Cloudflare's per-invocation subrequest cap, and a
+      // retry is another subrequest whether or not it succeeds.
+      if (onAttempt) onAttempt();
       res = await fetch(url, { headers });
     } catch (e) {
       if (e && /too many subrequests/i.test(e.message || '')) throw YT_ERRORS.SUBREQUEST_LIMIT();
@@ -328,9 +332,12 @@ export async function fetchChannel(accessToken) {
  * Returns null when the answer cannot be established, so an unreachable probe
  * is never mistaken for "not a Short".
  */
-export async function isShortVideo(videoId, durationSeconds) {
+export async function isShortVideo(videoId, durationSeconds, onAttempt) {
   if (durationSeconds != null && durationSeconds > SHORT_CANDIDATE_MAX_SECONDS) return false;
   try {
+    // A real external request, one per candidate video, and previously invisible
+    // to the counter -- the largest uncounted cost in a YouTube import.
+    if (onAttempt) onAttempt();
     const res = await fetch(`https://www.youtube.com/shorts/${encodeURIComponent(videoId)}`, {
       method: 'HEAD',
       redirect: 'manual'
@@ -385,7 +392,7 @@ export function normaliseVideo(v) {
  */
 // `fetchOneBatch` is injectable so tests can prove the per-batch isolation
 // below without mocking the network. Production always uses the default.
-export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch = ytFetch) {
+export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch = ytFetch, onAttempt) {
   const out = [];
   for (let i = 0; i < ids.length; i += VIEW_BATCH_SIZE) {
     const batch = ids.slice(i, i + VIEW_BATCH_SIZE);
@@ -398,7 +405,7 @@ export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch 
     if (apiKey) url.searchParams.set('key', apiKey);
     else Object.assign(headers, auth(accessToken));
     try {
-      const body = await fetchOneBatch(url.toString(), { headers });
+      const body = await fetchOneBatch(url.toString(), { headers, onAttempt });
       out.push(...(body.items || []));
     } catch (e) {
       for (const id of batch) out.push({ id, __batchError: (e && e.code) || 'UNKNOWN' });
@@ -416,8 +423,8 @@ export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch 
  *          just that id's batch, which the caller must not confuse with the
  *          video not existing.
  */
-export async function fetchViews(account, mediaIds, env) {
-  const items = await fetchVideoDetails(mediaIds, account.access_token, env && env.YT_API_KEY);
+export async function fetchViews(account, mediaIds, env, { onAttempt } = {}) {
+  const items = await fetchVideoDetails(mediaIds, account.access_token, env && env.YT_API_KEY, undefined, onAttempt);
   const map = new Map();
   for (const v of items) {
     if (v.__batchError) { map.set(v.id, { ok: false, code: v.__batchError }); continue; }
@@ -434,7 +441,7 @@ export async function fetchViews(account, mediaIds, env) {
  * video and instantly claiming a campaign's budget -- the same guardrail
  * Instagram auto-import uses.
  */
-export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds = null } = {}, env) {
+export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds = null, onAttempt } = {}, env) {
   const meta = account.meta_json ? JSON.parse(account.meta_json) : {};
   const playlist = meta.uploads_playlist;
   if (!playlist) return [];
@@ -447,7 +454,7 @@ export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds 
     url.searchParams.set('playlistId', playlist);
     url.searchParams.set('maxResults', '50');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const body = await ytFetch(url.toString(), { headers: auth(account.access_token) });
+    const body = await ytFetch(url.toString(), { headers: auth(account.access_token), onAttempt });
 
     let hitOld = false;
     for (const item of body.items || []) {
@@ -480,7 +487,7 @@ export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds 
   for (const v of items) {
     if (v.status && v.status.privacyStatus && v.status.privacyStatus !== 'public') continue;
     const duration = parseDuration(v.contentDetails && v.contentDetails.duration);
-    v.__is_short = await isShortVideo(v.id, duration);
+    v.__is_short = await isShortVideo(v.id, duration, onAttempt);
     out.push(normaliseVideo(v));
   }
   return out;

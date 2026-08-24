@@ -19,7 +19,7 @@
 //     chaining cannot create more of. src/rate-budget.js owns that, and this
 //     file defers to it rather than reimplementing it.
 
-import { getAdapter } from './platforms.js';
+import { getAdapter, campaignPlatforms } from './platforms.js';
 import { withAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
@@ -57,7 +57,7 @@ export async function jobAccounts(db, { clipperId = null } = {}) {
     `SELECT DISTINCT a.id AS account_id, a.platform, a.username, a.status,
             a.auto_import, a.access_token, a.external_id, a.meta_json,
             a.refresh_token, a.token_expires_at, a.connected_at,
-            p.campaign_id, p.clipper_id
+            p.campaign_id, p.clipper_id, c.allowed_platforms
      FROM participation_accounts pa
      JOIN participations p ON p.id = pa.participation_id
      JOIN campaigns c ON c.id = p.campaign_id
@@ -398,7 +398,22 @@ export async function retryJob(db, env, jobId) {
 
 async function loadAccount(db, accountId, cache) {
   if (cache.has(accountId)) return cache.get(accountId);
-  const row = await db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(accountId).first();
+  // Carries the campaign this account works for, which a plain social_accounts
+  // row does not have. Importing a clip needs campaign_id (NOT NULL) and the
+  // campaign's allowed_platforms; without them the INSERT bound campaign_id to
+  // NULL and INSERT OR IGNORE discarded the row without raising, so an import
+  // reported success while writing nothing.
+  const row = await db.prepare(
+    `SELECT a.*, a.id AS account_id,
+            p.campaign_id, p.id AS participation_id, c.allowed_platforms
+     FROM social_accounts a
+     LEFT JOIN participation_accounts pa ON pa.account_id = a.id
+     LEFT JOIN participations p ON p.id = pa.participation_id AND p.status = 'active'
+     LEFT JOIN campaigns c ON c.id = p.campaign_id
+     WHERE a.id = ?
+     ORDER BY pa.linked_at DESC
+     LIMIT 1`
+  ).bind(accountId).first();
   cache.set(accountId, row);
   return row;
 }
@@ -428,7 +443,53 @@ async function runImport(db, env, account, counter, adapters) {
       env
     )
   );
-  return (media || []).length;
+
+  // A campaign only accepts the platforms it was configured for, so a clip can
+  // never arrive on a platform the brand did not agree to.
+  if (!account.campaign_id) return 0;
+  if (!campaignPlatforms(account).includes(account.platform)) return 0;
+
+  // Actually record what was found. This is the whole point of the import leg:
+  // listing the media and returning a count -- which is all this did after the
+  // chained-refresh refactor deleted the old autoImportClips -- meant every
+  // auto-import account silently stopped gaining clips, while the refresh panel
+  // still reported "N new videos found" from the discarded array and the
+  // campaign page still promised "new Reels are added automatically".
+  //
+  // It also fed a second failure: knownIds is built from submissions, so with
+  // nothing ever written the dedup set stayed empty and every run re-probed the
+  // channel's entire history.
+  let imported = 0;
+  for (const m of media || []) {
+    // knownIds covers this account; this catches the same media arriving under
+    // a different account, which the per-account set cannot see.
+    const seen = await db.prepare(
+      'SELECT id FROM submissions WHERE platform = ? AND ig_media_id = ?'
+    ).bind(account.platform, m.external_id).first();
+    if (seen) continue;
+
+    const res = await db.prepare(
+      `INSERT OR IGNORE INTO submissions
+         (clipper_id, campaign_id, account_id, platform, ig_media_id, permalink, views, earning, status,
+          media_product_type, thumbnail_url, posted_at, created_at, source,
+          duration_seconds, is_short, eligible)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, 'auto', ?, ?, ?)`
+    ).bind(
+      account.clipper_id, account.campaign_id, account.account_id, account.platform,
+      m.external_id, m.permalink || '',
+      m.media_type || null, m.thumbnail_url || null,
+      m.posted_at || Date.now(), Date.now(),
+      m.duration_seconds == null ? null : m.duration_seconds,
+      m.is_short == null ? null : (m.is_short ? 1 : 0),
+      m.eligible === false ? 0 : 1
+    ).run();
+    // Count what was actually written, not what was attempted. INSERT OR IGNORE
+    // discards a row that violates a constraint without raising, so incrementing
+    // unconditionally would report an import that did not happen -- the same
+    // 'success for work not done' this whole fix exists to remove.
+    if (res && res.meta && res.meta.changes) imported++;
+  }
+  return imported;
 }
 
 /**
