@@ -510,11 +510,27 @@
 
     function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',4500);}
 
+
+    /* Turns an error response body into an Error carrying EVERY field the
+       server sent. Both call sites previously copied a hand-written list of
+       fields, which silently went stale: the server grew a job_id on its 409
+       'a refresh is already running' response, the list was never updated, and
+       so the branch that attaches the user to the running job was dead code --
+       they saw 'Refresh failed to start' while a refresh was in fact running.
+       Copying generically means the next field the server adds just works. */
+    function apiError(body){
+      const e=new Error((body&&body.error)||'Request failed');
+      for(const k of Object.keys(body||{})){
+        if(k==='message'||k==='name'||k==='stack'||k==='error') continue;
+        e[k]=body[k];
+      }
+      return e;
+    }
     async function api(path,opts={}){
       const isForm=opts.body instanceof FormData;
       const res=await fetch(path,{...opts,headers:isForm?(opts.headers||{}):{'Content-Type':'application/json',...(opts.headers||{})}});
       const body=await res.json().catch(()=>({}));
-      if(!res.ok) throw new Error(body.error||'Request failed');
+      if(!res.ok) throw apiError(body);
       return body;
     }
 
@@ -838,6 +854,11 @@
         const r=await api('/api/admin/payouts/settle',{method:'POST',body:JSON.stringify({
           clipper_id:Number(clipperId), campaign_id:camp?Number(camp):null,
           submission_ids:payIds, write_off_ids:offIds, amount,
+          // What THIS page believes the clips are worth. The server re-reads
+          // them and refuses the settle if they have moved since load, so a
+          // refresh landing mid-decision can no longer lock a clip at a figure
+          // the admin never saw and never paid.
+          expected_clips_total:expected,
           method:document.getElementById('po-method').value,
           reference:document.getElementById('po-reference').value,
           note:document.getElementById('po-note-in').value,

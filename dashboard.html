@@ -556,11 +556,27 @@
 
     function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',5200);}
 
+
+    /* Turns an error response body into an Error carrying EVERY field the
+       server sent. Both call sites previously copied a hand-written list of
+       fields, which silently went stale: the server grew a job_id on its 409
+       'a refresh is already running' response, the list was never updated, and
+       so the branch that attaches the user to the running job was dead code --
+       they saw 'Refresh failed to start' while a refresh was in fact running.
+       Copying generically means the next field the server adds just works. */
+    function apiError(body){
+      const e=new Error((body&&body.error)||'Request failed');
+      for(const k of Object.keys(body||{})){
+        if(k==='message'||k==='name'||k==='stack'||k==='error') continue;
+        e[k]=body[k];
+      }
+      return e;
+    }
     async function api(path,opts={}){
       const res=await fetch(path,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});
       if(res.status===401){location.href='/clipper';throw new Error('unauthorized');}
       const body=await res.json().catch(()=>({}));
-      if(!res.ok){const e=new Error(body.error||'Request failed');e.fix=body.fix;e.code=body.code;e.needs_reauth=body.needs_reauth;e.retry_in_ms=body.retry_in_ms;throw e;}
+      if(!res.ok) throw apiError(body);
       return body;
     }
     window.logout=async function(){await api('/api/clipper/logout',{method:'POST'}).catch(()=>{});location.href='/clipper';};
@@ -1203,7 +1219,7 @@
               </div>
               <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
                 <span class="badge ${a.status}">${a.status==='connected'?'✓ Verified':esc(a.status.replace('_',' '))}</span>
-                ${a.status!=='connected'&&a.campaign_id?`<a class="btn btn-warn btn-sm" href="/api/auth/instagram/start?campaign_id=${a.campaign_id}">Reconnect</a>`:''}
+                ${a.status!=='connected'&&a.campaign_id?`<a class="btn btn-warn btn-sm" href="/api/auth/${a.platform==='youtube'?'youtube':'instagram'}/start?campaign_id=${a.campaign_id}">Reconnect</a>`:''}
               </div></div></div>`).join('')
           : '<div class="card"><p class="muted" style="font-size:.85rem">No accounts connected yet. Open a campaign and connect the Instagram account you\'ll post from.</p></div>')
           + locked;
@@ -1348,10 +1364,22 @@
     /* ── init ── */
     (async function(){
       const q=new URLSearchParams(location.search), ga=document.getElementById('global-alert');
-      if(q.get('ig')==='connected') ga.innerHTML=alertBox('ok','Instagram connected','@'+(q.get('handle')||'')+' is now verified for that campaign. You can start posting clips to it.');
-      else if(q.get('ig')==='error') ga.innerHTML=alertBox('bad','Instagram connection failed',q.get('msg')||'Something went wrong.',q.get('fix')||'');
+      // Both callbacks report through their own key -- instagram-auth.js
+      // redirects with ?ig=..., youtube-auth.js with ?yt=... . Only 'ig' was
+      // ever read, so a clipper connecting YouTube saw no confirmation, and a
+      // YouTube FAILURE showed nothing at all: the msg/fix the server built
+      // were discarded, and the stale query string stayed in the address bar.
+      const oauth=q.get('ig')?{key:'ig',label:'Instagram',thing:'Reels'}
+                 :q.get('yt')?{key:'yt',label:'YouTube',thing:'Shorts'}:null;
+      if(oauth){
+        const state=q.get(oauth.key), handle=q.get('handle')||'';
+        if(state==='connected') ga.innerHTML=alertBox('ok',oauth.label+' connected',
+          (oauth.key==='ig'?'@'+handle:handle)+' is now verified for that campaign. You can start posting '+oauth.thing+' to it.');
+        else if(state==='error') ga.innerHTML=alertBox('bad',oauth.label+' connection failed',
+          q.get('msg')||'Something went wrong.',q.get('fix')||'');
+      }
       const jumpTo=q.get('campaign');
-      if(q.get('ig')) history.replaceState({},'',location.pathname);
+      if(oauth) history.replaceState({},'',location.pathname);
 
       try{
         await loadMe(); await loadCampaigns(); await loadClips();

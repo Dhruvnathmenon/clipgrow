@@ -116,10 +116,19 @@ export async function planInstagramSync(db, accountId, subs, { skipCooldown = fa
   };
 }
 
+/*
+ * Every write below carries "AND locked_at IS NULL". A settled clip is
+ * financial history: its earning is frozen at locked_earning and the books say
+ * that is what was owed. Without the guard a clip paid mid-sync -- between the
+ * read that built this work list and the write that lands -- still had its
+ * views and last_ok_sync_at moved afterwards, which desynchronised the CSV
+ * audit trail that prints views alongside locked_earning. refresh-jobs.js has
+ * always guarded its writes this way; this path had not been brought in line.
+ */
 export async function syncAccountClips(db, env, account, subs, { skipCooldown = false } = {}) {
   if (!account.access_token || account.status === 'revoked') {
     for (const s of subs) {
-      await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ?').bind('NO_ACCOUNT', s.id).run();
+      await db.prepare('UPDATE submissions SET sync_error = ? WHERE id = ? AND locked_at IS NULL').bind('NO_ACCOUNT', s.id).run();
     }
     return { synced: 0, failed: subs.length };
   }
@@ -160,7 +169,7 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
     // Nothing could even be attempted -- genuinely affects every clip equally.
     const code = (e && e.code) || 'UNKNOWN';
     for (const s of attemptSubs) {
-      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL')
         .bind(code, Date.now(), s.id).run();
     }
     if (e && e.needsReauth) await markAccount(db, account.id, { status: 'needs_reauth', code });
@@ -178,7 +187,7 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
     if (r == null) {
       // Genuinely absent from a successful response: the honest signal that
       // the post has been deleted or made private, not a fetch failure.
-      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL')
         .bind('MEDIA_NOT_FOUND', now, s.id).run();
       failed++;
       continue;
@@ -188,7 +197,7 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
       // This clip's own fetch failed. Recorded against this clip alone --
       // every other clip on the same account keeps updating normally this
       // round, which is the entire point of this shape.
-      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ?')
+      await db.prepare('UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL')
         .bind(r.code, now, s.id).run();
       if (r.needsReauth) needsReauthCode = r.code;
       failed++;
@@ -196,7 +205,7 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
     }
 
     await db.prepare(
-      'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ?'
+      'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ? AND locked_at IS NULL'
     ).bind(r.views, now, now, s.id).run();
     synced++;
   }
@@ -292,14 +301,19 @@ export async function allocateCampaignEarnings(db, campaignId) {
       allocated = 0;
     } else {
       // Threshold cleared -- earns on the FULL view count, not just the excess.
-      let naive = Math.floor((sub.views / 1000) * cpm);
+      // Multiply BEFORE dividing. (views / 1000) * cpm goes through a binary
+      // fraction that lands a hair under the true value, so Math.floor drops a
+      // rupee: at cpm 25, 1160 views gives 28 instead of 29. Across cpm
+      // 10..333 and views 0..500k there are 6182 such view counts and the
+      // error is one-directional -- it only ever underpays the creator.
+      let naive = Math.floor((sub.views * cpm) / 1000);
       // Per-video ceiling from the campaign blueprint, when one is set.
       if (maxPerVideo > 0) naive = Math.min(naive, maxPerVideo);
       allocated = Math.max(0, Math.min(naive, Math.max(0, remaining)));
       remaining -= allocated;
     }
     if (allocated !== sub.earning) {
-      updates.push(db.prepare('UPDATE submissions SET earning = ? WHERE id = ?').bind(allocated, sub.id));
+      updates.push(db.prepare('UPDATE submissions SET earning = ? WHERE id = ? AND locked_at IS NULL').bind(allocated, sub.id));
     }
   }
   if (updates.length) await db.batch(updates);

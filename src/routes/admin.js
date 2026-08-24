@@ -23,6 +23,18 @@ const PART_STATUSES = ['active', 'paused', 'kicked'];
  * input is empty or unrecognised, so a bad value can never silently open a
  * campaign to a platform the brand did not agree to.
  */
+/**
+ * A numeric field from a PATCH body, falling back only when the value is
+ * absent or unusable. Distinguishes a deliberate 0 from "not provided", which
+ * `Number(x) || fallback` cannot do, and rejects negatives so a stray minus
+ * cannot quietly invert a campaign's economics.
+ */
+function numOr(value, fallback) {
+  if (value == null) return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 function normalisePlatforms(input) {
   const list = (Array.isArray(input) ? input : String(input || '').split(','))
     .map(s => String(s).trim().toLowerCase())
@@ -263,14 +275,23 @@ export async function handleAdmin(request, env, url) {
     const existing = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!existing) return err('Not found', 404);
     if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) return err('Invalid status');
-    const merged = { ...JSON.parse(existing.blueprint_json || '{}'), ...pickBlueprint(payload) };
+    const priorBlueprint = JSON.parse(existing.blueprint_json || '{}');
+    const merged = { ...priorBlueprint, ...pickBlueprint(payload) };
+    // The per-video cap lives in the blueprint, not in a column, so a change to
+    // it used to slip past the repricing check below -- the campaign kept
+    // paying the old cap until some unrelated refresh happened to run.
+    const capChanged = String(priorBlueprint.max_payout ?? '') !== String(merged.max_payout ?? '');
     await env.DB.prepare(
       `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ?, allowed_platforms = ? WHERE id = ?`
     ).bind(
       payload.name != null ? String(payload.name).trim() || existing.name : existing.name,
       payload.description != null ? payload.description : existing.description,
-      payload.cpm != null ? Number(payload.cpm) || existing.cpm : existing.cpm,
-      payload.budget != null ? Number(payload.budget) || existing.budget : existing.budget,
+      // `Number(x) || existing` treated a deliberate 0 as "unset": an admin
+      // zeroing the budget to freeze a campaign got a success toast and no
+      // change, while a negative number was accepted. Take any finite value
+      // from 0 up, and fall back only when the input is not a usable number.
+      numOr(payload.cpm, existing.cpm),
+      numOr(payload.budget, existing.budget),
       payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : existing.min_views,
       payload.status || existing.status,
       payload.model != null ? payload.model : existing.model,
@@ -281,7 +302,7 @@ export async function handleAdmin(request, env, url) {
       params.id
     ).run();
     // CPM, budget or threshold changes re-price every submission in this campaign.
-    if (payload.cpm != null || payload.budget != null || payload.min_views != null) {
+    if (payload.cpm != null || payload.budget != null || payload.min_views != null || capChanged) {
       await reallocateCampaign(env.DB, params.id);
     }
     return json({ ok: true });
@@ -426,9 +447,29 @@ export async function handleAdmin(request, env, url) {
     const g = await env.DB.prepare('SELECT * FROM guides WHERE id = ?').bind(params.id).first();
     if (!g) return err('Not found', 404);
     const payload = await readJson(request);
+
+    // The admin form renders slug as an editable field and sends it on every
+    // save, but the UPDATE never set it -- so editing a slug produced a
+    // "Guide saved" toast and silently changed nothing. Normalised exactly as
+    // the POST path does, and checked for collisions because slug is UNIQUE
+    // NOT NULL: without this an in-use slug would throw a raw constraint
+    // error instead of a readable message.
+    let slug = g.slug;
+    if (payload.slug != null) {
+      const wanted = String(payload.slug).trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (wanted && wanted !== g.slug) {
+        const clash = await env.DB.prepare('SELECT id FROM guides WHERE slug = ? AND id != ?')
+          .bind(wanted, params.id).first();
+        if (clash) return err('A guide with this slug already exists', 409);
+        slug = wanted;
+      }
+    }
+
     await env.DB.prepare(
-      `UPDATE guides SET title = ?, meta_description = ?, audience = ?, target_keyword = ?, body_html = ?, status = ?, updated_at = ? WHERE id = ?`
+      `UPDATE guides SET slug = ?, title = ?, meta_description = ?, audience = ?, target_keyword = ?, body_html = ?, status = ?, updated_at = ? WHERE id = ?`
     ).bind(
+      slug,
       payload.title != null ? String(payload.title).trim() || g.title : g.title,
       payload.meta_description != null ? payload.meta_description : g.meta_description,
       payload.audience === 'brand' || payload.audience === 'clipper' ? payload.audience : g.audience,
@@ -551,6 +592,9 @@ export async function handleAdmin(request, env, url) {
       submissionIds: Array.isArray(body.submission_ids) ? body.submission_ids : [],
       writeOffIds: Array.isArray(body.write_off_ids) ? body.write_off_ids : [],
       amount: body.amount,
+      // What the admin's page displayed as the clip total. Optional so an older
+      // cached page still settles; when present it is enforced.
+      expectedClipsTotal: body.expected_clips_total != null ? body.expected_clips_total : null,
       campaignId: body.campaign_id ? Number(body.campaign_id) : null,
       method: body.method,
       reference: body.reference,

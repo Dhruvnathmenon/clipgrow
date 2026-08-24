@@ -54,7 +54,10 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
     const state = clipState(r);
     const maxPerVideo = maxPayoutPerVideo(r);
     const uncapped = r.views >= (r.min_views || 0)
-      ? Math.floor((r.views / 1000) * (r.cpm || 0))
+      // Must match allocateCampaignEarnings exactly -- see the note there on
+      // multiplying before dividing. If these two drift, the amount shown to
+      // the admin stops matching the amount the clip is actually locked at.
+      ? Math.floor((r.views * (r.cpm || 0)) / 1000)
       : 0;
     const ageDays = clipAgeDays(r);
     // Mirrors clipState's own 'below_min' gate exactly (src/clipstate.js) --
@@ -153,7 +156,8 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
  */
 export async function settlePayment(db, {
   clipperId, submissionIds = [], writeOffIds = [], amount,
-  campaignId = null, method = 'UPI', reference = '', note = '', paidAt = null
+  campaignId = null, method = 'UPI', reference = '', note = '', paidAt = null,
+  expectedClipsTotal = null
 }) {
   const payIds = [...new Set(submissionIds.map(Number).filter(Boolean))];
   const offIds = [...new Set(writeOffIds.map(Number).filter(Boolean))];
@@ -195,6 +199,24 @@ export async function settlePayment(db, {
   // The amount owed, computed from the clips themselves rather than trusted
   // from the client, so the locked total always matches what was really earned.
   const clipsTotal = payIds.reduce((n, id) => n + (found.get(id).earning || 0), 0);
+
+  // The admin pays an amount they read off a page snapshot, but earnings move
+  // whenever a refresh job lands. Without this check a clip whose earning rose
+  // from 120 to 360 between page load and clicking Pay would be transferred at
+  // 120 and then locked at 360 -- permanently closing it while still owing 240
+  // that no view can surface, because every "outstanding" figure excludes
+  // locked clips. The client sends what it displayed; if the server no longer
+  // agrees, nothing is charged and the admin reloads.
+  if (expectedClipsTotal != null) {
+    const expected = Math.round(Number(expectedClipsTotal));
+    if (Number.isFinite(expected) && expected !== clipsTotal) {
+      return {
+        error: `These clips are now worth ${clipsTotal}, not ${expected} — the views changed while this page was open. Nothing was charged. Reload and check the amount before paying.`,
+        status: 409,
+        expected, actual: clipsTotal
+      };
+    }
+  }
   const amt = Math.round(Number(amount));
   if (!Number.isFinite(amt) || amt < 0) return { error: 'Amount must be a number.', status: 400 };
   if (payIds.length && amt <= 0) {
@@ -227,7 +249,31 @@ export async function settlePayment(db, {
        WHERE id = ? AND locked_at IS NULL`
     ).bind(ts, id));
   }
-  if (stmts.length) await db.batch(stmts);
+  // A payment row is inserted BEFORE the locks, so the two can disagree: a
+  // concurrent or double-submitted settle finds the clips already locked, every
+  // "AND locked_at IS NULL" matches zero rows, and without this check the call
+  // still returned ok -- leaving a second payment row in the ledger for money
+  // that was only transferred once. The same gap turns a mid-batch failure into
+  // a payment with nothing locked, whose clips then settle again later.
+  if (stmts.length) {
+    const results = await db.batch(stmts);
+    const changed = (results || []).reduce(
+      (n, r) => n + (r && r.meta && typeof r.meta.changes === 'number' ? r.meta.changes : 1), 0);
+    if (changed !== stmts.length) {
+      // Undo our own work rather than leave the books wrong.
+      if (paymentId != null) {
+        await db.prepare(
+          `UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL
+           WHERE payment_id = ?`
+        ).bind(paymentId).run();
+        await db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId).run();
+      }
+      return {
+        error: 'Some of these clips were settled by another action while this was submitting. Nothing was charged. Reload the page to see the current state.',
+        status: 409
+      };
+    }
+  }
 
   // Locked amounts are now fixed, so every affected campaign's remaining
   // budget has to be re-spread across whatever is still open.

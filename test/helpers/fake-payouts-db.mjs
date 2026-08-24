@@ -117,14 +117,23 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
     if (/^UPDATE submissions SET locked_at = \?, locked_earning = \?, lock_reason = 'paid', payment_id = \?/.test(sql)) {
       const [locked_at, locked_earning, payment_id, id] = args;
       const s = subById(id);
-      if (s && !s.locked_at) Object.assign(s, { locked_at, locked_earning, lock_reason: 'paid', payment_id });
-      return { meta: {} };
+      // Report a real change count: the "AND locked_at IS NULL" guard means an
+      // already-locked clip matches zero rows, and settlePayment relies on that
+      // to detect a concurrent settle.
+      if (s && !s.locked_at) {
+        Object.assign(s, { locked_at, locked_earning, lock_reason: 'paid', payment_id });
+        return { meta: { changes: 1 } };
+      }
+      return { meta: { changes: 0 } };
     }
     if (/^UPDATE submissions SET locked_at = \?, locked_earning = 0, lock_reason = 'below_min', earning = 0/.test(sql)) {
       const [locked_at, id] = args;
       const s = subById(id);
-      if (s && !s.locked_at) Object.assign(s, { locked_at, locked_earning: 0, lock_reason: 'below_min', earning: 0 });
-      return { meta: {} };
+      if (s && !s.locked_at) {
+        Object.assign(s, { locked_at, locked_earning: 0, lock_reason: 'below_min', earning: 0 });
+        return { meta: { changes: 1 } };
+      }
+      return { meta: { changes: 0 } };
     }
     if (/^UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL/.test(sql)) {
       const paymentId = args[0];
