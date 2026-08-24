@@ -228,8 +228,8 @@ export async function settlePayment(db, {
 
   if (payIds.length) {
     const res = await db.prepare(
-      `INSERT INTO payments (clipper_id, campaign_id, amount, method, reference, note, paid_at, created_at, clip_count, clips_total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO payments (clipper_id, campaign_id, amount, method, reference, note, paid_at, created_at, clip_count, clips_total, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settlement')`
     ).bind(clipperId, campaignId || null, amt, method || 'UPI', reference || '', note || '',
            ts, now(), payIds.length, clipsTotal).run();
     paymentId = res.meta.last_row_id;

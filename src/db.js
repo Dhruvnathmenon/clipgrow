@@ -214,7 +214,12 @@ export function publicAccount(row) {
 export const BLUEPRINT_FIELDS = [
   'title', 'socials', 'objective', 'cta', 'tags', 'platforms',
   'guidelines', 'footage', 'demo_video', 'model_note', 'commission_rate',
-  'min_payout', 'max_payout', 'max_payout_per_channel',
+  // max_payout is the per-video ceiling and is the only payout field the
+  // allocator enforces. min_payout and max_payout_per_channel used to sit here
+  // too: the first duplicated campaigns.min_views (the real, enforced views
+  // threshold) and the second was never consulted by any money code, so both
+  // were decorative -- shown to clippers and brands as if they were binding.
+  'max_payout',
   'approval_steps', 'terms', 'extra_fields'
 ];
 
@@ -439,17 +444,32 @@ export async function clipperFinancials(db, clipperId) {
      FROM submissions WHERE clipper_id = ?`
   ).bind(clipperId).first();
 
-  const paidRow = await db
-    .prepare('SELECT COALESCE(SUM(amount),0) AS paid FROM payments WHERE clipper_id = ?')
-    .bind(clipperId).first();
+  const paidRow = await db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS paid,
+            COALESCE(SUM(CASE WHEN kind = 'advance' THEN amount ELSE 0 END),0) AS advanced,
+            COALESCE(SUM(CASE WHEN kind = 'bonus'   THEN amount ELSE 0 END),0) AS bonuses
+     FROM payments WHERE clipper_id = ?`
+  ).bind(clipperId).first();
+
+  const pending = row.pending || 0;
+  const advanced = paidRow.advanced || 0;
 
   return {
     earned: row.earned || 0,
     settled: row.settled || 0,
-    pending: row.pending || 0,
+    pending,
     pending_clips: row.pending_clips || 0,
     paid: paidRow.paid || 0,
+    advanced,
+    bonuses: paidRow.bonuses || 0,
+    // What is still genuinely owed. An advance was paid against work not yet
+    // settled, so it comes off the top -- otherwise the same money is owed
+    // twice: once as an unsettled clip and again as a payment already sent.
+    // A bonus is extra and is deliberately NOT deducted. Floored at 0 so an
+    // over-advance shows as "nothing owed" rather than a negative balance;
+    // the surplus is visible as advanced > pending.
+    owed: Math.max(0, pending - advanced),
     // Kept for existing callers/UI. Pending is the authoritative figure now.
-    outstanding: row.pending || 0
+    outstanding: pending
   };
 }

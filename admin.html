@@ -346,9 +346,14 @@
       </div>
       <div class="panel">
         <h2 class="panel-title">Record a Payment</h2>
-        <p class="note" style="margin-bottom:1rem">Standalone entry that does <strong>not</strong> lock any videos, for corrections and off-cycle transfers. For a normal payout use the <strong>Payouts</strong> tab so the videos are locked against it.</p>
+        <p class="note" style="margin-bottom:1rem">Standalone entry that does <strong>not</strong> lock any videos, for corrections and off-cycle transfers. For a normal payout use the <strong>Payouts</strong> tab so the videos are locked against it &mdash; anything recorded here leaves those videos still payable, so an <strong>advance</strong> is deducted from the next settlement while a <strong>bonus</strong> is not.</p>
         <form id="pay-form" class="form-grid">
           <div><label>Clipper <span class="req">*</span></label><select id="p-clipper" class="form-control" required></select></div>
+          <div><label>What is this? <span class="req">*</span></label>
+            <select id="p-kind" class="form-control" required>
+              <option value="advance">Advance — comes off what they are owed next</option>
+              <option value="bonus">Bonus — extra, on top of what they are owed</option>
+            </select></div>
           <div><label>Campaign (optional)</label><select id="p-campaign" class="form-control"><option value="">General / all</option></select></div>
           <div><label>Amount ₹ <span class="req">*</span></label><input type="number" id="p-amount" class="form-control" min="1" required /></div>
           <div><label>Method</label><input type="text" id="p-method" class="form-control" value="UPI" /></div>
@@ -361,7 +366,7 @@
       <div class="panel">
         <h2 class="panel-title">Payment History</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Videos</th><th>Amount</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Clipper</th><th>Campaign</th><th>Kind</th><th>Method</th><th>Reference</th><th>Videos</th><th>Amount</th><th></th></tr></thead>
           <tbody id="payments-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
         <p class="note" style="margin-top:.8rem">Reversing a payment unlocks every video it settled and puts them back in the pending pool.</p>
@@ -464,9 +469,8 @@
         <div class="fieldset">
           <div class="fs-title">Payout Terms</div>
           <div class="grid-3">
-            <div class="fld"><label>Min Payout ₹</label><input type="number" class="form-control" id="f-min_payout" /></div>
-            <div class="fld"><label>Max Payout ₹</label><input type="number" class="form-control" id="f-max_payout" /></div>
-            <div class="fld"><label>Max / Channel ₹</label><input type="number" class="form-control" id="f-max_payout_per_channel" /></div>
+            <div class="fld"><label>Max payout per video ₹</label><input type="number" class="form-control" id="f-max_payout" />
+              <div class="note">Ceiling for any single video. Leave blank for no cap. The minimum views a video needs before it earns is set by Min Views, above.</div></div>
           </div>
           <div class="grid-2">
             <div class="fld"><label>Commission Rate</label><input class="form-control" id="f-commission_rate" /></div>
@@ -501,7 +505,7 @@
     let modalMode='create', modalId=null;
     let CLIPPERS=[], CAMPAIGNS=[];
     const TEXT_FIELDS=['name','description','model','socials','platforms','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
-    const NUM_FIELDS=['cpm','budget','min_views','min_payout','max_payout','max_payout_per_channel'];
+    const NUM_FIELDS=['cpm','budget','min_views','max_payout'];
 
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
     const num=n=>Number(n||0).toLocaleString('en-IN');
@@ -1432,12 +1436,14 @@
         const tb=document.getElementById('payments-body');
         tb.innerHTML=payments.length?payments.map(p=>`<tr>
           <td>${when(p.paid_at)}</td><td class="handle">${esc(p.username)}</td>
-          <td>${esc(p.campaign_name||'General')}</td><td class="muted">${esc(p.method||'—')}</td>
+          <td>${esc(p.campaign_name||'General')}</td>
+          <td>${p.kind==='settlement'?'<span class="badge connected">settlement</span>':p.kind==='bonus'?'<span class="badge">bonus</span>':'<span class="badge needs_reauth">advance</span>'}</td>
+          <td class="muted">${esc(p.method||'—')}</td>
           <td class="muted">${esc(p.reference||'—')}</td>
           <td class="muted">${p.clip_count?`${num(p.clip_count)} locked`:'—'}</td>
           <td class="money">${money(p.amount)}</td>
           <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id},${p.clip_count||0})">Reverse</button></td>
-        </tr>`).join(''):'<tr><td colspan="8" class="empty">No payments recorded yet.</td></tr>';
+        </tr>`).join(''):'<tr><td colspan="9" class="empty">No payments recorded yet.</td></tr>';
       }catch(e){ toast(e.message,true); }
     }
     window.delPayment=async function(id,clips){
@@ -1455,6 +1461,7 @@
       try{
         await api('/api/admin/payments',{method:'POST',body:JSON.stringify({
           clipper_id:Number(document.getElementById('p-clipper').value),
+          kind:document.getElementById('p-kind').value,
           campaign_id:document.getElementById('p-campaign').value?Number(document.getElementById('p-campaign').value):null,
           amount:Number(document.getElementById('p-amount').value),
           method:document.getElementById('p-method').value.trim(),

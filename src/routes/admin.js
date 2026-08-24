@@ -348,8 +348,24 @@ export async function handleAdmin(request, env, url) {
       account_id !== undefined ? account_id : part.account_id,
       params.id
     ).run();
-    // Kicking or reinstating changes who earns, so the budget must be re-spread.
-    if (status && status !== part.status) await reallocateCampaign(env.DB, part.campaign_id);
+    // Kicking freezes this clipper's unpaid clips at what they are worth right
+    // now, so later repricing cannot erode them. Reinstating clears the freeze
+    // and hands them back to normal pricing. Settled clips are untouched --
+    // their money is already locked.
+    if (status && status !== part.status) {
+      if (status === 'kicked') {
+        await env.DB.prepare(
+          `UPDATE submissions SET frozen_earning = earning
+            WHERE clipper_id = ? AND campaign_id = ? AND locked_at IS NULL AND frozen_earning IS NULL`
+        ).bind(part.clipper_id, part.campaign_id).run();
+      } else if (part.status === 'kicked') {
+        await env.DB.prepare(
+          `UPDATE submissions SET frozen_earning = NULL
+            WHERE clipper_id = ? AND campaign_id = ? AND locked_at IS NULL`
+        ).bind(part.clipper_id, part.campaign_id).run();
+      }
+      await reallocateCampaign(env.DB, part.campaign_id);
+    }
     return json({ ok: true });
   }
 
@@ -658,18 +674,26 @@ export async function handleAdmin(request, env, url) {
   }
 
   if (pathname === '/api/admin/payments' && method === 'POST') {
-    const { clipper_id, campaign_id, amount, method: payMethod, reference, note, paid_at } = await readJson(request);
+    const { clipper_id, campaign_id, amount, method: payMethod, reference, note, paid_at, kind } = await readJson(request);
     if (!clipper_id) return err('Pick a clipper');
+    // This endpoint records money that was sent WITHOUT settling any videos --
+    // the clips stay open and payable. That is only ever correct for money that
+    // is not payment for specific videos, so it has to say which it is:
+    //   advance - paid up front, owed back out of the next settlement
+    //   bonus   - extra money, never deducted from what the clipper is owed
+    // Settling videos goes through the payouts flow, which locks them.
+    const payKind = kind === 'bonus' ? 'bonus' : kind === 'advance' ? 'advance' : null;
+    if (!payKind) return err('Say whether this is an advance or a bonus. To pay for specific videos, use the Payouts tab so they get locked.');
     const amt = Math.round(Number(amount));
     if (!Number.isFinite(amt) || amt <= 0) return err('Amount must be greater than 0');
     const clipper = await env.DB.prepare('SELECT id FROM clippers WHERE id = ?').bind(clipper_id).first();
     if (!clipper) return err('Clipper not found', 404);
     if (campaign_id && !(await getCampaignById(env.DB, campaign_id))) return err('Campaign not found', 404);
     const res = await env.DB.prepare(
-      `INSERT INTO payments (clipper_id, campaign_id, amount, method, reference, note, paid_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO payments (clipper_id, campaign_id, amount, method, reference, note, paid_at, created_at, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(clipper_id, campaign_id || null, amt, payMethod || 'UPI', reference || '', note || '',
-           paid_at ? Number(paid_at) : now(), now()).run();
+           paid_at ? Number(paid_at) : now(), now(), payKind).run();
     return json({ ok: true, id: res.meta.last_row_id, money: await clipperFinancials(env.DB, clipper_id) }, 201);
   }
 

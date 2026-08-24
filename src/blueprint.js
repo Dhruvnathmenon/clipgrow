@@ -11,9 +11,7 @@ const FIELD_MAP = {
   cta: 'cta',
   tags: 'tags',
   model: 'model_note',
-  min_payout: 'min_payout',
   max_payout: 'max_payout',
-  max_payout_per_channel: 'max_payout_per_channel',
   commission_rate: 'commission_rate',
   platforms: 'platforms',
   guidelines: 'guidelines',
@@ -125,9 +123,7 @@ export function toCampaignDraft(parsed) {
     demo_video: f.demo_video || '',
     model_note: f.model_note || '',
     commission_rate: f.commission_rate || '',
-    min_payout: parseMoney(f.min_payout),
     max_payout: parseMoney(f.max_payout),
-    max_payout_per_channel: parseMoney(f.max_payout_per_channel),
     // Not present in the blueprint template -- admin supplies these, and the
     // earnings allocator needs them.
     cpm: null,

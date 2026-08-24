@@ -834,8 +834,7 @@
         <div class="card"><div class="detail-grid">
           ${row('Objective',b.objective)}${row('CTA',b.cta)}${row('Socials',b.socials)}
           ${row('Platforms',b.platforms)}${row('Tags',b.tags)}${row('Payout',b.model_note)}
-          ${b.min_payout?row('Min payout',money(b.min_payout)):''}${b.max_payout?row('Max payout',money(b.max_payout)):''}
-          ${b.max_payout_per_channel?row('Max / channel',money(b.max_payout_per_channel)):''}${row('Commission',b.commission_rate)}
+          ${b.max_payout?row('Max payout per video',money(b.max_payout)):''}${row('Commission',b.commission_rate)}
         </div></div>
         ${(b.guidelines||b.footage||b.demo_video)?`<div class="sec-title">Resources</div><div class="card"><div class="chips">
           ${b.guidelines?`<a class="chip" href="${esc(b.guidelines)}" target="_blank" rel="noopener">Brand guidelines ↗</a>`:''}

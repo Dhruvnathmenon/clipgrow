@@ -1253,9 +1253,7 @@
     const payout=[
       cdRow('Payout Model',b.model_note),
       cdRow('Commission',b.commission_rate),
-      b.min_payout?cdRow('Min Payout','₹'+Number(b.min_payout).toLocaleString('en-IN')):'',
-      b.max_payout?cdRow('Max Payout','₹'+Number(b.max_payout).toLocaleString('en-IN')):'',
-      b.max_payout_per_channel?cdRow('Max / Channel','₹'+Number(b.max_payout_per_channel).toLocaleString('en-IN')):''
+      b.max_payout?cdRow('Max Payout / Video','₹'+Number(b.max_payout).toLocaleString('en-IN')):''
     ].join('');
 
     const resources=[

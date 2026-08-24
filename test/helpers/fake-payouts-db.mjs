@@ -88,7 +88,8 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
           const part = state.participations.find(p => p.clipper_id === s.clipper_id && p.campaign_id === s.campaign_id);
           return {
             id: s.id, views: s.views, earning: s.earning, locked_at: s.locked_at, locked_earning: s.locked_earning,
-            eligible: s.eligible, sub_status: s.status, part_status: part ? part.status : 'active'
+            eligible: s.eligible, frozen_earning: s.frozen_earning ?? null,
+            sub_status: s.status, part_status: part ? part.status : 'active'
           };
         })
         .sort((a, b) => a.id - b.id);

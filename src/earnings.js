@@ -254,7 +254,7 @@ export async function allocateCampaignEarnings(db, campaignId) {
   // clip reached ClipGrow -- an Instagram Reel and a YouTube Short compete for
   // the same pool on equal terms.
   const { results: submissions } = await db.prepare(
-    `SELECT s.id, s.views, s.earning, s.locked_at, s.locked_earning, s.eligible,
+    `SELECT s.id, s.views, s.earning, s.locked_at, s.locked_earning, s.eligible, s.frozen_earning,
             s.status AS sub_status, COALESCE(p.status, 'active') AS part_status
      FROM submissions s
      LEFT JOIN participations p ON p.clipper_id = s.clipper_id AND p.campaign_id = s.campaign_id
@@ -294,7 +294,15 @@ export async function allocateCampaignEarnings(db, campaignId) {
     } else if (sub.part_status === 'kicked') {
       // Removed from the campaign: earnings freeze at what they had already
       // accrued. The money is still owed, so it still consumes budget.
-      allocated = Math.min(sub.earning || 0, Math.max(0, remaining));
+      //
+      // Read from frozen_earning, written once when the clipper was kicked.
+      // Using `earning` here made this a ratchet: it is the previous pass's
+      // OUTPUT, so a pass run while the budget was short wrote the value down,
+      // and restoring the budget could never bring it back. frozen_earning does
+      // not move, so repricing is idempotent -- the clamp below can shrink what
+      // is payable right now without destroying the underlying figure.
+      const frozen = sub.frozen_earning != null ? sub.frozen_earning : (sub.earning || 0);
+      allocated = Math.min(frozen, Math.max(0, remaining));
       remaining -= allocated;
     } else if (sub.views < minViews) {
       // Under the campaign's minimum: tracked and shown, but earns nothing yet.
