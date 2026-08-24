@@ -126,7 +126,15 @@ export async function disconnectSocialAccount(db, accountId) {
 
   const stmts = [
     db.prepare('DELETE FROM participation_accounts WHERE account_id = ?').bind(accountId),
-    db.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(accountId)
+    db.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(accountId),
+    // ig_api_calls has a NOT NULL foreign key onto social_accounts, and every
+    // Instagram view fetch writes a row. When an account has no settled clips
+    // the branch below DELETEs the account outright, which that key refuses --
+    // so disconnecting any Instagram account that had ever synced failed with a
+    // bare "internal server error" and no way to swap the account. The rows are
+    // only the rolling 200/hour rate-limit ledger, meaningless once the account
+    // is gone, so they go with it.
+    db.prepare('DELETE FROM ig_api_calls WHERE social_account_id = ?').bind(accountId)
   ];
 
   if (pending.length) {

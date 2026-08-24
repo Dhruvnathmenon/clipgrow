@@ -13,7 +13,8 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     social_accounts: accounts.map(a => ({ ...a })),
     submissions: submissions.map(s => ({ ...s })),
     participation_accounts: participationAccounts.map(p => ({ ...p })),
-    participations: participations.map(p => ({ ...p }))
+    participations: participations.map(p => ({ ...p })),
+    ig_api_calls: []
   };
 
   function first(sql, args) {
@@ -51,6 +52,12 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     }
     if (/^DELETE FROM social_accounts WHERE id = \?/.test(sql)) {
       state.social_accounts = state.social_accounts.filter(a => a.id !== args[0]);
+      return { meta: {} };
+    }
+    // The rolling rate-limit ledger. It carries a NOT NULL foreign key onto
+    // social_accounts, so it must be cleared before the account row can go.
+    if (/^DELETE FROM ig_api_calls WHERE social_account_id = /.test(sql)) {
+      state.ig_api_calls = (state.ig_api_calls || []).filter(r => r.social_account_id !== args[0]);
       return { meta: {} };
     }
     throw new Error('fake-db: unhandled run(): ' + sql);
