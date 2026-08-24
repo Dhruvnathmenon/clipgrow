@@ -137,3 +137,39 @@ test('reversePayment: never reopens a clip closed for a different reason', async
   const off = db._state.submissions.find(x => x.id === 2);
   assert.equal(off.lock_reason, 'below_min', 'a write-off must stay closed');
 });
+
+test('a rolled-back settle also releases the write-offs it locked, not just the paid clips', async () => {
+  // The write-off statements deliberately set no payment_id, so a rollback
+  // scoped to payment_id left them permanently locked at zero while the API
+  // reported that nothing had been charged.
+  const db = makePayoutsDb({
+    campaigns: [campaign()],
+    submissions: [
+      sub({ id: 7, earning: 200 }),                        // to pay
+      sub({ id: 8, views: 100, earning: 0 })               // to write off
+    ]
+  });
+
+  // A concurrent settle grabs clip 7 between validation and the batch.
+  const realPrepare = db.prepare.bind(db);
+  let armed = true;
+  db.prepare = (sql) => {
+    if (armed && /^UPDATE submissions SET locked_at = \?, locked_earning = \?/.test(sql)) {
+      armed = false;
+      Object.assign(db._state.submissions.find(x => x.id === 7),
+        { locked_at: Date.now(), locked_earning: 200, lock_reason: 'paid', payment_id: 99 });
+    }
+    return realPrepare(sql);
+  };
+
+  const r = await settlePayment(db, {
+    clipperId: 1, submissionIds: [7], writeOffIds: [8], amount: 200
+  });
+
+  assert.equal(r.status, 409, 'must report the conflict');
+  assert.equal(db._state.payments.length, 0, 'no payment row may survive');
+
+  const off = db._state.submissions.find(x => x.id === 8);
+  assert.equal(off.locked_at, null, 'the write-off must be released, not orphaned');
+  assert.equal(off.lock_reason, null, 'and must not stay closed at zero');
+});

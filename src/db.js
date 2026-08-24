@@ -446,7 +446,7 @@ export async function clipperFinancials(db, clipperId) {
 
   const paidRow = await db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS paid,
-            COALESCE(SUM(CASE WHEN kind = 'advance' THEN amount ELSE 0 END),0) AS advanced,
+            COALESCE(SUM(CASE WHEN kind = 'advance' THEN amount - COALESCE(recovered_amount,0) ELSE 0 END),0) AS advanced,
             COALESCE(SUM(CASE WHEN kind = 'bonus'   THEN amount ELSE 0 END),0) AS bonuses
      FROM payments WHERE clipper_id = ?`
   ).bind(clipperId).first();

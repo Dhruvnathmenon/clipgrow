@@ -7,6 +7,20 @@
 -- at the moment of kicking, so repricing is idempotent.
 ALTER TABLE submissions ADD COLUMN frozen_earning INTEGER;
 
+-- Without this the fix only helps clippers kicked AFTER the deploy: anyone
+-- already kicked keeps frozen_earning NULL, the allocator falls back to the
+-- previous pass's output, and the ratchet this column exists to remove is still
+-- live for exactly that population. Captures what they are worth right now,
+-- which is the figure their earnings were meant to have frozen at.
+UPDATE submissions SET frozen_earning = earning
+ WHERE locked_at IS NULL
+   AND frozen_earning IS NULL
+   AND EXISTS (
+     SELECT 1 FROM participations p
+      WHERE p.clipper_id = submissions.clipper_id
+        AND p.campaign_id = submissions.campaign_id
+        AND p.status = 'kicked');
+
 -- Payments were all one undifferentiated row, so a hand-recorded payment looked
 -- identical to one that actually settled videos. Nothing linked it to clips, so
 -- those clips stayed payable and were re-ticked on the next payout run -- a

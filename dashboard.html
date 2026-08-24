@@ -625,7 +625,7 @@
       document.getElementById('home-stats').innerHTML=`
         <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Total Earned</div></div>
         <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Received</div></div>
-        <div class="stat"><div class="stat-val g">${money(d.money.pending!=null?d.money.pending:d.money.outstanding)}</div><div class="stat-lbl">Due Next Payout</div></div>
+        <div class="stat"><div class="stat-val g">${money(d.money.owed!=null?d.money.owed:(d.money.pending!=null?d.money.pending:d.money.outstanding))}</div><div class="stat-lbl">Due Next Payout</div>${d.money.advanced?`<div class="note" style="font-size:.66rem">after ${money(d.money.advanced)} already advanced</div>`:''}</div>
         <div class="stat"><div class="stat-val w">${num(d.totals.views)}</div><div class="stat-lbl">Total Views</div></div>
         <div class="stat"><div class="stat-val w">${num(d.totals.clips)}</div><div class="stat-lbl">Clips Posted</div></div>`;
       document.getElementById('n-clips').textContent=d.totals.clips;

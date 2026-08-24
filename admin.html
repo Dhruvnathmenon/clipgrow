@@ -351,6 +351,10 @@
           <div><label>Clipper <span class="req">*</span></label><select id="p-clipper" class="form-control" required></select></div>
           <div><label>What is this? <span class="req">*</span></label>
             <select id="p-kind" class="form-control" required>
+              <!-- An empty first option is what makes `required` actually fire.
+                   With a real value here the browser always submitted 'advance',
+                   and a mis-defaulted advance suppresses what a clipper is owed. -->
+              <option value="" disabled selected>Choose…</option>
               <option value="advance">Advance — comes off what they are owed next</option>
               <option value="bonus">Bonus — extra, on top of what they are owed</option>
             </select></div>
@@ -1262,7 +1266,7 @@
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td>${money(c.money.paid)}</td>
-          <td class="gold">${money(c.money.pending!=null?c.money.pending:c.money.outstanding)}</td>
+          <td class="gold">${money(c.money.owed!=null?c.money.owed:(c.money.pending!=null?c.money.pending:c.money.outstanding))}</td>
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
@@ -1415,7 +1419,7 @@
       const cs=document.getElementById('p-clipper');
       if(cs && CLIPPERS.length){
         const cur=cs.value;
-        cs.innerHTML='<option value="">Select clipper…</option>'+CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} — ${money(c.money.outstanding)} outstanding</option>`).join('');
+        cs.innerHTML='<option value="">Select clipper…</option>'+CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} — ${money(c.money.owed != null ? c.money.owed : c.money.outstanding)} owed</option>`).join('');
         cs.value=cur;
       }
       const cam=document.getElementById('p-campaign');
@@ -1427,7 +1431,13 @@
     }
     document.getElementById('p-clipper').addEventListener('change',e=>{
       const c=CLIPPERS.find(x=>String(x.id)===e.target.value);
-      document.getElementById('pay-hint').textContent=c?`${c.display_name} has earned ${money(c.money.earned)}, received ${money(c.money.paid)}, outstanding ${money(c.money.outstanding)}.`:'';
+      document.getElementById('pay-hint').textContent=c?(
+        `${c.display_name} has earned ${money(c.money.earned)}, received ${money(c.money.paid)}, still owed ${money(c.money.owed != null ? c.money.owed : c.money.outstanding)}.`
+        // Surfaced at the point of decision: without it the admin pays the full
+        // pending amount and the advance is effectively paid twice.
+        + (c.money.advanced ? ` ${money(c.money.advanced)} of that was already advanced and is netted off.` : '')
+        + (c.money.bonuses ? ` (${money(c.money.bonuses)} paid as bonus, not deducted.)` : '')
+      ):'';
     });
 
     async function loadPayments(){

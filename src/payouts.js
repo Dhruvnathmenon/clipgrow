@@ -261,17 +261,46 @@ export async function settlePayment(db, {
       (n, r) => n + (r && r.meta && typeof r.meta.changes === 'number' ? r.meta.changes : 1), 0);
     if (changed !== stmts.length) {
       // Undo our own work rather than leave the books wrong.
-      if (paymentId != null) {
-        await db.prepare(
+      // Scoped by this call's own timestamp rather than by payment_id. The
+      // write-off statements deliberately set no payment_id, so a payment_id
+      // rollback left them permanently locked at zero while telling the admin
+      // nothing had been charged -- clips that could never earn again. the timestamp is
+      // unique to this call, so this cannot touch a concurrent settle's rows.
+      const undo = [
+        db.prepare(
           `UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL
-           WHERE payment_id = ?`
-        ).bind(paymentId).run();
-        await db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId).run();
-      }
+           WHERE locked_at = ? AND id IN (${allIds.map(() => '?').join(',')})`
+        ).bind(ts, ...allIds)
+      ];
+      if (paymentId != null) undo.push(db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId));
+      // One batch, so the unlock and the delete cannot half-apply.
+      await db.batch(undo);
       return {
         error: 'Some of these clips were settled by another action while this was submitting. Nothing was charged. Reload the page to see the current state.',
         status: 409
       };
+    }
+  }
+
+  // Whatever the admin held back relative to what the clips were worth is, in
+  // practice, an advance being repaid. Applying it oldest-first keeps a
+  // clipper's outstanding advance shrinking as they settle, instead of
+  // suppressing their "still owed" figure forever.
+  if (paymentId != null && clipsTotal > amt) {
+    let toRecover = clipsTotal - amt;
+    const { results: advances } = await db.prepare(
+      `SELECT id, amount, COALESCE(recovered_amount,0) AS recovered
+       FROM payments
+       WHERE clipper_id = ? AND kind = 'advance' AND COALESCE(recovered_amount,0) < amount
+       ORDER BY paid_at ASC`
+    ).bind(clipperId).all();
+    for (const adv of advances || []) {
+      if (toRecover <= 0) break;
+      const take = Math.min(toRecover, adv.amount - adv.recovered);
+      if (take <= 0) continue;
+      await db.prepare('UPDATE payments SET recovered_amount = COALESCE(recovered_amount,0) + ? WHERE id = ?')
+        .bind(take, adv.id).run();
+      toRecover -= take;
     }
   }
 
@@ -355,9 +384,16 @@ export async function writeOffAllBelowMin(db, { campaignId = null, clipperId = n
     // A payout already ran for this clipper, dated on or after this clip was
     // posted -- so this clip's window has already closed once. `p.campaign_id
     // IS NULL` covers an "all campaigns" payout run, which still counts.
+    // Only a real settlement counts as "a payout already covered this clip".
+    // Without the kind filter a hand-recorded advance or bonus qualified, so a
+    // new clipper given an advance on Monday would have every below-minimum
+    // clip swept and permanently locked at zero -- clips that were still
+    // climbing toward the threshold and would have earned. This matches what
+    // the function's own docstring and the admin's confirm dialog both promise.
     `EXISTS (
        SELECT 1 FROM payments p
        WHERE p.clipper_id = s.clipper_id
+         AND p.kind = 'settlement'
          AND (p.campaign_id = s.campaign_id OR p.campaign_id IS NULL)
          AND p.paid_at >= COALESCE(s.posted_at, s.created_at)
      )`

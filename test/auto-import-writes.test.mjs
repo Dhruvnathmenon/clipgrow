@@ -94,3 +94,26 @@ test('a clip never lands on a platform the campaign does not accept', async () =
   await runImportLeg(db);
   assert.equal(db._rows('submissions').length, 0);
 });
+
+test('a paused clipper keeps tracking views but gains no new clips', async () => {
+  // The campaign page promises paused clips "keep tracking and earning", and the
+  // allocator does keep pricing them -- so excluding them from refresh froze
+  // their views while they carried on earning against a number that could never
+  // move. They refresh; only the import leg is withheld.
+  const db = seeded();
+  db._sqlite.prepare("UPDATE participations SET status = 'paused' WHERE id = 100").run();
+
+  // An existing clip, already tracked, should still be refreshed.
+  db._sqlite.prepare(
+    `INSERT INTO submissions (clipper_id, campaign_id, account_id, platform, ig_media_id,
+       permalink, views, earning, status, created_at, source, eligible)
+     VALUES (1, 1, 10, 'instagram', 'old1', 'https://x/old1', 100, 0, 'active', ?, 'auto', 1)`
+  ).run(NOW - 7200000);
+
+  await runImportLeg(db);
+
+  const rows = db._rows('submissions');
+  assert.equal(rows.length, 1, 'no NEW clip may be imported while paused');
+  assert.equal(rows[0].ig_media_id, 'old1');
+  assert.ok(rows[0].last_ok_sync_at, 'the existing clip must still have been refreshed');
+});

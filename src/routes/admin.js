@@ -77,6 +77,10 @@ export async function handleAdmin(request, env, url) {
         (SELECT COUNT(*) FROM campaigns WHERE status='active') AS active_campaigns,
         (SELECT COALESCE(SUM(earning),0) FROM submissions WHERE status='active') AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
+        -- Outstanding nets off settlements and advances only. A bonus is money
+        -- given on top of what was earned, so counting it here understated what
+        -- is still owed to clippers on the one figure used to judge cash position.
+        (SELECT COALESCE(SUM(CASE WHEN kind != 'bonus' THEN amount ELSE 0 END),0) FROM payments) AS total_paid_against_earnings,
         (SELECT COUNT(*) FROM social_accounts WHERE status='needs_reauth') AS accounts_needing_reauth,
         -- Accounts whose last auto-import attempt failed for a non-auth
         -- reason. These still read as 'connected' and their existing clips
@@ -96,7 +100,7 @@ export async function handleAdmin(request, env, url) {
              -- created_at measures from when tracking actually began.
              AND COALESCE(last_ok_sync_at, created_at) < ?) AS submissions_stuck`
     ).bind(Date.now() - STUCK_AFTER_MS).first();
-    return json({ overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid || 0)) } });
+    return json({ overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid_against_earnings || 0)) } });
   }
 
   // ------------------------------------------------------- blueprint parse

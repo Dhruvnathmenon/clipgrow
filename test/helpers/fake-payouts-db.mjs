@@ -137,11 +137,31 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
       return { meta: { changes: 0 } };
     }
     if (/^UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL/.test(sql)) {
-      const paymentId = args[0];
-      for (const s of state.submissions) {
-        if (s.payment_id === paymentId) Object.assign(s, { locked_at: null, locked_earning: null, lock_reason: null, payment_id: null });
+      // Two callers with the same SET clause but different WHERE:
+      //   reversePayment  -> WHERE payment_id = ?
+      //   settle rollback -> WHERE locked_at = ? AND id IN (...)
+      // The rollback is scoped by timestamp because write-offs carry no
+      // payment_id, so matching on payment_id alone would strand them locked.
+      if (/WHERE locked_at = [?] AND id IN/.test(sql)) {
+        const [ts, ...ids] = args;
+        let changes = 0;
+        for (const s of state.submissions) {
+          if (s.locked_at === ts && ids.includes(s.id)) {
+            Object.assign(s, { locked_at: null, locked_earning: null, lock_reason: null, payment_id: null });
+            changes++;
+          }
+        }
+        return { meta: { changes } };
       }
-      return { meta: {} };
+      const paymentId = args[0];
+      let changes = 0;
+      for (const s of state.submissions) {
+        if (s.payment_id === paymentId) {
+          Object.assign(s, { locked_at: null, locked_earning: null, lock_reason: null, payment_id: null });
+          changes++;
+        }
+      }
+      return { meta: { changes } };
     }
     if (/^DELETE FROM payments WHERE id = \?/.test(sql)) {
       state.payments = state.payments.filter(p => p.id !== args[0]);

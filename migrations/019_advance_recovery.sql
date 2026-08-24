@@ -1,0 +1,11 @@
+-- Advances were summed forever with nothing ever marking one repaid, so once a
+-- clipper had taken an advance their "still owed" figure stayed suppressed by
+-- that amount permanently -- long after the settlement that actually recovered
+-- it. Tracking how much of each advance has been recouped makes the netting
+-- correct over time instead of only on the day it was given.
+--
+-- Recovery is derived from the settlement itself: settlePayment already records
+-- `amount` (what was actually transferred) separately from `clips_total` (what
+-- the clips were worth). The gap between them is precisely what the admin held
+-- back, which is what an advance being repaid looks like in practice.
+ALTER TABLE payments ADD COLUMN recovered_amount INTEGER NOT NULL DEFAULT 0;

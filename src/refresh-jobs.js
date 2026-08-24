@@ -57,13 +57,18 @@ export async function jobAccounts(db, { clipperId = null } = {}) {
     `SELECT DISTINCT a.id AS account_id, a.platform, a.username, a.status,
             a.auto_import, a.access_token, a.external_id, a.meta_json,
             a.refresh_token, a.token_expires_at, a.connected_at,
-            p.campaign_id, p.clipper_id, c.allowed_platforms
+            p.campaign_id, p.clipper_id, p.status AS part_status, c.allowed_platforms
      FROM participation_accounts pa
      JOIN participations p ON p.id = pa.participation_id
      JOIN campaigns c ON c.id = p.campaign_id
      JOIN social_accounts a ON a.id = pa.account_id
      WHERE a.status = 'connected' AND a.access_token IS NOT NULL
-       AND p.status = 'active' AND c.status != 'completed'
+       -- Paused is included deliberately. The campaign page tells a paused
+       -- clipper "clips you already posted keep tracking and earning", and the
+       -- allocator does keep pricing them -- but excluding them here froze their
+       -- views, so they kept earning on a number that could never move. They are
+       -- refreshed; only NEW imports are withheld (see buildAccountItems).
+       AND p.status IN ('active', 'paused') AND c.status != 'completed'
        ${clipperId ? 'AND p.clipper_id = ?' : ''}
      ORDER BY p.campaign_id, a.id`
   ).bind(...(clipperId ? [clipperId] : [])).all();
@@ -83,7 +88,12 @@ export async function jobAccounts(db, { clipperId = null } = {}) {
 export async function buildAccountItems(db, account, { respectCooldown = true } = {}) {
   const items = [];
 
-  if (account.auto_import !== 0) items.push({ t: 'import', a: account.account_id });
+  // Paused means "submit nothing new", so the import leg is withheld while the
+  // view legs below still run. Without this, pausing a clipper would silently
+  // keep sweeping their uploads into the campaign.
+  if (account.auto_import !== 0 && account.part_status !== 'paused') {
+    items.push({ t: 'import', a: account.account_id });
+  }
 
   const { results } = await db.prepare(
     `SELECT id, ig_media_id, last_ok_sync_at FROM submissions
@@ -405,10 +415,10 @@ async function loadAccount(db, accountId, cache) {
   // reported success while writing nothing.
   const row = await db.prepare(
     `SELECT a.*, a.id AS account_id,
-            p.campaign_id, p.id AS participation_id, c.allowed_platforms
+            p.campaign_id, p.id AS participation_id, p.status AS part_status, c.allowed_platforms
      FROM social_accounts a
      LEFT JOIN participation_accounts pa ON pa.account_id = a.id
-     LEFT JOIN participations p ON p.id = pa.participation_id AND p.status = 'active'
+     LEFT JOIN participations p ON p.id = pa.participation_id AND p.status IN ('active', 'paused')
      LEFT JOIN campaigns c ON c.id = p.campaign_id
      WHERE a.id = ?
      ORDER BY pa.linked_at DESC
