@@ -81,6 +81,7 @@
     .streak-pill.on .ic, .streak-pill.hot .ic { filter:none; }
     .streak-best { font-size:.63rem; color:var(--muted); margin-top:.22rem; }
     /* Recency: only genuinely stale gets a warning colour. */
+    .clip-checked { font-size:.7rem; margin-top:.15rem; }
     .ago { font-size:.78rem; color:var(--text); white-space:nowrap; }
     .ago.fresh { color:var(--neon); }
     .ago.warn { color:var(--gold); }
@@ -1153,6 +1154,25 @@
     // visually inactive, so a clipper never mistakes a stuck clip for a live one.
     const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible']);
 
+    /* How long ago this clip's view count was last actually confirmed with the
+       platform. Without this the card showed a big confident number with no
+       hint of its age: routine syncing runs every 6 hours, so a clipper who had
+       just checked Instagram saw a smaller figure here and reasonably concluded
+       the tracking was broken. The number was never wrong, only stale and
+       presented as current. Reads last_ok_sync_at -- the last SUCCESSFUL fetch
+       -- never last_synced_at, which is stamped on failures too and would
+       therefore claim freshness a failing clip does not have. */
+    function checkedAgo(ts){
+      if(!ts) return '<span class="ago never">not checked yet</span>';
+      const mins=Math.floor((Date.now()-ts)/60000);
+      if(mins<2)  return '<span class="ago fresh">checked just now</span>';
+      if(mins<60) return `<span class="ago fresh">checked ${mins} min ago</span>`;
+      const hrs=Math.floor(mins/60);
+      if(hrs<24)  return `<span class="ago ${hrs<8?'':'warn'}">checked ${hrs}h ago</span>`;
+      const days=Math.floor(hrs/24);
+      return `<span class="ago cold">checked ${days} day${days===1?'':'s'} ago</span>`;
+    }
+
     function clipCard(c){
       const thumb=c.has_thumb
         ? `<img src="${c.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
@@ -1169,6 +1189,7 @@
             <div class="clip-v">${num(c.views)}<small>views</small></div>
             <div class="clip-e">${money(c.earning)}<small>${c.locked?'settled':'earned'}</small></div>
           </div>
+          ${c.locked?'':`<div class="clip-checked">${checkedAgo(c.last_ok_sync_at)}</div>`}
           ${c.locked?`<div class="clip-note lock">${c.lock_reason==='below_min'
               ? `Closed on ${when(c.locked_at)} — never reached the ${num(c.min_views)}-view minimum.`
               : `Paid and locked on ${when(c.paid_at||c.locked_at)}. This amount is final.`}</div>`:''}
@@ -1178,8 +1199,8 @@
           ${!c.locked&&c.state_message&&c.state!=='below_min'&&c.state!=='verified'?`<div class="clip-note">${esc(c.state_message)}</div>`:''}
           <div class="clip-actions">
             <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
-            ${!c.locked&&c.platform==='instagram'&&(c.state==='tracking'||c.state==='below_min'||c.state==='verified')
-              ?`<button class="clip-refresh-btn" title="Refresh just this clip (1 call)" onclick="refreshOneClip(${c.id},this)">↻</button>`:''}
+            ${!c.locked&&(c.state==='tracking'||c.state==='below_min'||c.state==='verified')
+              ?`<button class="clip-refresh-btn" title="${c.platform==='youtube'?'Refresh just this Short':'Refresh just this clip (1 call)'}" onclick="refreshOneClip(${c.id},this)">↻</button>`:''}
           </div>
         </div></div>`;
     }
