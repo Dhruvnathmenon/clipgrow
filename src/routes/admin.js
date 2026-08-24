@@ -157,7 +157,16 @@ export async function handleAdmin(request, env, url) {
     if (!clipper) return err('Not found', 404);
     const { results: accounts } = await env.DB.prepare('SELECT * FROM social_accounts WHERE clipper_id = ?').bind(params.id).all();
     const { results: parts } = await env.DB.prepare(
-      `SELECT p.*, c.name AS campaign_name, a.username AS account_username, a.status AS account_status
+      // participations.account_id is the legacy single-account column and is
+      // only ever maintained for Instagram, so joining through it shows the
+      // Instagram handle and silently hides an attached YouTube channel -- and
+      // shows nothing at all for a YouTube-only participation. linked_accounts
+      // resolves every platform through participation_accounts, which is the
+      // canonical table; the old fields stay for compatibility.
+      `SELECT p.*, c.name AS campaign_name, a.username AS account_username, a.status AS account_status,
+              (SELECT GROUP_CONCAT(a2.platform || ':' || COALESCE(a2.username,'') || ':' || a2.status, '|')
+                 FROM participation_accounts pa JOIN social_accounts a2 ON a2.id = pa.account_id
+                 WHERE pa.participation_id = p.id) AS linked_accounts
        FROM participations p JOIN campaigns c ON c.id = p.campaign_id
        LEFT JOIN social_accounts a ON a.id = p.account_id
        WHERE p.clipper_id = ?`).bind(params.id).all();
@@ -245,6 +254,9 @@ export async function handleAdmin(request, env, url) {
       `SELECT p.id, p.status, p.status_note, p.joined_at, p.clipper_id,
               cl.username, cl.display_name,
               a.username AS account_username, a.status AS account_status, a.account_type, a.last_error_code,
+              (SELECT GROUP_CONCAT(a2.platform || ':' || COALESCE(a2.username,'') || ':' || a2.status, '|')
+                 FROM participation_accounts pa JOIN social_accounts a2 ON a2.id = pa.account_id
+                 WHERE pa.participation_id = p.id) AS linked_accounts,
               (SELECT COUNT(*) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS videos,
               (SELECT COALESCE(SUM(views),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS views,
               (SELECT COALESCE(SUM(earning),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS earned

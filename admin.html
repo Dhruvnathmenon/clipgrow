@@ -526,6 +526,22 @@
       }
       return e;
     }
+    /* Renders every account linked to a participation, across platforms.
+       The old markup read participations.account_id, which is only maintained
+       for Instagram -- so an attached YouTube channel was invisible here, and a
+       YouTube-only participation read as "not connected". Also fixes the handle:
+       YouTube usernames already start with "@", Instagram's do not. */
+    function linkedAccounts(p, opts={}){
+      const raw=(p.linked_accounts||'').trim();
+      if(!raw) return opts.dash?'<span class="muted">&mdash;</span>':'<span class="muted">not connected</span>';
+      return raw.split('|').map(part=>{
+        const i=part.indexOf(':'), j=part.indexOf(':', i+1);
+        const platform=part.slice(0,i), handle=part.slice(i+1,j), status=part.slice(j+1);
+        const shown=platform==='youtube'?handle:'@'+handle;
+        return `<span class="acct-line">${esc(shown)}${opts.badge?` <span class="badge ${status}">${esc(status.replace('_',' '))}</span>`:''}</span>`;
+      }).join('<br>');
+    }
+
     async function api(path,opts={}){
       const isForm=opts.body instanceof FormData;
       const res=await fetch(path,{...opts,headers:isForm?(opts.headers||{}):{'Content-Type':'application/json',...(opts.headers||{})}});
@@ -1159,9 +1175,7 @@
             <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th><th>Earned</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${participants.map(p=>`<tr>
               <td class="handle">${esc(p.display_name||p.username)}</td>
-              <td>${p.account_username
-                  ? `@${esc(p.account_username)} <span class="badge ${p.account_status}">${esc((p.account_status||'').replace('_',' '))}</span>`
-                  : '<span class="muted">not connected</span>'}</td>
+              <td>${linkedAccounts(p,{badge:true})}</td>
               <td>${num(p.videos)}</td><td>${num(p.views)}</td><td class="money">${money(p.earned)}</td>
               <td><span class="badge ${p.status}">${p.status}</span></td>
               <td><div class="actions">
@@ -1288,7 +1302,7 @@
             <thead><tr><th>Campaign</th><th>Account</th><th>Status</th><th>Note</th><th></th></tr></thead>
             <tbody>${d.participations.map(p=>`<tr>
               <td>${esc(p.campaign_name)}</td>
-              <td class="muted">${p.account_username?'@'+esc(p.account_username):'—'}</td>
+              <td class="muted">${linkedAccounts(p,{dash:true})}</td>
               <td><span class="badge ${p.status}">${p.status}</span></td>
               <td class="muted">${esc(p.status_note||'')}</td>
               <td><div class="actions">
