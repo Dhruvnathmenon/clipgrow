@@ -100,7 +100,38 @@ export async function handleAdmin(request, env, url) {
              -- created_at measures from when tracking actually began.
              AND COALESCE(last_ok_sync_at, created_at) < ?) AS submissions_stuck`
     ).bind(Date.now() - STUCK_AFTER_MS).first();
-    return json({ overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid_against_earnings || 0)) } });
+
+    // The counts above say something is wrong; these say WHICH account, so the
+    // banner can name it. A count alone means opening every clipper in turn to
+    // find the one that needs attention.
+    const { results: problemAccounts } = await env.DB.prepare(
+      `SELECT a.id, a.platform, a.username, a.status, a.last_error_code,
+              COALESCE(cl.display_name, cl.username) AS clipper
+       FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
+       WHERE a.status = 'needs_reauth'
+          OR (a.status = 'connected' AND a.last_error_code LIKE 'IMPORT!_%' ESCAPE '!')
+       ORDER BY a.platform, cl.username`
+    ).all();
+
+    // Stuck clips grouped by account: five clips stuck on one account is one
+    // problem to go and look at, not five.
+    const { results: stuckAccounts } = await env.DB.prepare(
+      `SELECT a.platform, a.username, COALESCE(cl.display_name, cl.username) AS clipper,
+              COUNT(*) AS clips, MIN(COALESCE(s.last_ok_sync_at, s.created_at)) AS oldest
+       FROM submissions s
+       JOIN clippers cl ON cl.id = s.clipper_id
+       LEFT JOIN social_accounts a ON a.id = s.account_id
+       WHERE s.sync_error IS NOT NULL AND s.status = 'active' AND s.locked_at IS NULL
+         AND COALESCE(s.last_ok_sync_at, s.created_at) < ?
+       GROUP BY s.account_id
+       ORDER BY clips DESC`
+    ).bind(Date.now() - STUCK_AFTER_MS).all();
+
+    return json({
+      overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid_against_earnings || 0)) },
+      problem_accounts: problemAccounts || [],
+      stuck_accounts: stuckAccounts || []
+    });
   }
 
   // ------------------------------------------------------- blueprint parse

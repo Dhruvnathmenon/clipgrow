@@ -58,6 +58,8 @@
        independent invocations regardless of any open connection, so a dropped
        connection or a closed tab can never lose progress -- reopening just
        resumes polling the same job id. */
+    .trouble { margin-top:.5rem; font-size:.82rem; line-height:1.5; display:flex; align-items:baseline; gap:.45rem; flex-wrap:wrap; }
+    .trouble strong { color:var(--white); }
     .job-panel { position:fixed; right:1rem; bottom:1rem; width:min(380px,calc(100vw - 2rem)); z-index:400;
       background:var(--card); border:1px solid var(--border-s); border-radius:12px; padding:1rem 1.1rem;
       box-shadow:0 18px 44px rgba(0,0,0,.55); display:none; }
@@ -1033,8 +1035,27 @@
     };
 
     /* ---------- overview ---------- */
+    /* Why an account is in trouble, in the words an admin needs to act on. */
+    const ACCOUNT_TROUBLE={
+      REAUTH_TOKEN_UPGRADE:'one-time reconnect after the Google app was published',
+      TOKEN_REVOKED:'access was withdrawn on the platform',
+      TOKEN_EXPIRED:'the connection expired',
+      PERMISSION_MISSING:'a permission was left unticked when connecting',
+      NOT_A_TESTER:'not on the platform’s approved list'
+    };
+
+    /* One line per account, naming it, so the admin knows where to look
+       instead of opening every clipper in turn to find the broken one. */
+    function troubleLine(a){
+      const handle=a.platform==='youtube'?esc(a.username||''):'@'+esc(a.username||'');
+      const why=ACCOUNT_TROUBLE[a.last_error_code]
+        ||(String(a.last_error_code||'').startsWith('IMPORT_')?'new uploads are not being picked up':'needs attention');
+      return `<div class="trouble"><span class="badge ${platBadge(a.platform)}">${platName(a.platform)}</span>
+        <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>`;
+    }
+
     async function loadOverview(){
-      const {overview:o}=await api('/api/admin/overview');
+      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[]}=await api('/api/admin/overview');
       document.getElementById('overview').innerHTML=`
         <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
         <div class="stat"><div class="stat-val w">${num(o.active_campaigns)}</div><div class="stat-lbl">Active Campaigns</div></div>
@@ -1050,17 +1071,30 @@
       // what would have surfaced the sync batch-isolation bug immediately
       // instead of it only being found by manually querying the database.
       const urgent=[];
-      if(o.accounts_needing_reauth>0) urgent.push(`${o.accounts_needing_reauth} account(s) need reconnecting by their clipper`);
-      if(o.submissions_stuck>0) urgent.push(`${o.submissions_stuck} video(s) have not synced successfully in 12+ hours — investigate`);
+      // Named rather than counted. "3 accounts need reconnecting" means opening
+      // every clipper to find which three; the handle and the clipper's name
+      // mean going straight to the one that is broken.
+      if(problems.length) urgent.push(problems.map(troubleLine).join(''));
+      else if(o.accounts_needing_reauth>0) urgent.push(`${o.accounts_needing_reauth} account(s) need reconnecting by their clipper`);
+      if(stuck.length) urgent.push(stuck.map(a=>{
+        const handle=a.username?(a.platform==='youtube'?esc(a.username):'@'+esc(a.username)):'no linked account';
+        const days=a.oldest?Math.floor((Date.now()-a.oldest)/86400000):null;
+        const age=days==null?'':days>=1?` for ${days} day${days===1?'':'s'}`:' for 12h+';
+        return `<div class="trouble"><span class="badge ${platBadge(a.platform||'instagram')}">${platName(a.platform||'instagram')}</span>
+          <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s) not syncing${age}</div>`;
+      }).join(''));
+      else if(o.submissions_stuck>0) urgent.push(`${o.submissions_stuck} video(s) have not synced successfully in 12+ hours — investigate`);
       // An import failure is invisible by nature: existing clips keep syncing,
       // so nothing looks broken while new uploads quietly stop arriving.
-      if(o.accounts_import_failing>0) urgent.push(`${o.accounts_import_failing} account(s) failed to import new videos — new uploads may not be appearing`);
+      // Import failures already appear by name in problem_accounts above; only
+      // fall back to the bare count if that list could not be built.
+      if(!problems.length && o.accounts_import_failing>0) urgent.push(`${o.accounts_import_failing} account(s) failed to import new videos — new uploads may not be appearing`);
       const soft=[];
       const passing=o.submissions_with_errors-o.submissions_stuck;
       if(passing>0) soft.push(`${passing} video(s) hit a transient sync error, expected to clear on the next sync`);
 
       document.getElementById('health').innerHTML =
-        (urgent.length?`<div class="alert bad"><strong>Needs attention:</strong> ${urgent.join(' · ')}</div>`:'') +
+        (urgent.length?`<div class="alert bad"><strong>Needs attention</strong>${urgent.join('')}</div>`:'') +
         (soft.length?`<div class="alert info" style="margin-top:.6rem"><strong>FYI:</strong> ${soft.join(' · ')}</div>`:'');
     }
 
