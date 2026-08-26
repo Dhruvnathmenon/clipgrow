@@ -9,7 +9,7 @@ const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 // a call needs one, so YouTube accounts are deliberately not swept here.
 const PROACTIVE_REFRESH_PLATFORMS = ['instagram'];
 
-async function markAccount(db, accountId, { status, code }) {
+export async function markAccount(db, accountId, { status, code }) {
   await db.prepare(
     'UPDATE social_accounts SET status = ?, last_error_code = ?, last_error_at = ?, last_checked_at = ? WHERE id = ?'
   ).bind(status, code || null, code ? Date.now() : null, Date.now(), accountId).run();

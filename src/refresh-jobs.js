@@ -20,7 +20,7 @@
 //     file defers to it rather than reimplementing it.
 
 import { getAdapter, campaignPlatforms } from './platforms.js';
-import { withAccount } from './earnings.js';
+import { withAccount, markAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
 
@@ -288,6 +288,16 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
       // the per-clip sync already follows.
       stats.failed += countClips(item);
       recordAccountError(acctStats, item.a, account, e);
+      // The job's own JSON is thrown away when the panel closes. An auth
+      // failure has to land on the ACCOUNT row too, because that is what every
+      // screen reads to decide whether to warn the clipper and offer Reconnect.
+      // Without this a revoked YouTube token showed only as a flash in the
+      // refresh panel: the account kept reading 'connected', no banner
+      // appeared, no Reconnect button appeared, and the clipper just saw their
+      // view counts quietly stop moving.
+      if (e && e.needsReauth) {
+        await markAccount(db, item.a, { status: 'needs_reauth', code: (e && e.code) || 'UNKNOWN' });
+      }
     }
 
     calls += Math.max(counter.count() - before, cost === ITEM_COST.import ? 0 : cost);
@@ -523,6 +533,11 @@ async function runViews(db, env, account, item, counter, adapters) {
 
   const now = Date.now();
   let ok = 0, failed = 0, skipped = 0;
+  // An auth failure can arrive per-clip rather than as a thrown error -- the
+  // adapters return {ok:false, code, needsReauth} for each id in a batch. That
+  // still means the whole account needs reconnecting, so it has to reach the
+  // account row the same way a thrown one does.
+  let authFailureCode = null;
 
   for (let i = 0; i < ids.length; i++) {
     const r = results && results.get ? results.get(ids[i]) : null;
@@ -536,6 +551,7 @@ async function runViews(db, env, account, item, counter, adapters) {
       continue;
     }
     if (!r.ok) {
+      if (r.needsReauth) authFailureCode = r.code || 'UNKNOWN';
       const changed = await writeGuarded(db,
         'UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL',
         [r.code, now, subId]);
@@ -546,6 +562,13 @@ async function runViews(db, env, account, item, counter, adapters) {
       'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ? AND locked_at IS NULL',
       [r.views, now, now, subId]);
     changed ? ok++ : skipped++;
+  }
+
+  // Only flag when nothing succeeded. A batch where some clips read fine is a
+  // per-video problem, not a dead token, and flagging there would tell a
+  // clipper to reconnect a connection that is working.
+  if (authFailureCode && ok === 0) {
+    await markAccount(db, account.account_id || account.id, { status: 'needs_reauth', code: authFailureCode });
   }
 
   return { ok, failed, skipped };

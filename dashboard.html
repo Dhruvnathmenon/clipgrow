@@ -81,6 +81,11 @@
     .streak-pill.on .ic, .streak-pill.hot .ic { filter:none; }
     .streak-best { font-size:.63rem; color:var(--muted); margin-top:.22rem; }
     /* Recency: only genuinely stale gets a warning colour. */
+    .conn-alert { margin-top:.8rem; padding:.8rem .9rem; border-radius:8px;
+      background:rgba(255,77,77,.08); border:1px solid rgba(255,77,77,.28); }
+    .conn-t { font-size:.82rem; font-weight:700; color:var(--red); margin-bottom:.25rem; }
+    .conn-b { font-size:.76rem; color:var(--text); }
+    .conn-ok { font-size:.72rem; color:var(--muted-l); margin:.45rem 0 .6rem; }
     .clip-checked { font-size:.7rem; margin-top:.15rem; }
     .ago { font-size:.78rem; color:var(--text); white-space:nowrap; }
     .ago.fresh { color:var(--neon); }
@@ -735,8 +740,12 @@
       }
 
       if(a.status==='needs_reauth'||a.status==='revoked'){
-        return alertBox('bad',`${label} connection needs attention`,`We can no longer read views from ${handle}.`,
-          'Reconnect the same account — your earnings are safe.',
+        // Name the actual cause where we know it. "Needs attention" alone reads
+        // as our fault and gives the clipper nothing to check on their side.
+        const why=CONNECTION_HELP[a.last_error_code]
+          ||`We can no longer read views from ${handle}.`;
+        return alertBox('bad',`${label} needs reconnecting`, why,
+          'Your videos and earnings are safe. Reconnecting the same account resumes tracking straight away — nothing has to be added again.',
           `<a class="btn btn-warn" href="${startUrl}">Reconnect ${handle}</a>`);
       }
 
@@ -1221,6 +1230,39 @@
     }
 
     /* ── accounts ── */
+
+    /* What a broken connection means and what to do about it, in plain words.
+       A token can lapse for reasons the clipper never sees -- Google expires
+       long-lived grants, and a password change or a "remove access" tap in
+       account settings revokes them outright. Before this, the only symptom was
+       their view counts quietly going stale. */
+    const CONNECTION_HELP={
+      TOKEN_REVOKED:'Access was withdrawn — usually a password change, or the app being removed in your account settings.',
+      TOKEN_EXPIRED:'The connection reached its expiry date. Platforms cap how long access can last.',
+      PERMISSION_MISSING:'A permission this needs was turned off.',
+      NOT_A_TESTER:'This account is no longer on the approved list.'
+    };
+
+    /* The reassurance is the point: a clipper who thinks reconnecting means
+       re-adding every video will avoid doing it. Reconnecting the SAME account
+       updates the existing row -- same account id, clips untouched, and
+       connected_at is left alone so nothing has to be re-added. */
+    function connectionAlert(a){
+      if(a.status==='connected') return '';
+      const site=a.platform==='youtube'?'YouTube':'Instagram';
+      const why=CONNECTION_HELP[a.last_error_code]||'We can no longer read view counts from this account.';
+      const url='/api/auth/'+(a.platform==='youtube'?'youtube':'instagram')+'/start'
+                +(a.campaign_id?'?campaign_id='+a.campaign_id:'');
+      return `<div class="conn-alert">
+        <div class="conn-t">⚠ ${site} needs reconnecting</div>
+        <div class="conn-b">${esc(why)}</div>
+        <div class="conn-ok">Your videos and earnings are safe. Reconnecting the same account picks up exactly where it left off — you do not need to add anything again.</div>
+        ${a.campaign_id
+          ? `<a class="btn btn-warn btn-sm" href="${url}">Reconnect ${site}</a>`
+          : '<div class="conn-b" style="margin-top:.5rem">Open the campaign this account posts for to reconnect it.</div>'}
+      </div>`;
+    }
+
     async function loadAccounts(){
       const el=document.getElementById('acct-list');
       try{
@@ -1239,8 +1281,7 @@
               </div>
               <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
                 <span class="badge ${a.status}">${a.status==='connected'?'✓ Verified':esc(a.status.replace('_',' '))}</span>
-                ${a.status!=='connected'&&a.campaign_id?`<a class="btn btn-warn btn-sm" href="/api/auth/${a.platform==='youtube'?'youtube':'instagram'}/start?campaign_id=${a.campaign_id}">Reconnect</a>`:''}
-              </div></div></div>`).join('')
+              </div></div>${connectionAlert(a)}</div>`).join('')
           : '<div class="card"><p class="muted" style="font-size:.85rem">No accounts connected yet. Open a campaign and connect the Instagram account you\'ll post from.</p></div>')
           + locked;
       }catch(e){ el.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
