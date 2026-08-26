@@ -35,16 +35,37 @@ export const IDENTIFIER_SPEC = {
     }
   },
   youtube: {
-    label: 'Google account email',
-    placeholder: 'you@gmail.com',
-    hint: 'The Google account that owns your YouTube channel. ClipGrow has to grant this exact address access before you can connect.',
-    normalise: (v) => String(v || '').trim().toLowerCase(),
+    // Used to be the Google account email, because that address had to be
+    // pasted into the Cloud Console's Test users list before Google would let
+    // the clipper through. The app is published now, so any Google account
+    // can connect and no allowlisting happens. What is still worth a human
+    // step is checking the CHANNEL is real and suits the campaign -- so this
+    // asks for the channel, which is the thing actually being approved.
+    label: 'YouTube channel',
+    placeholder: '@yourchannel',
+    hint: 'The channel you will post Shorts from. ClipGrow checks it suits the campaign, then you connect it yourself.',
+    normalise: (v) => {
+      let s = String(v || '').trim();
+      // Accept a pasted channel URL as well as a bare handle -- copying the
+      // address out of the browser is the common case -- and store the
+      // handle either way.
+      const at = s.indexOf('@');
+      if (at >= 0 && s.toLowerCase().includes('youtube.com/')) {
+        s = s.slice(at).split('/')[0].split('?')[0].split('#')[0];
+      }
+      while (s.startsWith('@')) s = s.slice(1);
+      return s.trim();
+    },
     validate: (v) => {
-      if (!v) return 'Enter the Google account email for your channel';
-      // Deliberately permissive: the address only has to be good enough to
-      // paste into Google Cloud Console, and over-strict email regexes reject
-      // valid addresses far more often than they catch typos.
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'That does not look like an email address';
+      if (!v) return 'Enter your YouTube channel';
+      // Lenient on purpose: a person reads this, nothing is matched against
+      // it, and a channel NAME with spaces identifies the channel just as
+      // well as a handle. Only obvious mistakes are worth rejecting.
+      if (v.includes('@') && v.includes('.')) {
+        return 'That looks like an email address. Enter your YouTube channel instead, for example @yourchannel';
+      }
+      if (v.length < 2) return 'That is too short to be a channel name';
+      if (v.length > 100) return 'That is too long to be a channel name';
       return null;
     }
   }
@@ -100,7 +121,7 @@ export function accessGuidance(state, platform, request) {
       return {
         title: `Step 1 of 2 — request ${label} access`,
         body: isYt
-          ? 'Tell us the Google account that owns your channel. ClipGrow has to grant it access before YouTube will let you connect.'
+          ? 'Tell us the channel you will post from, so ClipGrow can check it suits this campaign. Once it is approved you connect it yourself.'
           : `Tell us the Instagram account you will post from. ClipGrow has to add it as an approved tester before Instagram will let you connect.`,
         action: 'request'
       };
@@ -108,7 +129,7 @@ export function accessGuidance(state, platform, request) {
       return {
         title: `Step 1 of 2 — waiting for ClipGrow`,
         body: isYt
-          ? `We have your address (${request ? request.identifier : ''}) and are granting it access. This is a manual step on our side, usually within a day. You will see the Connect button here as soon as it is done.`
+          ? `We have your channel (@${request ? request.identifier : ''}) and are checking it over. This is a manual step on our side, usually within a day. You will see the Connect button here as soon as it is done.`
           : `We have your handle (@${request ? request.identifier : ''}) and are adding it as an approved tester. This is a manual step on our side, usually within a day. You will see the Connect button here as soon as it is done.`,
         action: 'wait'
       };
@@ -124,7 +145,7 @@ export function accessGuidance(state, platform, request) {
       return {
         title: `Step 2 of 2 — connect ${label}`,
         body: isYt
-          ? 'Your Google account has been granted access. Click Connect, sign in with that same Google account, and approve every permission it asks for.'
+          ? 'Your channel is approved. Click Connect, sign in with the Google account that owns it, and allow every permission. Google shows an "unverified app" warning on the way -- click Advanced, then "Go to clipgrow.in", which is safe while our review is pending. You only do this once.'
           : 'Your account has been approved. Instagram will have sent you a tester invite — accept it in the Instagram app under Settings and privacy → Apps and websites → Tester invites, then click Connect and tap Allow on every permission.',
         action: 'connect'
       };

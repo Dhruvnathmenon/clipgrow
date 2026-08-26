@@ -702,8 +702,8 @@
           <div class="alert-t">${label} not connected</div>
           <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect ${label}</a></div></div>`;
 
-        const idLabel=isYt?'Google account email':'Instagram username';
-        const idPlaceholder=isYt?'you@gmail.com':'yourhandle';
+        const idLabel=isYt?'YouTube channel':'Instagram username';
+        const idPlaceholder=isYt?'@yourchannel':'yourhandle';
 
         if(acc.state==='none'||acc.state==='rejected'){
           return `<div class="alert ${acc.state==='rejected'?'bad':'warn'}">
@@ -725,7 +725,7 @@
             <div>${esc(acc.body)}</div>
             <div class="step-row" style="margin-top:.7rem">
               <button class="btn btn-ghost btn-sm" onclick="loadCampaigns().then(()=>openCampaign(${c.id}))">Check again</button>
-              <button class="btn btn-ghost btn-sm" onclick="reRequestAccess(${c.id},'${plat}')">Wrong ${isYt?'email':'username'}? Change it</button>
+              <button class="btn btn-ghost btn-sm" onclick="reRequestAccess(${c.id},'${plat}')">Wrong ${isYt?'channel':'username'}? Change it</button>
             </div>
           </div>`;
         }
@@ -1413,7 +1413,7 @@
     window.requestAccess=async function(campaignId,platform){
       const input=document.getElementById(`ar-${platform}-${campaignId}`);
       const identifier=((input&&input.value)||'').trim();
-      if(!identifier){ toast(platform==='youtube'?'Enter your Google account email':'Enter your Instagram username',true); return; }
+      if(!identifier){ toast(platform==='youtube'?'Enter your YouTube channel':'Enter your Instagram username',true); return; }
       try{
         await api('/api/clipper/access-request',{method:'POST',
           body:JSON.stringify({identifier,platform,campaign_id:campaignId})});
@@ -1427,7 +1427,7 @@
        the pending request rather than queuing a second one for the admin. */
     window.reRequestAccess=async function(campaignId,platform){
       const isYt=platform==='youtube';
-      const next=prompt(isYt?'Google account email for your channel:':'Your Instagram username:');
+      const next=prompt(isYt?'Your YouTube channel (for example @yourchannel):':'Your Instagram username:');
       if(next===null) return;
       const identifier=next.trim();
       if(!identifier) return;
