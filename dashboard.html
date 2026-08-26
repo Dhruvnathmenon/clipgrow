@@ -86,6 +86,10 @@
     .conn-t { font-size:.82rem; font-weight:700; color:var(--red); margin-bottom:.25rem; }
     .conn-b { font-size:.76rem; color:var(--text); }
     .conn-ok { font-size:.72rem; color:var(--muted-l); margin:.45rem 0 .6rem; }
+    .yt-steps { margin-top:.85rem; padding:.8rem .95rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:8px; font-size:.82rem; }
+    .yt-steps ol { margin:.5rem 0 0 1.1rem; padding:0; }
+    .yt-steps li { margin-bottom:.35rem; line-height:1.5; }
+    .yt-steps strong { color:var(--white); }
     .clip-checked { font-size:.7rem; margin-top:.15rem; }
     .ago { font-size:.78rem; color:var(--text); white-space:nowrap; }
     .ago.fresh { color:var(--neon); }
@@ -739,6 +743,28 @@
         }
       }
 
+      // A one-time reconnect after moving the Google app out of testing mode.
+      // Worth its own block rather than a line in CONNECTION_HELP: nothing is
+      // broken, the clipper has to walk past a scary-looking Google warning
+      // that only appears while our review is pending, and being told exactly
+      // what to click is the difference between reconnecting and giving up.
+      if(isYt&&a.last_error_code==='REAUTH_TOKEN_UPGRADE'&&(a.status==='needs_reauth'||a.status==='revoked')){
+        return `<div class="alert warn">
+          <div class="alert-t">One-time reconnect needed for ${handle}</div>
+          <div>We have upgraded how ClipGrow connects to YouTube. Reconnect once and it stays connected permanently — you will not be asked again unless you remove it yourself.</div>
+          <div class="alert-fix">Your videos, views and earnings are all safe. Nothing has to be added again.</div>
+          <div class="yt-steps">
+            <strong>Google will show a warning screen on the way. That is expected — here is exactly what to click:</strong>
+            <ol>
+              <li>Choose the Google account that owns <strong>${handle}</strong>.</li>
+              <li>On the “Google hasn’t verified this app” screen, click <strong>Advanced</strong> at the bottom.</li>
+              <li>Click <strong>Go to clipgrow.in (unsafe)</strong>. It is safe — that wording shows only because our Google review is still in progress.</li>
+              <li>Leave every permission ticked and press <strong>Continue</strong>.</li>
+            </ol>
+          </div>
+          <div style="margin-top:.85rem"><a class="btn btn-warn" href="${startUrl}">Reconnect ${handle}</a></div>
+        </div>`;
+      }
       if(a.status==='needs_reauth'||a.status==='revoked'){
         // Name the actual cause where we know it. "Needs attention" alone reads
         // as our fault and gives the clipper nothing to check on their side.
@@ -1240,7 +1266,8 @@
       TOKEN_REVOKED:'Access was withdrawn — usually a password change, or the app being removed in your account settings.',
       TOKEN_EXPIRED:'The connection reached its expiry date. Platforms cap how long access can last.',
       PERMISSION_MISSING:'A permission this needs was turned off.',
-      NOT_A_TESTER:'This account is no longer on the approved list.'
+      NOT_A_TESTER:'This account is no longer on the approved list.',
+      REAUTH_TOKEN_UPGRADE:'We have upgraded how ClipGrow connects to YouTube. One reconnect and it stays connected for good.'
     };
 
     /* The reassurance is the point: a clipper who thinks reconnecting means
