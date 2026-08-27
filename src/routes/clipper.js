@@ -13,14 +13,9 @@ import {
 } from '../access.js';
 import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
-import { syncAccountClips, reallocateCampaign, reallocateAll } from '../earnings.js';
+import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
-import { createRefreshJob, advanceJob, getJob, publicJob, retryJob } from '../refresh-jobs.js';
 
-// Manual refresh cooldown. Instagram allows roughly 200 calls per user per
-// hour and each clip costs one call, so this keeps a clipper well inside it
-// even with a full 40-clip refresh every time.
-const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 
 // Clip status lives in src/clipstate.js so the clipper dashboard, the admin
 // panel and the client portal can never describe the same clip differently.
@@ -96,11 +91,7 @@ export async function handleClipper(request, env, url) {
         display_name: me.display_name || me.username,
         status: me.status, read_only: readOnly
       },
-      money, streak, totals,
-      refresh: {
-        cooldown_ms: MANUAL_SYNC_COOLDOWN_MS,
-        next_allowed_at: (me.last_manual_sync_at || 0) + MANUAL_SYNC_COOLDOWN_MS
-      }
+      money, streak, totals
     });
   }
 
@@ -316,67 +307,14 @@ export async function handleClipper(request, env, url) {
   }
 
   // ----------------------------------------------------------- submissions
-  // ------------------------------------------------------- manual refresh
-  if (pathname === '/api/clipper/refresh' && method === 'POST') {
-    const blocked = blockIfReadOnly();
-    if (blocked) return blocked;
-
-    const last = me.last_manual_sync_at || 0;
-    const waitMs = last + MANUAL_SYNC_COOLDOWN_MS - Date.now();
-    if (waitMs > 0) {
-      return json({
-        error: `Views were just refreshed. You can refresh again in ${Math.ceil(waitMs / 1000)}s.`,
-        retry_in_ms: waitMs
-      }, 429);
-    }
-
-    // Stamp before syncing: if the sync throws halfway, the cooldown still
-    // applies, so a failing account can't be retried in a tight loop.
-    await env.DB.prepare('UPDATE clippers SET last_manual_sync_at = ? WHERE id = ?')
-      .bind(Date.now(), clipperId).run();
-
-    // Tier 2: a chained job over every campaign this clipper is active in and
-    // every account under each. respectCooldown false -- a human pressing
-    // Refresh is asking for the truth right now, not a cheap top-up.
-    const created = await createRefreshJob(env.DB, {
-      kind: 'clipper', clipperId, triggeredBy: 'clipper', respectCooldown: false
-    });
-    if (created.error) {
-      return json({ error: created.error, job_id: created.job_id }, created.status || 409);
-    }
-
-    // Run the first chunk inline so the UI has real progress immediately
-    // instead of showing an empty job while the first queue message lands.
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
-    const job = await getJob(env.DB, created.job_id);
-
-    return json({
-      ok: true, job_id: created.job_id, job: publicJob(job),
-      first_chunk: { calls: first.calls, done: first.done },
-      cooldown_ms: MANUAL_SYNC_COOLDOWN_MS
-    });
-  }
-
-  // Progress for a refresh job. Polled by the panel; a clipper may only read
-  // their own jobs.
-  params = matchPath('/api/clipper/refresh/:jobId', pathname);
-  if (params && method === 'GET') {
-    const job = await getJob(env.DB, Number(params.jobId));
-    if (!job || job.clipper_id !== clipperId) return err('Not found', 404);
-    return json({ job: publicJob(job), money: await clipperFinancials(env.DB, clipperId) });
-  }
-
-  params = matchPath('/api/clipper/refresh/:jobId/retry', pathname);
-  if (params && method === 'POST') {
-    const blocked = blockIfReadOnly();
-    if (blocked) return blocked;
-    const job = await getJob(env.DB, Number(params.jobId));
-    if (!job || job.clipper_id !== clipperId) return err('Not found', 404);
-    const r = await retryJob(env.DB, env, Number(params.jobId));
-    if (r.error) return err(r.error, r.status || 400);
-    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: () => reallocateAll(env.DB) });
-    return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
-  }
+  // The clipper-triggered full refresh used to live here. It spawned a chained
+  // job across every campaign and account the clipper was active in, which
+  // competed with the cron and the admin for the same per-account locks and
+  // gave the clipper a progress bar to watch instead of an answer. Views are
+  // now refreshed solely by the 6-hourly cron, and the dashboard shows a
+  // countdown to the next sweep. Refreshing ONE clip is still available below
+  // (/submissions/:id/refresh): a single call, answered immediately, and
+  // capped by the account's real hourly budget.
 
   // --------------------------------------------------- Instagram call budget
   // Real, dynamic usage for the specific Instagram account driving this
