@@ -64,6 +64,18 @@ export const IG_ERRORS = {
     'Reconnect the account and make sure you leave every permission checkbox ticked on the Instagram approval screen.',
     { needsReauth: true }
   ),
+  // Instagram's real, permanent refusal for a post published before the
+  // account switched from Personal to Business/Creator -- confirmed against
+  // subcode 2108006 directly against the live API. No permission, reconnect,
+  // or admin action changes this; it is a fact about when the post was made.
+  // Deliberately NOT needsReauth: flagging the account for this would send a
+  // clipper through a reconnect that can never fix it.
+  PRE_CONVERSION_MEDIA: () => new IgError(
+    'PRE_CONVERSION_MEDIA',
+    'This was posted before the account switched to Business/Creator, so Instagram will never share its view count.',
+    'This is permanent -- Instagram does not provide insights for posts from before the switch, no matter what. It will never earn; there is nothing to fix by reconnecting.',
+    { needsReauth: false }
+  ),
   NOT_A_TESTER: () => new IgError(
     'NOT_A_TESTER',
     'This Instagram account has not been given access to the ClipGrow app yet.',
@@ -122,7 +134,10 @@ export const IG_ERRORS = {
 // as `error_type` / `code` / `error_message`. Reading only the Graph shape made
 // every token-exchange failure collapse into a blank UNKNOWN, hiding the real
 // reason (bad client secret, redirect_uri mismatch, reused code, ...).
-function classify(status, body) {
+// Exported only for classify.test.mjs / pre-conversion-media.test.mjs, which
+// need to assert on real Graph API error bodies without mocking fetch(). Not
+// part of the module's intended public surface otherwise.
+export function classify(status, body) {
   const e = (body && body.error) || {};
   const code = e.code != null ? e.code : (body && body.code);
   const sub = e.error_subcode;
@@ -154,6 +169,10 @@ function classify(status, body) {
     return IG_ERRORS.PERMISSION_MISSING();
   }
   if (code === 100) {
+    // Checked before the message-text branches: this has a stable numeric
+    // subcode, so it should never depend on Instagram's wording matching a
+    // pattern the way the fallback below has to.
+    if (sub === 2108006) return IG_ERRORS.PRE_CONVERSION_MEDIA();
     if (/does not exist|cannot be loaded|unsupported get request/i.test(msg)) return IG_ERRORS.MEDIA_NOT_FOUND();
     if (/metric/i.test(msg)) return IG_ERRORS.INSIGHTS_UNAVAILABLE();
     return IG_ERRORS.PERMISSION_MISSING();

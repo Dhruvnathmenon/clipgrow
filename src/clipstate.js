@@ -31,6 +31,10 @@ export function clipState(s) {
 
   if (s.sync_error) {
     if (s.sync_error === 'MEDIA_NOT_FOUND') return 'removed';
+    // Permanent and explained, same footing as 'removed': there is a fact
+    // about this clip that will never change, so it should read as settled
+    // information rather than an open problem waiting on anyone.
+    if (s.sync_error === 'PRE_CONVERSION_MEDIA') return 'no_insights';
     if (s.sync_error === 'NO_ACCOUNT') return 'disconnected';
     if (s.sync_error === 'TOKEN_EXPIRED' || s.sync_error === 'TOKEN_REVOKED' ||
         s.sync_error === 'PERMISSION_MISSING' || s.sync_error === 'NOT_A_TESTER') {
@@ -81,6 +85,11 @@ export function clipStateMessage(state, s) {
         : 'Paid and closed. Views after the lock date do not change the amount.';
     case 'removed':
       return `This post is no longer on ${site}, so its views cannot be checked. ${staleNote}`;
+    case 'no_insights':
+      // No staleNote here on purpose -- appending "views last updated X days
+      // ago" to a clip that can never update would read as if it is broken
+      // and getting worse, when the true fact is it was never going to work.
+      return `Instagram does not provide view counts for anything posted before this account switched to Business/Creator. This one predates that switch, so it can never earn.`;
     case 'disconnected':
       return `The ${site} account this clip was posted from is disconnected. ${staleNote}`;
     case 'reconnect':

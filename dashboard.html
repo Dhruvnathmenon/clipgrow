@@ -438,8 +438,7 @@
       <div class="page-head clips-head">
         <div><h1>My Clips</h1><p>Views are pulled straight from the platform you posted on — no manual reporting</p></div>
         <div class="refresh-wrap">
-          <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ Refresh views</button>
-          <div class="note refresh-note">Updates automatically every 6 hours</div>
+          <div class="note next-sweep">Next automatic check…</div>
         </div>
       </div>
       <div id="clips-budget-row" class="clips-budget-row"></div>
@@ -617,7 +616,7 @@
       const part=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
       document.getElementById('greet').textContent=`${part}, ${name}`;
 
-      if(d.refresh){ NEXT_REFRESH_AT=d.refresh.next_allowed_at||0; paintRefresh(); }
+      paintNextRefresh();
 
       if(d.clipper.read_only){
         document.getElementById('ro-banner').innerHTML=alertBox('warn','Account disabled — view only',
@@ -841,8 +840,8 @@
           });
           // One refresh control for the whole campaign, not one per platform.
           action+=`<div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
-              <button class="btn btn-ghost btn-sm refresh-btn" onclick="manualRefresh()">↻ ${manualOnly?'Refresh views':'Check for new clips &amp; views'}</button>
-              <div class="note refresh-note">Updates automatically every 6 hours</div>
+              <div class="note next-sweep">Next automatic check…</div>
+              <div class="note" style="margin-top:.25rem">Use ↻ on a video to check that one now.</div>
             </div>
             <div class="submit-row">
               <input type="url" id="d-url" placeholder="${manualOnly?`Paste your campaign ${what} link here`:`Paste a link to add an older ${what}`}" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
@@ -987,188 +986,50 @@
        ceiling. So this POLLS the job rather than holding a stream open -- the
        work continues regardless of this page, and closing the tab loses only
        the view, never the job. */
-    let JOB_POLL=null, JOB_STATUS_URL=null, JOB_HOVER=false;
-
-    function jobPanelEl(){
-      let el=document.getElementById('job-panel');
-      if(!el){
-        el=document.createElement('div');
-        el.id='job-panel'; el.className='job-panel';
-        el.addEventListener('mouseenter',()=>{JOB_HOVER=true;});
-        el.addEventListener('mouseleave',()=>{JOB_HOVER=false;});
-        document.body.appendChild(el);
-      }
-      return el;
-    }
-
-    window.closeJobPanel=function(){
-      const el=document.getElementById('job-panel');
-      if(el) el.classList.remove('on');
-      if(JOB_POLL){ clearInterval(JOB_POLL); JOB_POLL=null; }
-    };
-
-    function renderJob(j){
-      const el=jobPanelEl();
-      el.classList.add('on');
-      const total=j.total||0, done=(j.clips_fetched||0)+(j.clips_failed||0)+(j.clips_skipped||0);
-      const pct=total>0?Math.round(100*done/total):(j.status==='done'?100:0);
-      const finished=j.status==='done';
-
-      // A job with no work at all is a real outcome (everything already
-      // paid/locked, or nothing connected yet) -- saying "0 of 0" leaves
-      // someone wondering whether it silently failed.
-      const nothingToDo=finished&&total===0;
-      const title=nothingToDo?'Nothing to refresh'
-        :finished?'Refresh complete'
-        :j.stalled?'Refresh stalled'
-        :j.kind==='global'?'Refreshing every account':'Refreshing your videos';
-
-      // One line per account, as a checklist. The video count is what actually
-      // means something to a person; the Instagram call budget is shown only
-      // where it exists (YouTube batches 50 videos per call, so it has no
-      // comparable per-account figure and used to render as a bare "batched").
-      const rows=Object.entries(j.accounts||{}).map(([id,a])=>{
-        const st=a.error?'error':(a.state||'waiting');
-        const icon=st==='done'?'✓':st==='error'?'!':st==='working'?'⟳':'○';
-        const count=a.total?`${num(a.done||0)}/${num(a.total)} videos`:'no videos';
-        const note=a.error?esc(a.error)
-          :(a.limit!=null?`${num(a.remaining)} of ${num(a.limit)} calls left`:'');
-        return `<div class="job-row ${st}">
-          <span class="job-ic">${icon}</span>
-          <span class="job-name">${esc(a.label||('#'+id))}</span>
-          <span class="job-count">${count}</span>
-          ${note?`<span class="job-note">${note}</span>`:''}
-        </div>`;
-      }).join('');
-
-      el.innerHTML=`
-        <div class="job-head">
-          <div class="job-title">${esc(title)}</div>
-          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
-        </div>
-        <div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>
-        <div class="prog-label">${nothingToDo?'No videos needed checking right now':`${num(done)} of ${num(total)} videos checked${finished?'':` · ${num(j.remaining||0)} to go`}`}</div>
-        ${rows?`<div class="job-rows">${rows}</div>`:''}
-        <div class="job-foot">
-          ${nothingToDo?'Everything here is already up to date or settled':finished?`${num(j.clips_fetched)} updated`:`${num(j.invocations)} batch${j.invocations===1?'':'es'} so far`}
-          ${j.imported?` · ${num(j.imported)} new video${j.imported===1?'':'s'} found`:''}
-          ${j.clips_failed?` · ${num(j.clips_failed)} couldn't be read`:''}
-          ${j.clips_skipped?` · ${num(j.clips_skipped)} skipped`:''}
-        </div>
-        ${j.stalled?`<button class="btn btn-ghost btn-sm" style="margin-top:.7rem" onclick="retryJob(${j.id})">Retry from where it stopped</button>`:''}`;
-    }
-
-    /* Shown the instant a refresh button is clicked, before the server has
-       replied. The first chunk runs inline in that POST, so the response can
-       take many seconds -- without this the UI looked frozen and there was no
-       way to tell a click from a network stall. */
-    window.showJobStarting=function(title){
-      const el=jobPanelEl();
-      el.classList.add('on');
-      el.innerHTML=`
-        <div class="job-head">
-          <div class="job-title">${esc(title||'Starting refresh…')}</div>
-          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
-        </div>
-        <div class="prog-bar"><div class="prog-fill indet" style="width:35%"></div></div>
-        <div class="prog-label">Working out what needs refreshing…</div>`;
-    };
-
-    window.showJobError=function(msg){
-      const el=jobPanelEl();
-      el.classList.add('on');
-      el.innerHTML=`
-        <div class="job-head">
-          <div class="job-title">Refresh failed to start</div>
-          <button class="job-x" onclick="closeJobPanel()" title="Hide">&times;</button>
-        </div>
-        <div class="prog-label" style="color:var(--gold)">${esc(msg||'Something went wrong')}</div>`;
-    };
-
-    window.retryJob=async function(jobId){
-      try{ await api(JOB_STATUS_URL.replace(/\/\d+$/,'/'+jobId)+'/retry',{method:'POST'}); trackJob(jobId,JOB_STATUS_URL); }
-      catch(e){ toast(e.message,true); }
-    };
-
-    /* baseUrl e.g. '/api/clipper/refresh' or '/api/admin/refresh' */
-    function trackJob(jobId, baseUrl){
-      JOB_STATUS_URL=baseUrl+'/'+jobId;
-      if(JOB_POLL) clearInterval(JOB_POLL);
-      const tick=async()=>{
-        try{
-          const {job}=await api(baseUrl+'/'+jobId);
-          if(!job) return;
-          renderJob(job);
-          if(job.status==='done'||job.status==='failed'){
-            clearInterval(JOB_POLL); JOB_POLL=null;
-            if(typeof onJobFinished==='function') onJobFinished(job);
-            // Auto-dismiss, but never yank the panel out from under someone
-            // who is actively reading it.
-            setTimeout(function drop(){
-              if(JOB_HOVER) return setTimeout(drop,2000);
-              closeJobPanel();
-            },12000);
-          }
-        }catch(e){ clearInterval(JOB_POLL); JOB_POLL=null; }
-      };
-      tick();
-      JOB_POLL=setInterval(tick,1500);
-    }
 
     /* ── clips ── */
     async function loadClips(){ const {clips}=await api('/api/clipper/submissions'); CLIPS=clips; renderHomeClips(); }
 
-    /* ── manual refresh (rate-capped server-side; UI just mirrors the cooldown) ── */
-    let NEXT_REFRESH_AT=0, refreshTimer=null;
+    /* ── next automatic refresh ──
 
-    // Refresh controls appear in more than one place (Clips tab, campaign
-    // detail), so drive them all off a class rather than a single id.
-    function paintRefresh(){
-      const btns=document.querySelectorAll('.refresh-btn'), notes=document.querySelectorAll('.refresh-note');
-      if(!btns.length) return;
-      const left=NEXT_REFRESH_AT-Date.now();
-      if(left>0){
-        const s=Math.ceil(left/1000);
-        const txt=`Next refresh in ${s>=60?Math.ceil(s/60)+'m':s+'s'}`;
-        btns.forEach(b=>b.disabled=true);
-        notes.forEach(n=>n.textContent=txt);
-        if(!refreshTimer) refreshTimer=setInterval(paintRefresh,1000);
-      }else{
-        btns.forEach(b=>b.disabled=false);
-        notes.forEach(n=>n.textContent='Updates automatically every 6 hours');
-        if(refreshTimer){ clearInterval(refreshTimer); refreshTimer=null; }
-      }
+       Views are refreshed by the 6-hourly cron, not by the clipper. The
+       clipper-triggered full refresh was removed: it spawned a chained job
+       that competed with the cron and the admin for the same per-account
+       locks, and a clipper watching a progress bar is a worse experience
+       than simply knowing when the next sweep lands. Per-clip refresh stays
+       -- one call, immediate, capped by the account's hourly budget. */
+    let nextRefreshTimer=null;
+
+    /* The cron fires at 00:00, 06:00, 12:00 and 18:00 UTC. Computed from the
+       clock rather than sent by the server, so it stays correct on a page
+       left open for hours. */
+    function msUntilNextSweep(){
+      const now=new Date();
+      const next=new Date(now);
+      next.setUTCMinutes(0,0,0);
+      next.setUTCHours(Math.floor(now.getUTCHours()/6)*6+6);
+      return next.getTime()-now.getTime();
     }
 
-    // Called by the panel when the chained job finishes, so the numbers on
-    // the page catch up with what the job just wrote.
+    function paintNextRefresh(){
+      const els=document.querySelectorAll('.next-sweep');
+      if(!els.length){ if(nextRefreshTimer){clearInterval(nextRefreshTimer);nextRefreshTimer=null;} return; }
+      const left=msUntilNextSweep();
+      const h=Math.floor(left/3600000), m=Math.floor(left%3600000/60000), s=Math.floor(left%60000/1000);
+      const txt=h>0?`Next automatic check in ${h}h ${m}m`
+                 :m>0?`Next automatic check in ${m}m ${s}s`
+                     :`Next automatic check in ${s}s`;
+      els.forEach(e=>e.textContent=txt);
+      if(!nextRefreshTimer) nextRefreshTimer=setInterval(paintNextRefresh,1000);
+    }
+
+    /* Kept as a named function because several loaders call it after they
+       change clip data; it just re-renders from what is already loaded. */
     async function onJobFinished(){
       await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
-      renderClips(); renderClipsBudget(); paintRefresh();
+      renderClips(); renderClipsBudget();
     }
 
-    window.manualRefresh=async function(){
-      document.querySelectorAll('.refresh-btn').forEach(b=>b.disabled=true);
-      document.querySelectorAll('.refresh-note').forEach(n=>n.textContent='Starting refresh…');
-      showJobStarting('Starting refresh…');
-      try{
-        const r=await api('/api/clipper/refresh',{method:'POST'});
-        NEXT_REFRESH_AT=Date.now()+(r.cooldown_ms||300000);
-        // The job may already be finished if it fit in the first chunk; the
-        // panel handles both cases identically.
-        trackJob(r.job_id,'/api/clipper/refresh');
-      }catch(e){
-        // 409 means a refresh is already running -- show THAT one rather than
-        // reporting an error for what is really just "already in progress".
-        if(e.job_id){ trackJob(e.job_id,'/api/clipper/refresh'); }
-        else{
-          if(e.retry_in_ms) NEXT_REFRESH_AT=Date.now()+e.retry_in_ms;
-          showJobError(e.message);
-          toast(e.message,true);
-        }
-      }
-      paintRefresh();
-    };
 
     function renderPlatRow(){
       const counts={}; CLIPS.forEach(c=>counts[c.platform]=(counts[c.platform]||0)+1);
@@ -1182,12 +1043,12 @@
     window.setPlat=function(p){ platFilter=p; renderClips(); };
 
     const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',
-      paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from platform',
+      paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from platform',no_insights:'No insights available',
       disconnected:'Account disconnected',reconnect:'Reconnect needed',unavailable:'Not updating',
       ineligible:'Not eligible'};
     // Every state that means "this clip is not earning right now" reads as
     // visually inactive, so a clipper never mistakes a stuck clip for a live one.
-    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible']);
+    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible','no_insights']);
 
     /* How long ago this clip's view count was last actually confirmed with the
        platform. Without this the card showed a big confident number with no

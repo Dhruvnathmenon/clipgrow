@@ -89,7 +89,14 @@ export async function handleAdmin(request, env, url) {
         -- an absence is something the dashboard can actually report.
         (SELECT COUNT(*) FROM social_accounts
            WHERE status='connected' AND last_error_code LIKE 'IMPORT!_%' ESCAPE '!') AS accounts_import_failing,
-        (SELECT COUNT(*) FROM submissions WHERE sync_error IS NOT NULL AND status='active') AS submissions_with_errors,
+        -- Excludes the same permanent conditions as submissions_stuck below,
+        -- for the same reason: a permanently-dead post is not "a transient
+        -- error expected to clear on the next sync" (the FYI line's own
+        -- wording), and it is already explained to the clipper on their own
+        -- dashboard, so it needs no admin attention on either line here.
+        (SELECT COUNT(*) FROM submissions
+           WHERE sync_error IS NOT NULL AND status='active'
+             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')) AS submissions_with_errors,
         (SELECT COUNT(*) FROM submissions
            WHERE sync_error IS NOT NULL AND status='active' AND locked_at IS NULL
              -- A clip that has never had a successful sync has no
@@ -98,7 +105,14 @@ export async function handleAdmin(request, env, url) {
              -- regardless of age, so a clip's very first failed attempt,
              -- seconds old, read as "stuck 12+ hours". Falling back to
              -- created_at measures from when tracking actually began.
-             AND COALESCE(last_ok_sync_at, created_at) < ?) AS submissions_stuck`
+             AND COALESCE(last_ok_sync_at, created_at) < ?
+             -- MEDIA_NOT_FOUND and PRE_CONVERSION_MEDIA are permanent, not
+             -- stuck: nothing will ever make a deleted post or a pre-conversion
+             -- post sync successfully, so counting them here meant the banner
+             -- flagged the same clips forever with no action anyone could take.
+             -- clipstate.js already gives both their own explained, final state
+             -- ('removed' / 'no_insights') on the clipper's own dashboard.
+             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')) AS submissions_stuck`
     ).bind(Date.now() - STUCK_AFTER_MS).first();
 
     // The counts above say something is wrong; these say WHICH account, so the
@@ -123,6 +137,13 @@ export async function handleAdmin(request, env, url) {
        LEFT JOIN social_accounts a ON a.id = s.account_id
        WHERE s.sync_error IS NOT NULL AND s.status = 'active' AND s.locked_at IS NULL
          AND COALESCE(s.last_ok_sync_at, s.created_at) < ?
+             -- MEDIA_NOT_FOUND and PRE_CONVERSION_MEDIA are permanent, not
+             -- stuck: nothing will ever make a deleted post or a pre-conversion
+             -- post sync successfully, so counting them here meant the banner
+             -- flagged the same clips forever with no action anyone could take.
+             -- clipstate.js already gives both their own explained, final state
+             -- ('removed' / 'no_insights') on the clipper's own dashboard.
+             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')
        GROUP BY s.account_id
        ORDER BY clips DESC`
     ).bind(Date.now() - STUCK_AFTER_MS).all();
