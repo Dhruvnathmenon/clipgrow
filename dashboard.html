@@ -341,13 +341,9 @@
     <a href="index.html" class="sb-logo"><span class="sb-pulse"></span>Clip<span>Grow</span></a>
     <nav class="sb-nav">
       <button class="sb-item on" data-v="home" onclick="go('home',this)">
-        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>Dashboard</button>
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>Dashboard<span class="sb-count" id="n-clips">0</span></button>
       <button class="sb-item" data-v="campaigns" onclick="go('campaigns',this)">
         <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Campaigns<span class="sb-count" id="n-camp">0</span></button>
-      <button class="sb-item" data-v="clips" onclick="go('clips',this)">
-        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>Clips<span class="sb-count" id="n-clips">0</span></button>
-      <button class="sb-item" data-v="accounts" onclick="go('accounts',this)">
-        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/></svg>Accounts</button>
       <button class="sb-item" data-v="payments" onclick="go('payments',this)">
         <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Payments</button>
       <button class="sb-item" data-v="clippers" onclick="go('clippers',this)">
@@ -387,37 +383,25 @@
       <div class="stats" id="home-stats"></div>
       <div class="sec-title">Active campaigns</div>
       <div id="home-camps"><div class="empty">Loading…</div></div>
-      <div class="sec-title">Recent clips</div>
-      <div id="home-clips"><div class="empty">Loading…</div></div>
-    </section>
-
-    <!-- CAMPAIGNS -->
-    <section class="view" id="v-campaigns">
-      <div class="page-head"><h1>Campaigns</h1><p>Join a campaign, connect its Instagram account, then post</p></div>
-      <div id="camp-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <!-- CAMPAIGN DETAIL -->
-    <section class="view" id="v-detail"><div id="detail-body"></div></section>
-
-    <!-- CLIPS -->
-    <section class="view" id="v-clips">
-      <div class="page-head clips-head">
-        <div><h1>My Clips</h1><p>Views are pulled straight from the platform you posted on — no manual reporting</p></div>
-        <div class="refresh-wrap">
-          <div class="note next-sweep">Next automatic check…</div>
-        </div>
+      <div class="clips-head">
+        <div class="sec-title" style="margin-bottom:0">Your clips</div>
+        <div class="refresh-wrap"><div class="note next-sweep">Next automatic check…</div></div>
       </div>
       <div id="clips-budget-row" class="clips-budget-row"></div>
       <div class="plat-row" id="plat-row"></div>
       <div id="clip-grid"><div class="empty">Loading…</div></div>
     </section>
 
-    <!-- ACCOUNTS -->
-    <section class="view" id="v-accounts">
-      <div class="page-head"><h1>Connected Accounts</h1><p>Each campaign is worked from its own account, verified once</p></div>
+    <!-- CAMPAIGNS -->
+    <section class="view" id="v-campaigns">
+      <div class="page-head"><h1>Campaigns</h1><p>Join a campaign, connect its Instagram account, then post</p></div>
+      <div id="camp-list"><div class="empty">Loading…</div></div>
+      <div class="sec-title" style="margin-top:2rem">Your connected accounts</div>
       <div id="acct-list"><div class="empty">Loading…</div></div>
     </section>
+
+    <!-- CAMPAIGN DETAIL -->
+    <section class="view" id="v-detail"><div id="detail-body"></div></section>
 
     <!-- PAYMENTS -->
     <section class="view" id="v-payments">
@@ -562,8 +546,10 @@
       document.getElementById('v-'+name).classList.add('on');
       if(btn){document.querySelectorAll('.sb-item').forEach(t=>t.classList.remove('on'));btn.classList.add('on');}
       window.scrollTo({top:0});
-      if(name==='clips'){ renderClips(); renderClipsBudget(); }
-      if(name==='accounts') loadAccounts();
+      // Home now owns the clip grid, and Campaigns owns the accounts list, so
+      // each tab loads what it actually renders.
+      if(name==='home'){ renderClips(); renderClipsBudget(); }
+      if(name==='campaigns') loadAccounts();
       if(name==='payments') loadPayments();
       if(name==='clippers') loadDirectory();
     };
@@ -662,10 +648,21 @@
       const acc=(p.access&&p.access[plat])||null;
 
       if(!a){
-        // No server-computed state (older payload, or platform not offered) —
-        // fall back to the plain connect link rather than showing nothing.
+        // No approval state for this platform. For YouTube that is now the
+        // normal case -- the Google app is published, so there is nothing to
+        // pre-approve and the clipper connects straight away. It also still
+        // covers the defensive case of a platform with no computed state.
         if(!acc) return `<div class="alert warn">
-          <div class="alert-t">${label} not connected</div>
+          <div class="alert-t">Connect ${label} to start earning</div>
+          <div>Sign in with the account that owns your ${isYt?'channel':'profile'} and allow every permission. We only ever read view counts &mdash; we can't post, edit or delete anything.</div>
+          ${isYt?`<div class="yt-steps">
+            <strong>Google shows a warning screen on the way. That is expected &mdash; here is what to click:</strong>
+            <ol>
+              <li>On the &ldquo;Google hasn&rsquo;t verified this app&rdquo; screen, click <strong>Advanced</strong> at the bottom.</li>
+              <li>Click <strong>Go to clipgrow.in (unsafe)</strong>. It is safe &mdash; that wording shows only because our Google review is still in progress.</li>
+              <li>Leave every permission ticked and press <strong>Continue</strong>.</li>
+            </ol>
+          </div>`:''}
           <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect ${label}</a></div></div>`;
 
         const idLabel=isYt?'YouTube channel':'Instagram username';
@@ -955,7 +952,7 @@
        the view, never the job. */
 
     /* ── clips ── */
-    async function loadClips(){ const {clips}=await api('/api/clipper/submissions'); CLIPS=clips; renderHomeClips(); }
+    async function loadClips(){ const {clips}=await api('/api/clipper/submissions'); CLIPS=clips; renderClips(); }
 
     /* ── next automatic refresh ──
 
@@ -988,13 +985,6 @@
                      :`Next automatic check in ${s}s`;
       els.forEach(e=>e.textContent=txt);
       if(!nextRefreshTimer) nextRefreshTimer=setInterval(paintNextRefresh,1000);
-    }
-
-    /* Kept as a named function because several loaders call it after they
-       change clip data; it just re-renders from what is already loaded. */
-    async function onJobFinished(){
-      await Promise.all([loadMe(),loadClips(),loadCampaigns()]);
-      renderClips(); renderClipsBudget();
     }
 
 
@@ -1074,13 +1064,7 @@
       const list=platFilter==='all'?CLIPS:CLIPS.filter(c=>c.platform===platFilter);
       document.getElementById('clip-grid').innerHTML=list.length
         ? `<div class="clips">${list.map(clipCard).join('')}</div>`
-        : '<div class="empty">No clips yet. Join a campaign, connect Instagram, then paste your Reel link.</div>';
-    }
-    function renderHomeClips(){
-      const recent=CLIPS.slice(0,5);
-      document.getElementById('home-clips').innerHTML=recent.length
-        ? `<div class="clips">${recent.map(clipCard).join('')}</div>`
-        : '<div class="card"><p class="muted" style="font-size:.85rem">No clips yet — your posted Reels will show here with live view counts.</p></div>';
+        : '<div class="empty">No clips yet. Join a campaign and connect the account you post from &mdash; new posts then show up here on their own.</div>';
     }
 
     /* ── accounts ── */

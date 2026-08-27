@@ -178,6 +178,12 @@ export async function handleClipper(request, env, url) {
       if (part && part.status !== 'kicked') {
         for (const plat of allowed) {
           if (!configured.includes(plat)) continue;
+          // YouTube has no approval step any more -- the Google app is published,
+          // so a clipper connects directly. Leaving it out of this map is what
+          // makes the page show a plain Connect button instead of the
+          // request-and-wait flow. Instagram still needs the step, because
+          // Meta's tester allowlist is still enforced until App Review passes.
+          if (plat === 'youtube') continue;
           const req = requestByKey.get(`${c.id}:${plat}`) || null;
           const state = accessState(req, accounts[plat]);
           access[plat] = {
