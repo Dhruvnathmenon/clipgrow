@@ -443,7 +443,7 @@ export async function handleAdmin(request, env, url) {
   // hand in the Meta dashboard; these endpoints just track that state.
   const TESTER_STATUSES = ['requested', 'invited', 'confirmed', 'rejected'];
 
-  if ((pathname === '/api/admin/access-requests' || pathname === '/api/admin/tester-requests') && method === 'GET') {
+  if (pathname === '/api/admin/access-requests' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT t.*, COALESCE(t.identifier, t.ig_username) AS identifier,
               cl.username AS clipper_username, cl.display_name AS clipper_display_name,
@@ -474,8 +474,7 @@ export async function handleAdmin(request, env, url) {
     return json({ requests: results || [] });
   }
 
-  params = matchPath('/api/admin/access-requests/:id', pathname)
-        || matchPath('/api/admin/tester-requests/:id', pathname);
+  params = matchPath('/api/admin/access-requests/:id', pathname);
   if (params && method === 'PATCH') {
     const { status, note } = await readJson(request);
     const reqRow = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(params.id).first();
@@ -640,13 +639,6 @@ export async function handleAdmin(request, env, url) {
     ).bind(params.id).run();
     await reallocateCampaign(env.DB, sub.campaign_id);
     return json({ ok: true });
-  }
-
-  params = matchPath('/api/admin/payments/:id/reverse', pathname);
-  if (params && method === 'POST') {
-    const result = await reversePayment(env.DB, Number(params.id));
-    if (result.error) return json({ error: result.error }, result.status || 400);
-    return json(result);
   }
 
   // --------------------------------------------------------------- payments
@@ -815,7 +807,7 @@ export async function handleAdmin(request, env, url) {
   // job. A single flat pass could not fit inside one invocation's external
   // subrequest budget -- the accounts last in the loop were being silently
   // truncated, which is what sync_error = 'SUBREQUEST_LIMIT' recorded.
-  if ((pathname === '/api/admin/sync' || pathname === '/api/admin/refresh/global') && method === 'POST') {
+  if (pathname === '/api/admin/refresh/global' && method === 'POST') {
     const created = await createRefreshJob(env.DB, {
       kind: 'global', triggeredBy: 'admin', respectCooldown: false
     });

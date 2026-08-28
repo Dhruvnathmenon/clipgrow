@@ -282,7 +282,7 @@ export async function handleClipper(request, env, url) {
   // Step 1 of connecting: the clipper tells us which account they intend to
   // use, so the admin can grant it access on the platform's side. The old
   // Instagram-only path is kept as an alias so a stale browser tab still works.
-  if ((pathname === '/api/clipper/access-request' || pathname === '/api/clipper/tester-request') && method === 'POST') {
+  if (pathname === '/api/clipper/access-request' && method === 'POST') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
     const body = await readJson(request);

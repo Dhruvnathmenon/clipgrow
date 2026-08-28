@@ -584,9 +584,9 @@
         :(s.current===1?'day streak':'day streak')+(s.best>s.current?` · best ${s.best}`:'');
 
       document.getElementById('home-stats').innerHTML=`
-        <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Total Earned</div></div>
-        <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Received</div></div>
-        <div class="stat"><div class="stat-val g">${money(d.money.owed!=null?d.money.owed:(d.money.pending!=null?d.money.pending:d.money.outstanding))}</div><div class="stat-lbl">Due Next Payout</div>${d.money.advanced?`<div class="note" style="font-size:.66rem">after ${money(d.money.advanced)} already advanced</div>`:''}</div>
+        <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
+        <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Paid</div></div>
+        <div class="stat"><div class="stat-val g">${money(d.money.owed)}</div><div class="stat-lbl">Left to Pay</div>${d.money.advanced?`<div class="note" style="font-size:.66rem">after ${money(d.money.advanced)} already advanced</div>`:''}</div>
         <div class="stat"><div class="stat-val w">${num(d.totals.views)}</div><div class="stat-lbl">Total Views</div></div>
         <div class="stat"><div class="stat-val w">${num(d.totals.clips)}</div><div class="stat-lbl">Clips Posted</div></div>`;
       document.getElementById('n-clips').textContent=d.totals.clips;
@@ -1132,9 +1132,9 @@
       try{
         const {payments,money:m}=await api('/api/clipper/payments');
         el.innerHTML=`<div class="stats">
-            <div class="stat"><div class="stat-val">${money(m.earned)}</div><div class="stat-lbl">Earned</div></div>
-            <div class="stat"><div class="stat-val w">${money(m.paid)}</div><div class="stat-lbl">Received</div></div>
-            <div class="stat"><div class="stat-val g">${money(m.pending!=null?m.pending:m.outstanding)}</div><div class="stat-lbl">Due Next Payout</div></div>
+            <div class="stat"><div class="stat-val">${money(m.earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
+            <div class="stat"><div class="stat-val w">${money(m.paid)}</div><div class="stat-lbl">Paid</div></div>
+            <div class="stat"><div class="stat-val g">${money(m.owed)}</div><div class="stat-lbl">Left to Pay</div></div>
           </div>
           <p class="muted" style="font-size:.78rem;margin:.3rem 0 .9rem">Once a video is paid for it locks: the amount is final and later views do not change it.</p>`+(payments.length
           ? `<div class="card"><div class="table-wrap"><table>
@@ -1174,7 +1174,7 @@
         const {clippers}=await api('/api/clipper/directory');
         DIRECTORY=clippers;
         el.innerHTML=clippers.length?`<div class="card"><div class="table-wrap"><table>
-          <thead><tr><th>Rank</th><th>Clipper</th><th>Streak</th><th>Last Post</th><th>Total Views</th><th>Total Earned</th></tr></thead>
+          <thead><tr><th>Rank</th><th>Clipper</th><th>Streak</th><th>Last Post</th><th>Total Views</th><th>Clipper Earnings</th></tr></thead>
           <tbody>${clippers.map(c=>`<tr class="dir-row ${c.is_me?'me-row':''}" onclick="openProfile(${c.id})">
             <td class="rank-cell ${c.rank<=3?'medal':''}">${MEDALS[c.rank]||('#'+c.rank)}</td>
             <td><strong style="color:var(--white)">${esc(c.display_name)}</strong>${c.is_me?' <span class="chip">you</span>':''}</td>

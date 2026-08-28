@@ -144,9 +144,12 @@
           <div class="stat"><div class="stat-val">${num(t.clips)}</div><div class="stat-lbl">Videos Posted</div></div>
           <div class="stat"><div class="stat-val">${num(t.clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
           <div class="stat"><div class="stat-val">${money(c.cpm)}</div><div class="stat-lbl">Per 1,000 Views</div></div>
+          <div class="stat"><div class="stat-val">${money(c.budget)}</div><div class="stat-lbl">Total Budget</div></div>
+          <div class="stat"><div class="stat-val">${pct}%</div><div class="stat-lbl">Utilization</div></div>
+          <div class="stat"><div class="stat-val g">${money(c.remaining)}</div><div class="stat-lbl">Left to Pay</div></div>
         </div>
         <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
-        <p class="note">${money(c.spent)} of ${money(c.budget)} budget allocated · ${money(c.remaining)} remaining · minimum ${num(c.min_views)} views per video before it earns</p>
+        <p class="note">Minimum ${num(c.min_views)} views per video before it earns</p>
       </div>
 
       <div class="panel">

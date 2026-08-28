@@ -476,8 +476,6 @@ export async function clipperFinancials(db, clipperId) {
     // A bonus is extra and is deliberately NOT deducted. Floored at 0 so an
     // over-advance shows as "nothing owed" rather than a negative balance;
     // the surplus is visible as advanced > pending.
-    owed: Math.max(0, pending - advanced),
-    // Kept for existing callers/UI. Pending is the authoritative figure now.
-    outstanding: pending
+    owed: Math.max(0, pending - advanced)
   };
 }

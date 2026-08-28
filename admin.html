@@ -246,7 +246,7 @@
       <div class="panel">
         <h2 class="panel-title">All Clippers</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Paid</th><th>Pending</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Clipper Earnings</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="clippers-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
@@ -434,7 +434,6 @@
           <div class="fs-title">Campaign Details</div>
           <div class="grid-2">
             <div class="fld"><label>Client Socials</label><input class="form-control" id="f-socials" /></div>
-            <div class="fld"><label>Platforms</label><input class="form-control" id="f-platforms" /></div>
           </div>
           <div class="fld"><label>Objective</label><input class="form-control" id="f-objective" /></div>
           <div class="grid-2">
@@ -480,7 +479,7 @@
   <script>
     let modalMode='create', modalId=null;
     let CLIPPERS=[], CAMPAIGNS=[];
-    const TEXT_FIELDS=['name','description','model','socials','platforms','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
+    const TEXT_FIELDS=['name','description','model','socials','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
     const NUM_FIELDS=['cpm','budget','min_views','max_payout'];
 
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
@@ -1028,9 +1027,9 @@
       document.getElementById('overview').innerHTML=`
         <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
         <div class="stat"><div class="stat-val w">${num(o.active_campaigns)}</div><div class="stat-lbl">Active Campaigns</div></div>
-        <div class="stat"><div class="stat-val">${money(o.total_earned)}</div><div class="stat-lbl">Total Earned</div></div>
+        <div class="stat"><div class="stat-val">${money(o.total_earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
         <div class="stat"><div class="stat-val w">${money(o.total_paid)}</div><div class="stat-lbl">Total Paid</div></div>
-        <div class="stat"><div class="stat-val g">${money(o.outstanding)}</div><div class="stat-lbl">Outstanding</div></div>`;
+        <div class="stat"><div class="stat-val g">${money(o.outstanding)}</div><div class="stat-lbl">Left to Pay</div></div>`;
       // Two severities, deliberately not merged: a video with a sync_error
       // that synced fine within the last 12h is just normal noise (a rate
       // limit clearing on the next cron run) and would make this banner fire
@@ -1183,7 +1182,7 @@
         box.innerHTML=`
           <div class="sub-h">Participants (${participants.length})</div>
           ${participants.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th><th>Earned</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${participants.map(p=>`<tr>
               <td class="handle">${esc(p.display_name||p.username)}</td>
               <td>${linkedAccounts(p,{badge:true})}</td>
@@ -1269,7 +1268,7 @@
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td>${money(c.money.paid)}</td>
-          <td class="gold">${money(c.money.owed!=null?c.money.owed:(c.money.pending!=null?c.money.pending:c.money.outstanding))}</td>
+          <td class="gold">${money(c.money.owed)}</td>
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
@@ -1422,7 +1421,7 @@
       const cs=document.getElementById('p-clipper');
       if(cs && CLIPPERS.length){
         const cur=cs.value;
-        cs.innerHTML='<option value="">Select clipper…</option>'+CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} — ${money(c.money.owed != null ? c.money.owed : c.money.outstanding)} owed</option>`).join('');
+        cs.innerHTML='<option value="">Select clipper…</option>'+CLIPPERS.map(c=>`<option value="${c.id}">${esc(c.display_name)} — ${money(c.money.owed)} left to pay</option>`).join('');
         cs.value=cur;
       }
       const cam=document.getElementById('p-campaign');
@@ -1435,7 +1434,7 @@
     document.getElementById('p-clipper').addEventListener('change',e=>{
       const c=CLIPPERS.find(x=>String(x.id)===e.target.value);
       document.getElementById('pay-hint').textContent=c?(
-        `${c.display_name} has earned ${money(c.money.earned)}, received ${money(c.money.paid)}, still owed ${money(c.money.owed != null ? c.money.owed : c.money.outstanding)}.`
+        `${c.display_name} has ${money(c.money.earned)} in Clipper Earnings, ${money(c.money.paid)} Paid, ${money(c.money.owed)} Left to Pay.`
         // Surfaced at the point of decision: without it the admin pays the full
         // pending amount and the advance is effectively paid twice.
         + (c.money.advanced ? ` ${money(c.money.advanced)} of that was already advanced and is netted off.` : '')
