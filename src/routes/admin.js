@@ -8,6 +8,11 @@ import {
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
+import {
+  walletBalances, walletOfKind, agencyAvailable, recordClientPayment,
+  campaignFinancials, allCampaignFinancials, campaignFunding, fundingAlerts,
+  agencyPnL, addEntry, voidEntry, listEntries, LEDGER_CATEGORIES
+} from '../finance.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
@@ -163,6 +168,87 @@ export async function handleAdmin(request, env, url) {
       stuck_accounts: stuckAccounts || [],
       stalled_jobs: stalledJobs || []
     });
+  }
+
+  // ----------------------------------------------------------- finance
+  //
+  // Everything else in this file answers "what do we owe clippers". These
+  // answer "have we been paid, what did we spend and why, are we cash
+  // positive, and what does the agency owe its founders".
+
+  if (pathname === '/api/admin/finance/overview' && method === 'GET') {
+    return json({
+      totals: await agencyPnL(env.DB),
+      wallets: await walletBalances(env.DB),
+      // Campaigns delivering faster than the client is paying. This is the
+      // number that decides whether Sunday's payout run can happen.
+      funding_alerts: await fundingAlerts(env.DB),
+      available: await agencyAvailable(env.DB),
+      categories: LEDGER_CATEGORIES
+    });
+  }
+
+  if (pathname === '/api/admin/finance/campaigns' && method === 'GET') {
+    return json({ campaigns: await allCampaignFinancials(env.DB) });
+  }
+
+  params = matchPath('/api/admin/finance/campaigns/:id', pathname);
+  if (params && method === 'GET') {
+    const fin = await campaignFinancials(env.DB, Number(params.id));
+    if (!fin) return err('Not found', 404);
+    return json({ campaign: fin, funding: await campaignFunding(env.DB, Number(params.id)) });
+  }
+
+  if (pathname === '/api/admin/finance/entries' && method === 'GET') {
+    const q = url.searchParams;
+    const numOrNull = (k) => (q.get(k) ? Number(q.get(k)) : null);
+    return json({
+      entries: await listEntries(env.DB, {
+        walletId: numOrNull('wallet_id'),
+        category: q.get('category') || null,
+        campaignId: numOrNull('campaign_id'),
+        clientId: numOrNull('client_id'),
+        from: numOrNull('from'),
+        to: numOrNull('to'),
+        includeVoid: q.get('include_void') === '1',
+        limit: Math.min(1000, Number(q.get('limit')) || 200)
+      })
+    });
+  }
+
+  if (pathname === '/api/admin/finance/entries' && method === 'POST') {
+    const body = await readJson(request);
+    const r = await addEntry(env.DB, { ...body, created_by: 'admin' });
+    if (r.error) return err(r.error, r.status || 400);
+    return json(r, 201);
+  }
+
+  // A client payment is never one entry: it splits into the clipper share and
+  // our fee on arrival, so which rupees are whose is never a later guess.
+  if (pathname === '/api/admin/finance/client-payment' && method === 'POST') {
+    const body = await readJson(request);
+    const r = await recordClientPayment(env.DB, {
+      clientId: body.client_id ? Number(body.client_id) : null,
+      campaignId: body.campaign_id ? Number(body.campaign_id) : null,
+      amount: body.amount,
+      feePercent: body.fee_percent != null ? Number(body.fee_percent) : 20,
+      method: body.method, reference: body.reference, note: body.note,
+      occurredAt: body.occurred_at || null, createdBy: 'admin'
+    });
+    if (r.error) return err(r.error, r.status || 400);
+    return json(r, 201);
+  }
+
+  params = matchPath('/api/admin/finance/entries/:id/void', pathname);
+  if (params && method === 'POST') {
+    const body = await readJson(request);
+    const r = await voidEntry(env.DB, Number(params.id), body.reason);
+    if (r.error) return err(r.error, r.status || 400);
+    return json(r);
+  }
+
+  if (pathname === '/api/admin/finance/funding' && method === 'GET') {
+    return json({ alerts: await fundingAlerts(env.DB) });
   }
 
   // ------------------------------------------------------- blueprint parse
@@ -790,7 +876,11 @@ export async function handleAdmin(request, env, url) {
       note: body.note,
       paidAt: body.paid_at,
       // Deliberate, per-run override of the Rs 500 floor.
-      allowBelowMinimum: !!body.allow_below_minimum
+      allowBelowMinimum: !!body.allow_below_minimum,
+      walletId: body.wallet_id ? Number(body.wallet_id) : null,
+      // The agency does not fund campaigns out of anyone's pocket, so a
+      // payout it cannot cover is refused unless deliberately overridden.
+      allowUnfunded: !!body.allow_unfunded
     });
     if (result.error) {
       return json({ error: result.error, locked_ids: result.locked_ids,

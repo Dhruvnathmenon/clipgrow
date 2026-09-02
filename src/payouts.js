@@ -1,5 +1,6 @@
 import { now, maxPayoutPerVideo } from './db.js';
 import { cpmEarning, explainEarning, explainEarningText } from './earning-math.js';
+import { addEntry, voidEntry, agencyAvailable } from './finance.js';
 import { clipState, clipStateMessage, daysSince } from './clipstate.js';
 import { platformLabel } from './platforms.js';
 import { reallocateCampaign } from './earnings.js';
@@ -188,7 +189,11 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
 export async function settlePayment(db, {
   clipperId, submissionIds = [], writeOffIds = [], amount,
   campaignId = null, method = 'UPI', reference = '', note = '', paidAt = null,
-  expectedClipsTotal = null, allowBelowMinimum = false
+  expectedClipsTotal = null, allowBelowMinimum = false, allowUnfunded = false,
+  // Which pot the cash actually left. Recording it is what makes
+  // "the agency owes me" and "this is the client's money, not ours"
+  // computable at all -- see src/finance.js.
+  walletId = null
 }) {
   const payIds = [...new Set(submissionIds.map(Number).filter(Boolean))];
   const offIds = [...new Set(writeOffIds.map(Number).filter(Boolean))];
@@ -231,6 +236,22 @@ export async function settlePayment(db, {
       below_minimum: true,
       payout_minimum: PAYOUT_MINIMUM
     };
+  }
+
+  // You cannot send money you do not have. Fee income deliberately sits in a
+  // separate wallet so it can never make this number look bigger than it is.
+  // Overridable, because the ledger can lag reality -- but it has to be a
+  // deliberate act, not a silent one.
+  if (payIds.length && walletId && !allowUnfunded) {
+    const available = await agencyAvailable(db);
+    if (available < Number(amount)) {
+      return {
+        error: `The agency wallet holds Rs ${available}, which is less than the Rs ${Number(amount)} this payout needs. Top it up, or tick "pay anyway" if the money has moved but is not recorded yet.`,
+        status: 409,
+        unfunded: true,
+        available
+      };
+    }
   }
 
   const alreadyLocked = (rows || []).filter(r => r.locked_at);
@@ -279,6 +300,25 @@ export async function settlePayment(db, {
     ).bind(clipperId, campaignId || null, amt, method || 'UPI', reference || '', note || '',
            ts, now(), payIds.length, clipsTotal).run();
     paymentId = res.meta.last_row_id;
+
+    // The same payout, recorded once in `payments` (what the clipper is owed
+    // and locked against) and once in the ledger (where the cash came from).
+    // Linked by payment_id so nothing double-counts, and best-effort so a
+    // bookkeeping failure can never block a payout that has already happened.
+    if (walletId) {
+      try {
+        await addEntry(db, {
+          direction: 'out', amount: amt, wallet_id: walletId,
+          category: 'clipper_payout', campaign_id: campaignId || null,
+          clipper_id: clipperId, payment_id: paymentId,
+          method: method || 'UPI', reference: reference || null,
+          note: note || `Settled ${payIds.length} clip(s)`,
+          occurred_at: ts, created_by: 'settle'
+        });
+      } catch (e) {
+        console.error('[finance] could not record payout in the ledger:', e && e.message);
+      }
+    }
   }
 
   const stmts = [];
@@ -380,6 +420,18 @@ export async function reversePayment(db, paymentId) {
   const { results: subs } = await db.prepare(
     'SELECT id, campaign_id FROM submissions WHERE payment_id = ?'
   ).bind(paymentId).all();
+
+  // Void the ledger entry BEFORE the payment row goes, while payment_id still
+  // resolves. Voided rather than deleted: the money did move, and then it was
+  // reversed -- both facts belong in the ledger.
+  try {
+    const { results: led } = await db.prepare(
+      "SELECT id FROM ledger_entries WHERE payment_id = ? AND status = 'active'"
+    ).bind(paymentId).all();
+    for (const l of led || []) await voidEntry(db, l.id, 'payment reversed');
+  } catch (e) {
+    console.error('[finance] could not void the ledger entry:', e && e.message);
+  }
 
   await db.batch([
     db.prepare(
