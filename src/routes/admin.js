@@ -370,6 +370,50 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true, id, slug }, 201);
   }
 
+  // "How much do I still owe on THIS campaign?" -- previously answerable only
+  // one clipper at a time, by picking a campaign in the Payouts tab. Every
+  // piece already existed: payableClips accepts a campaignId.
+  params = matchPath('/api/admin/campaigns/:id/payable', pathname);
+  if (params && method === 'GET') {
+    const campaignId = Number(params.id);
+    const campaign = await env.DB.prepare('SELECT id, name FROM campaigns WHERE id = ?').bind(campaignId).first();
+    if (!campaign) return err('Not found', 404);
+
+    const { results: parts } = await env.DB.prepare(
+      `SELECT DISTINCT p.clipper_id, cl.username, cl.display_name
+         FROM participations p JOIN clippers cl ON cl.id = p.clipper_id
+        WHERE p.campaign_id = ?`
+    ).bind(campaignId).all();
+
+    const rows = [];
+    for (const p of parts || []) {
+      const { totals } = await payableClips(env.DB, p.clipper_id, { days: 0, campaignId });
+      if (!totals.payable_clips && !totals.settled_clips) continue;
+      rows.push({
+        clipper_id: p.clipper_id, username: p.username, display_name: p.display_name,
+        payable_now: totals.payable_now, payable_clips: totals.payable_clips,
+        already_settled: totals.already_settled, settled_clips: totals.settled_clips,
+        below_min_clips: totals.below_min_clips, meets_minimum: totals.meets_minimum
+      });
+    }
+    rows.sort((a, b) => b.payable_now - a.payable_now);
+
+    return json({
+      campaign: { id: campaign.id, name: campaign.name },
+      clippers: rows,
+      totals: {
+        // Gross pending on this campaign. Deliberately NOT advance-netted:
+        // advances are a clipper-level concept with no campaign dimension, so
+        // a per-campaign "owed" cannot honestly exist.
+        payable_now: rows.reduce((n, r) => n + r.payable_now, 0),
+        payable_clips: rows.reduce((n, r) => n + r.payable_clips, 0),
+        already_settled: rows.reduce((n, r) => n + r.already_settled, 0),
+        clippers: rows.length,
+        below_minimum: rows.filter(r => r.payable_now > 0 && !r.meets_minimum).length
+      }
+    });
+  }
+
   params = matchPath('/api/admin/campaigns/:id/participants', pathname);
   if (params && method === 'GET') {
     const { results } = await env.DB.prepare(
@@ -381,7 +425,11 @@ export async function handleAdmin(request, env, url) {
                  WHERE pa.participation_id = p.id) AS linked_accounts,
               (SELECT COUNT(*) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS videos,
               (SELECT COALESCE(SUM(views),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS views,
-              (SELECT ${SPEND_EXPR} FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS earned
+              (SELECT ${SPEND_EXPR} FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS earned,
+              (SELECT COALESCE(SUM(CASE WHEN s.locked_at IS NULL AND s.status='active' THEN s.earning ELSE 0 END),0)
+                 FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS pending,
+              (SELECT COALESCE(SUM(CASE WHEN s.locked_at IS NOT NULL THEN COALESCE(s.locked_earning,0) ELSE 0 END),0)
+                 FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS settled
        FROM participations p
        JOIN clippers cl ON cl.id = p.clipper_id
        LEFT JOIN social_accounts a ON a.id = p.account_id

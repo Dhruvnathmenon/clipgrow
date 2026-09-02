@@ -270,6 +270,11 @@
     /* Clips the admin has switched off: visible, but clearly not earning */
     .clip-off { opacity:.55; filter:grayscale(1); }
     .clip-off:hover { opacity:.8; }
+    /* The arithmetic behind the number. cpm and min_views were already being
+       sent and ignored, and a clip reduced by the per-video cap or by the
+       campaign budget running out just showed a smaller figure with no
+       explanation available anywhere. */
+    .clip-why { font-size:.7rem; color:var(--muted); line-height:1.5; margin-top:.3rem; }
     .clip-note { font-size:.7rem; color:var(--gold); line-height:1.45; margin:.4rem 0 .1rem; }
     .clip-note.min { color:var(--muted-l); }
     .clip-note.min small { color:var(--muted); }
@@ -1080,6 +1085,7 @@
           ${!c.locked&&c.state==='disqualified'?'<div class="clip-note">Disqualified — this clip does not earn.</div>':''}
           ${!c.locked&&c.state==='below_min'?`<div class="clip-note min">${num(c.views_needed)} more views to start earning <small>(minimum ${num(c.min_views)})</small></div>`:''}
           ${!c.locked&&c.state_message&&c.state!=='below_min'&&c.state!=='verified'?`<div class="clip-note">${esc(c.state_message)}</div>`:''}
+          ${c.why_text?`<div class="clip-why">${esc(c.why_text)}</div>`:''}
           <div class="clip-actions">
             <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
             ${!c.locked&&(c.state==='tracking'||c.state==='below_min'||c.state==='verified')
@@ -1168,8 +1174,10 @@
           </div>
           <p class="muted" style="font-size:.78rem;margin:.3rem 0 .9rem">Once a video is paid for it locks: the amount is final and later views do not change it.</p>`+(payments.length
           ? `<div class="card"><div class="table-wrap"><table>
-              <thead><tr><th>Date</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
-              <tbody>${payments.map(p=>`<tr><td>${when(p.paid_at)}</td><td>${esc(p.campaign_name||'General')}</td>
+              <thead><tr><th>Date</th><th>Type</th><th>Campaign</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
+              <tbody>${payments.map(p=>`<tr><td>${when(p.paid_at)}</td>
+                <td>${p.kind==='advance'?'Advance':p.kind==='bonus'?'Bonus':'Payout'}</td>
+                <td>${esc(p.campaign_name||'General')}</td>
                 <td class="muted">${esc(p.method||'—')}</td><td class="muted">${esc(p.reference||'—')}</td>
                 <td class="money">${money(p.amount)}</td></tr>`).join('')}</tbody></table></div></div>`
           : '<div class="card"><p class="muted" style="font-size:.85rem">No payments recorded yet. Everything you earn shows as outstanding until it\'s paid out.</p></div>');

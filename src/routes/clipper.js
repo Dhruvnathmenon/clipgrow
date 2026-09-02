@@ -4,9 +4,10 @@ import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
-  unlinkParticipationAccount, SPEND_EXPR, spendExpr
+  unlinkParticipationAccount, SPEND_EXPR, spendExpr, maxPayoutPerVideo
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
+import { explainEarning, explainEarningText } from '../earning-math.js';
 import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
 import {
   accessState, accessGuidance, submitAccessRequest, normaliseIdentifier, validateIdentifier
@@ -147,7 +148,11 @@ export async function handleClipper(request, env, url) {
 
   if (pathname === '/api/clipper/payments' && method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT p.id, p.amount, p.method, p.reference, p.note, p.paid_at, c.name AS campaign_name
+      // `kind` was never selected, so a clipper could not tell a settlement
+      // from an advance from a bonus -- and their "Paid" total silently
+      // included bonuses that are deliberately NOT deducted from what they
+      // are still owed, with no way on screen to reconcile the two.
+      `SELECT p.id, p.amount, p.kind, p.method, p.reference, p.note, p.paid_at, c.name AS campaign_name
        FROM payments p LEFT JOIN campaigns c ON c.id = p.campaign_id
        WHERE p.clipper_id = ? ORDER BY p.paid_at DESC`
     ).bind(clipperId).all();
@@ -438,7 +443,7 @@ export async function handleClipper(request, env, url) {
               s.last_ok_sync_at, s.locked_at, s.locked_earning, s.lock_reason,
               s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
               s.platform, s.duration_seconds, s.is_short, s.eligible,
-              c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views,
+              c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views, c.blueprint_json,
               a.username AS account_username,
               p.paid_at AS payment_paid_at
        FROM submissions s
@@ -451,6 +456,11 @@ export async function handleClipper(request, env, url) {
     return json({
       clips: (results || []).map(s => {
         const state = clipState(s);
+        const why = explainEarning(s, {
+          cpm: s.cpm,
+          minViews: s.min_views || 0,
+          maxPerVideo: maxPayoutPerVideo(s)
+        });
         return {
           id: s.id,
           campaign_id: s.campaign_id,
@@ -469,6 +479,13 @@ export async function handleClipper(request, env, url) {
           cpm: s.cpm,
           min_views: s.min_views || 0,
           views_needed: Math.max(0, (s.min_views || 0) - s.views),
+          // cpm and min_views were already being sent and the row renderer
+          // ignored them, so a clipper saw a number with no way to check it.
+          // Worse, a clip reduced by the per-video cap or by the campaign
+          // budget running out simply showed a smaller figure with no
+          // explanation available anywhere on their side of the product.
+          why,
+          why_text: explainEarningText(why),
           state,
           state_message: clipStateMessage(state, s),
           locked: !!s.locked_at,

@@ -254,9 +254,10 @@
       </div>
       <div class="panel">
         <h2 class="panel-title">All Clippers</h2>
+        <div id="clippers-total" class="note" style="margin-bottom:.6rem"></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Clipper Earnings</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="clippers-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Settled</th><th>Pending</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="clippers-body"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
       <div class="panel">
@@ -1388,16 +1389,29 @@
     async function loadClippers(){
       const {clippers}=await api('/api/admin/clippers');
       CLIPPERS=clippers;
+      // The Overview header shows the same number computed server-side. Printing
+      // the sum here too means the two are visibly checkable against each other,
+      // which is exactly what was not true when they used different formulas.
+      const sumOwed=clippers.reduce((n,c)=>n+(c.money.owed||0),0);
+      const sumPending=clippers.reduce((n,c)=>n+(c.money.pending||0),0);
+      const sumAdv=clippers.reduce((n,c)=>n+(c.money.advanced||0),0);
+      document.getElementById('clippers-total').innerHTML=
+        `<strong>${money(sumOwed)}</strong> left to pay across ${clippers.length} clipper(s)`+
+        ` &nbsp;·&nbsp; ${money(sumPending)} pending`+
+        (sumAdv?` &nbsp;·&nbsp; ${money(sumAdv)} advanced and not yet recovered`:'')+
+        `<div style="margin-top:.25rem;opacity:.75">* Paid includes bonuses, which are given on top of earnings and are not deducted from Left to Pay.</div>`;
       const tb=document.getElementById('clippers-body');
-      if(!clippers.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No clippers yet.</td></tr>'; return; }
+      if(!clippers.length){ tb.innerHTML='<tr><td colspan="10" class="empty">No clippers yet.</td></tr>'; return; }
       tb.innerHTML=clippers.map(c=>`
         <tr class="row-click" onclick="toggleClipper(${c.id})">
           <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
           <td>${num(c.campaigns)}</td>
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}${c.accounts_mismatched>0?` <span class="badge needs_reauth" title="Connected account doesn't match what was approved">⚠ mismatch</span>`:''}</td>
           <td class="money">${money(c.money.earned)}</td>
-          <td>${money(c.money.paid)}</td>
-          <td class="gold">${money(c.money.owed)}</td>
+          <td class="muted">${money(c.money.settled)}</td>
+          <td>${money(c.money.pending)}</td>
+          <td title="${c.money.bonuses?'Includes '+money(c.money.bonuses)+' in bonuses, which are NOT deducted from Left to Pay':'Settlements and advances'}">${money(c.money.paid)}${c.money.bonuses?' *':''}</td>
+          <td class="gold">${money(c.money.owed)}${c.money.advanced?`<div class="muted" style="font-size:.68rem">after ${money(c.money.advanced)} advanced</div>`:''}</td>
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>

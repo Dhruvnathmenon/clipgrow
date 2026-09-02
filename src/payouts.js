@@ -1,4 +1,5 @@
 import { now, maxPayoutPerVideo } from './db.js';
+import { cpmEarning, explainEarning, explainEarningText } from './earning-math.js';
 import { clipState, clipStateMessage, daysSince } from './clipstate.js';
 import { platformLabel } from './platforms.js';
 import { reallocateCampaign } from './earnings.js';
@@ -72,12 +73,11 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
   const clips = (results || []).map(r => {
     const state = clipState(r);
     const maxPerVideo = maxPayoutPerVideo(r);
-    const uncapped = r.views >= (r.min_views || 0)
-      // Must match allocateCampaignEarnings exactly -- see the note there on
-      // multiplying before dividing. If these two drift, the amount shown to
-      // the admin stops matching the amount the clip is actually locked at.
-      ? Math.floor((r.views * (r.cpm || 0)) / 1000)
-      : 0;
+    // Same function the allocator writes with, so the two cannot drift.
+    const uncapped = r.views >= (r.min_views || 0) ? cpmEarning(r.views, r.cpm) : 0;
+    const why = explainEarning(r, {
+      cpm: r.cpm, minViews: r.min_views || 0, maxPerVideo
+    });
     const ageDays = clipAgeDays(r);
     // Mirrors clipState's own 'below_min' gate exactly (src/clipstate.js) --
     // a clip only counts as "under the minimum" once it has actually been
@@ -115,6 +115,11 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       state,
       state_message: clipStateMessage(state, r),
       below_min: belowMin,
+      // Which of the allocator's reductions actually bit. A clip clamped
+      // because the campaign ran out of budget used to be indistinguishable
+      // from one that simply had fewer views.
+      why,
+      why_text: explainEarningText(why),
       age_days: ageDays,
       // Any clip still under the minimum is due for write-off the moment a
       // payout is run over it -- the payout window itself is the grace

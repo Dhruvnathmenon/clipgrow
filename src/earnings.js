@@ -1,3 +1,4 @@
+import { cpmEarning } from './earning-math.js';
 import { maxPayoutPerVideo } from './db.js';
 import { getAdapter, campaignPlatforms } from './platforms.js';
 import { makeCallCounter, getBudget, MAX_CLIPS_FOR_FULL_REFRESH, CLIP_COOLDOWN_MS } from './rate-budget.js';
@@ -309,12 +310,11 @@ export async function allocateCampaignEarnings(db, campaignId) {
       allocated = 0;
     } else {
       // Threshold cleared -- earns on the FULL view count, not just the excess.
-      // Multiply BEFORE dividing. (views / 1000) * cpm goes through a binary
-      // fraction that lands a hair under the true value, so Math.floor drops a
-      // rupee: at cpm 25, 1160 views gives 28 instead of 29. Across cpm
-      // 10..333 and views 0..500k there are 6182 such view counts and the
-      // error is one-directional -- it only ever underpays the creator.
-      let naive = Math.floor((sub.views * cpm) / 1000);
+      // The rounding rule lives in cpmEarning; this used to be a second copy of
+      // it, with payableClips holding a third, and a comment warning that a
+      // drift between them would make the displayed amount stop matching the
+      // amount a clip is actually locked at.
+      let naive = cpmEarning(sub.views, cpm);
       // Per-video ceiling from the campaign blueprint, when one is set.
       if (maxPerVideo > 0) naive = Math.min(naive, maxPerVideo);
       allocated = Math.max(0, Math.min(naive, Math.max(0, remaining)));
