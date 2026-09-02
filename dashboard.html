@@ -296,7 +296,15 @@
     .pf-av { width:48px; height:48px; border-radius:12px; background:var(--neon); color:#060E06; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.35rem; flex-shrink:0; }
     .pf-name { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:1.1rem; }
     .pf-rank { font-size:.78rem; color:var(--muted-l); margin-top:.1rem; }
-    .pf-foot { padding:.9rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
+    .pf-foot { padding:.9rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem; }
+
+    /* Password-change modal (reuses .pf/.pf-inner/.pf-foot shell) */
+    #pw-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
+    #pw-back.open { display:flex; }
+    .form-group { margin-bottom:.9rem; }
+    .form-group label { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.35rem; }
+    .form-group input { width:100%; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.6rem .8rem; color:var(--white); font-size:.88rem; font-family:'Inter',sans-serif; }
+    .form-group input:focus { outline:none; border-color:var(--neon); }
 
     /* Instagram connect guide */
     #ig-back { position:fixed; inset:0; background:rgba(4,8,4,.86); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9600; padding:2rem 1rem; overflow-y:auto; }
@@ -364,6 +372,7 @@
           <span class="streak-l" id="wm-streak-l">day streak</span>
         </div>
       </div>
+      <button class="sb-out" onclick="openPasswordModal()">Change Password</button>
       <button class="sb-out" onclick="logout()">Log out</button>
     </div>
   </aside>
@@ -371,7 +380,10 @@
   <main class="main">
     <div class="mob-head">
       <a href="index.html" class="sb-logo" style="padding:0">Clip<span>Grow</span></a>
-      <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-ghost btn-sm" onclick="openPasswordModal()">Password</button>
+        <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+      </div>
     </div>
 
     <div id="ro-banner"></div>
@@ -489,6 +501,24 @@
     <div class="pf">
       <div class="pf-inner" id="pf-body"></div>
       <div class="pf-foot"><button class="btn btn-ghost btn-sm" onclick="closeProfile()">Close</button></div>
+    </div>
+  </div>
+
+  <div id="pw-back" onclick="if(event.target.id==='pw-back')closePasswordModal()">
+    <div class="pf">
+      <div class="pf-inner">
+        <h3 style="margin-bottom:1rem">Change Password</h3>
+        <form id="pw-form">
+          <div class="form-group"><label for="pw-current">Current password</label><input type="password" id="pw-current" required autocomplete="current-password" /></div>
+          <div class="form-group"><label for="pw-new">New password</label><input type="password" id="pw-new" required minlength="6" autocomplete="new-password" /></div>
+          <p class="note" style="margin-top:.3rem">At least 6 characters.</p>
+          <p class="error" id="pw-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
+        </form>
+      </div>
+      <div class="pf-foot">
+        <button class="btn btn-ghost btn-sm" onclick="closePasswordModal()" type="button">Cancel</button>
+        <button class="btn btn-sm" id="pw-submit" onclick="submitPasswordChange()" type="button">Save</button>
+      </div>
     </div>
   </div>
 
@@ -1206,6 +1236,36 @@
       document.getElementById('pf-back').classList.add('open');
     };
     window.closeProfile=function(){ document.getElementById('pf-back').classList.remove('open'); };
+
+    window.openPasswordModal=function(){
+      document.getElementById('pw-current').value='';
+      document.getElementById('pw-new').value='';
+      document.getElementById('pw-error').style.display='none';
+      document.getElementById('pw-back').classList.add('open');
+      document.getElementById('pw-current').focus();
+    };
+    window.closePasswordModal=function(){ document.getElementById('pw-back').classList.remove('open'); };
+    window.submitPasswordChange=async function(){
+      const currentPassword=document.getElementById('pw-current').value;
+      const newPassword=document.getElementById('pw-new').value;
+      const errorEl=document.getElementById('pw-error');
+      const btn=document.getElementById('pw-submit');
+      errorEl.style.display='none';
+      if(!currentPassword||!newPassword){ errorEl.textContent='Fill in both fields.'; errorEl.style.display='block'; return; }
+      if(newPassword.length<6){ errorEl.textContent='New password must be at least 6 characters.'; errorEl.style.display='block'; return; }
+      btn.disabled=true; btn.textContent='Saving…';
+      try{
+        await api('/api/clipper/me/password',{method:'PATCH',body:JSON.stringify({currentPassword,newPassword})});
+        closePasswordModal();
+        toast('Password changed');
+      }catch(e){
+        errorEl.textContent=e.message||'Could not change password.';
+        errorEl.style.display='block';
+      }finally{
+        btn.disabled=false; btn.textContent='Save';
+      }
+    };
+    document.getElementById('pw-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPasswordChange(); } });
 
     /* ── Instagram connect guide ── */
     window.openConnectGuide=function(campaignId,campaignName){

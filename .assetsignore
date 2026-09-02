@@ -1,19 +1,34 @@
-.git
-.git/**
-node_modules
-src
-test
-test/**
+# Files that must never be served publicly by the Worker's ASSETS binding.
+# wrangler's assets.directory is "." (repo root) with run_worker_first, so
+# anything not explicitly routed by src/worker.js falls through to a raw
+# static-file response for whatever exists on disk -- this is the guard
+# against accidentally publishing internal files that way.
+#
+# NOTE: adding this file makes wrangler stop falling back to .gitignore for
+# asset exclusion, so everything from .gitignore has to be repeated here too
+# -- see that file for the source list. Keep the two in sync.
+
+# from .gitignore
+node_modules/
 .wrangler
 .dev.vars*
+!.dev.vars.example
 .env*
-wrangler.jsonc
-wrangler.toml
+!.env.example
+*.log
+
+# internal-only, not meant to be public
+.mcp.json
+.claude/
+docs/
+*.md
+.git/
+.gitignore
 package.json
 package-lock.json
+wrangler.jsonc
+migrations/
+test/
+src/
 schema.sql
-migrations
-.assetsignore
-.gitignore
 remove_blue.py
-*.md

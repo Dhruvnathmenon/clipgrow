@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>ClipGrow — Clipper Login</title>
+  <title>ClipGrow — Log In</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
-      --bg: #080D08; --card: #0F170F; --border: #1A2C1A; --border-s: #223322;
+      --bg: #080D08; --card: #0F170F; --card-h: #141C12; --border: #1A2C1A; --border-s: #223322;
       --neon: #3DFF7A; --glow-s: rgba(61,255,122,.22); --white: #F0F5F0;
       --text: #C4D4C4; --muted: #566056; --muted-l: #849484; --red: #FF4D4D;
     }
@@ -20,47 +21,88 @@
     }
     h1 { font-family: 'Space Grotesk', sans-serif; color: var(--white); }
     .box { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 2.5rem; width: 100%; max-width: 380px; box-shadow: 0 8px 48px rgba(0,0,0,.5); }
-    .logo { font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.5rem; color: var(--white); text-decoration: none; display: block; text-align: center; margin-bottom: 2rem; }
+    .logo { font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.5rem; color: var(--white); text-decoration: none; display: block; text-align: center; margin-bottom: 1.6rem; }
     .logo span { color: var(--neon); }
+
+    /* Role toggle -- same pill pattern as index.html's For Clippers/For Brands switch */
+    .mode-toggle { position: relative; background: var(--card-h); border: 1px solid var(--border-s); border-radius: 8px; padding: 3px; display: flex; margin: 0 auto 1.8rem; width: fit-content; }
+    .mt-btn { position: relative; z-index: 1; padding: .5rem 1.3rem; font-size: .82rem; font-weight: 700; background: transparent; border: none; color: var(--muted-l); cursor: pointer; border-radius: 6px; transition: color .25s; font-family: 'Space Grotesk', sans-serif; }
+    .mt-btn:focus-visible { outline: 2px solid var(--neon); outline-offset: 2px; }
+    .mt-btn[aria-pressed="true"] { color: #060E06; }
+    .mt-slider { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); background: var(--neon); border-radius: 5px; transition: transform .3s cubic-bezier(.4,0,.2,1); box-shadow: 0 0 14px var(--glow-s); }
+    .mt-slider.client { transform: translateX(100%); }
+
+    h1.form-title { font-size: 1.15rem; margin-bottom: 1.4rem; text-align: center }
     .form-group { margin-bottom: 1.1rem; }
     label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted-l); margin-bottom: 0.4rem; }
     input { width: 100%; background: #080D08; border: 1px solid var(--border-s); border-radius: 6px; padding: 0.75rem 1rem; color: var(--white); font-family: 'Inter', sans-serif; outline: none; font-size: 0.95rem; }
     input:focus { border-color: var(--neon); }
     .btn { width: 100%; background: var(--neon); color: #060E06; padding: 0.85rem; border-radius: 6px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; border: none; cursor: pointer; font-size: 0.95rem; margin-top: 0.5rem; box-shadow: 0 4px 20px var(--glow-s); }
     .btn:hover { background: var(--white); }
-    .error { color: var(--red); font-size: 0.83rem; margin-top: 1rem; text-align: center; display: none; }
+    .btn:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+    .error { color: var(--red); font-size: 0.83rem; margin-top: 1rem; text-align: center; }
     .hint { font-size: 0.78rem; color: var(--muted); text-align: center; margin-top: 1.5rem; line-height: 1.6; }
   </style>
 </head>
 <body>
   <div class="box">
-    <a href="index.html" class="logo">Clip<span>Grow</span></a>
-    <h1 style="font-size: 1.2rem; margin-bottom: 1.5rem; text-align: center">Clipper Login</h1>
+    <a href="/" class="logo">Clip<span>Grow</span></a>
+
+    <div class="mode-toggle" role="group" aria-label="Log in as">
+      <button type="button" class="mt-btn" id="tab-clipper" aria-pressed="false" onclick="setRole('clipper')">Clipper</button>
+      <button type="button" class="mt-btn" id="tab-client" aria-pressed="false" onclick="setRole('client')">Client</button>
+      <div class="mt-slider" id="mt-slider"></div>
+    </div>
+
+    <h1 class="form-title" id="form-title">Clipper Login</h1>
     <form id="login-form">
-      <div class="form-group"><label>Username</label><input type="text" id="username" required autocomplete="username" /></div>
-      <div class="form-group"><label>Password</label><input type="password" id="password" required autocomplete="current-password" /></div>
-      <button type="submit" class="btn">Log In</button>
-      <p class="error" id="error">Invalid username or password</p>
+      <div class="form-group"><label for="username">Username</label><input type="text" id="username" required autocomplete="username" /></div>
+      <div class="form-group"><label for="password">Password</label><input type="password" id="password" required autocomplete="current-password" /></div>
+      <button type="submit" class="btn" id="submit-btn">Log In</button>
+      <p class="error" id="error" role="alert" style="display:none">Invalid username or password</p>
     </form>
-    <p class="hint">Don't have an account? Your ClipGrow admin creates it for you and shares the credentials directly.</p>
+    <p class="hint" id="hint">Don't have an account? Your ClipGrow admin creates it for you and shares the credentials directly.</p>
   </div>
   <script>
+    const COPY = {
+      clipper: { title: 'Clipper Login', hint: "Don't have an account? Your ClipGrow admin creates it for you and shares the credentials directly.", endpoint: '/api/clipper/login', redirect: '/dashboard' },
+      client:  { title: 'Client Login',  hint: 'This is the brand portal for tracking your live campaign.', endpoint: '/api/client/login', redirect: '/client-dashboard' }
+    };
+    let role = location.pathname.replace(/\/+$/, '') === '/client' ? 'client' : 'clipper';
+
+    function setRole(next) {
+      role = next;
+      document.getElementById('tab-clipper').setAttribute('aria-pressed', String(role === 'clipper'));
+      document.getElementById('tab-client').setAttribute('aria-pressed', String(role === 'client'));
+      document.getElementById('mt-slider').classList.toggle('client', role === 'client');
+      document.getElementById('form-title').textContent = COPY[role].title;
+      document.getElementById('hint').textContent = COPY[role].hint;
+      document.title = 'ClipGrow — ' + COPY[role].title;
+      document.getElementById('error').style.display = 'none';
+      history.replaceState(null, '', role === 'client' ? '/client' : '/clipper');
+    }
+    setRole(role);
+
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
       const errorEl = document.getElementById('error');
+      const btn = document.getElementById('submit-btn');
       errorEl.style.display = 'none';
+      btn.disabled = true; btn.textContent = 'Logging in…';
       try {
-        const res = await fetch('/api/clipper/login', {
+        const res = await fetch(COPY[role].endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
         });
-        if (!res.ok) throw new Error();
-        location.href = '/dashboard';
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) { errorEl.textContent = body.error || 'Invalid username or password'; throw new Error(); }
+        location.href = COPY[role].redirect;
       } catch {
         errorEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Log In';
       }
     });
   </script>

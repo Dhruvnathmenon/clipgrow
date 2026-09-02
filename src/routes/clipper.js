@@ -1,5 +1,5 @@
 import { json, err, readJson, matchPath } from '../http.js';
-import { createSessionCookie, requireClipper, verifyPassword, clearCookieHeader } from '../auth.js';
+import { createSessionCookie, requireClipper, verifyPassword, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
@@ -50,9 +50,10 @@ export async function handleClipper(request, env, url) {
     const { username, password } = await readJson(request);
     if (!username || !password) return err('Enter your username and password');
     const clipper = await getClipperByUsername(env.DB, username);
-    if (!clipper) return err('Invalid username or password', 401);
+    if (!clipper || clipper.status === 'deleted') return err('Invalid username or password', 401);
     // Disabled clippers may still sign in, read-only, so they can verify any
-    // balance still owed to them.
+    // balance still owed to them. Deleted ones are archived accounts -- they
+    // don't get a login at all, same as a username that never existed.
     const valid = await verifyPassword(password, clipper.password_hash, clipper.password_salt);
     if (!valid) return err('Invalid username or password', 401);
     const cookie = await createSessionCookie('clipper', clipper.id, env.SESSION_SECRET);
@@ -70,7 +71,7 @@ export async function handleClipper(request, env, url) {
   const clipperId = Number(session.sub);
 
   const me = await getClipperById(env.DB, clipperId);
-  if (!me) return json({ error: 'Account no longer exists' }, 401, { 'Set-Cookie': clearCookieHeader('cg_session') });
+  if (!me || me.status === 'deleted') return json({ error: 'Account no longer exists' }, 401, { 'Set-Cookie': clearCookieHeader('cg_session') });
 
   // A disabled account keeps read access to its own numbers but cannot act.
   const readOnly = me.status !== 'active';
@@ -93,6 +94,24 @@ export async function handleClipper(request, env, url) {
       },
       money, streak, totals
     });
+  }
+
+  // Self-service password change. Not gated by blockIfReadOnly -- a disabled
+  // clipper can still sign in (read-only) and should still be able to secure
+  // their own account, same as login itself staying open while disabled.
+  if (pathname === '/api/clipper/me/password' && method === 'PATCH') {
+    const { currentPassword, newPassword } = await readJson(request);
+    if (!currentPassword || !newPassword) return err('Enter your current and new password');
+    const valid = await verifyPassword(currentPassword, me.password_hash, me.password_salt);
+    // 403, not 401 -- dashboard.html's api() helper treats any 401 as "session
+    // expired" and force-redirects to /clipper before this error ever reaches
+    // the modal. This is a wrong-password rejection, not an auth failure.
+    if (!valid) return err('Current password is incorrect', 403);
+    if (String(newPassword).length < 6) return err('New password must be at least 6 characters');
+    const { hash, salt } = await hashPassword(newPassword);
+    await env.DB.prepare('UPDATE clippers SET password_hash = ?, password_salt = ? WHERE id = ?')
+      .bind(hash, salt, clipperId).run();
+    return json({ ok: true });
   }
 
   // Every social account this clipper has linked, and which campaign each drives.
