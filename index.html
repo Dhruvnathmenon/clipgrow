@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ClipGrow — Clipping Agency in India | Get Paid Per 1,000 Views</title>
-  <meta name="description" content="ClipGrow is India's performance clipping agency. Clippers earn ₹30-₹50 per 1,000 verified views with zero followers required. Brands pay only for results — no flat fees, no lock-in. Started in Kerala, now pan-India." />
+  <meta name="description" content="ClipGrow is India's performance clipping agency. Clippers earn ₹30-₹70 per 1,000 verified views with zero followers required. Brands pay only for results — no flat fees, no lock-in. Started in Kerala, now pan-India." />
   <link rel="canonical" href="https://clipgrow.in/" />
 
   <!-- Favicon -->
@@ -289,19 +289,7 @@
     .cd-list.bulleted li::before { content:'—'; position:absolute; left:0; color:var(--neon); }
     .cd-terms li { font-size:.73rem; color:var(--muted); line-height:1.7; }
 
-    /* ─── EARNINGS TIERS ─── */
-    .tiers { display:grid; grid-template-columns:repeat(4,1fr); gap:1.2rem; margin-top:clamp(1.8rem,4vw,2.5rem); }
-    .tier { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:clamp(1.4rem,3vw,2rem) clamp(1.1rem,2.5vw,1.5rem); text-align:center; transition:all .35s; box-shadow:0 2px 14px rgba(0,0,0,.35); }
-    .tier:hover { transform:translateY(-8px); box-shadow:0 20px 48px rgba(0,0,0,.5); }
-    .tier.hot { border-color:var(--neon); background:linear-gradient(150deg,rgba(61,255,122,.08) 0%,var(--card) 55%); box-shadow:0 4px 32px rgba(0,0,0,.5),0 0 0 1px var(--neon),0 8px 40px var(--glow); }
-    .tier-tag { font-size:.65rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted-l); margin-bottom:1.2rem; display:block; }
-    .tier.hot .tier-tag { color:var(--neon); }
-    .tier-cpm { font-size:clamp(2rem,5vw,2.8rem); font-weight:900; font-family:'Space Grotesk',sans-serif; line-height:1; color:var(--white); margin-bottom:.15rem; }
-    .tier-cpm .rs { font-size:55%; vertical-align:super; }
-    .tier.hot .tier-cpm { color:var(--neon); text-shadow:0 0 28px var(--glow-s); }
-    .tier-unit  { font-size:.74rem; color:var(--muted); margin-bottom:1rem; }
-    .tier-range { font-size:.81rem; font-weight:600; color:var(--muted-l); margin-bottom:.45rem; }
-    .tier-desc  { font-size:.77rem; color:var(--muted); line-height:1.6; }
+    /* ─── EARNINGS ─── */
     .payout-strip { margin-top:1.5rem; padding:1rem clamp(.9rem,3vw,1.4rem); border-left:3px solid var(--neon); background:var(--glow); border-radius:0 8px 8px 0; font-size:clamp(.8rem,2vw,.88rem); color:var(--muted-l); line-height:1.7; }
     .payout-strip strong { color:var(--white); }
 
@@ -383,6 +371,8 @@
     .cta-wrap h2 .nc { color:var(--neon); text-shadow:0 0 48px rgba(61,255,122,.5); }
     .cta-wrap p { color:var(--muted-l); font-size:clamp(.88rem,2vw,1rem); max-width:460px; margin:0 auto 2.2rem; position:relative; line-height:1.8; }
     .cta-fine { font-size:.72rem; color:var(--muted); margin-top:1rem; }
+    .cta-btns { display:flex; flex-wrap:wrap; gap:1rem; justify-content:center; position:relative; }
+    @media (max-width:600px){ .cta-btns { flex-direction:column; align-items:stretch; gap:.85rem; } .cta-btns .btn-primary { width:100%; justify-content:center; } }
 
     /* ─── BRAND: OFFER CARDS ─── */
     .offer-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; margin-top:clamp(2rem,4vw,3rem); }
@@ -445,6 +435,50 @@
     .wa-float { position:fixed; bottom:1.8rem; right:1.8rem; background:#25D366; color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.35rem; text-decoration:none; box-shadow:0 4px 20px rgba(37,211,102,.5); z-index:998; transition:all .3s; animation:wa-bounce 3s ease-in-out infinite; }
     @keyframes wa-bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
     .wa-float:hover { transform:scale(1.12) translateY(-3px) !important; box-shadow:0 8px 32px rgba(37,211,102,.65); animation-play-state:paused; }
+    .dc-float { position:fixed; bottom:5.6rem; right:1.8rem; background:#5865F2; color:#fff; width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.35rem; text-decoration:none; box-shadow:0 4px 20px rgba(88,101,242,.5); z-index:998; transition:all .3s; animation:wa-bounce 3s ease-in-out infinite; }
+    .dc-float:hover { transform:scale(1.12) translateY(-3px) !important; box-shadow:0 8px 32px rgba(88,101,242,.65); animation-play-state:paused; }
+    .btn-ico { width:18px; height:18px; flex-shrink:0; }
+    .wa-float svg, .dc-float svg { width:26px; height:26px; }
+
+    /* ─── NAV JOIN DROPDOWN ─── */
+    .nav-join { position:relative; }
+    .nav-join > .btn-nav { display:inline-flex; align-items:center; gap:.4rem; border:none; cursor:pointer; font-family:'Space Grotesk',sans-serif; line-height:1; }
+    .jn-caret { font-size:.62rem; transition:transform .2s; }
+    .nav-join:hover .jn-caret, .nav-join.open .jn-caret { transform:rotate(180deg); }
+    .join-menu {
+      position:absolute; top:calc(100% + 12px); right:0;
+      display:flex; flex-direction:column; gap:.35rem;
+      background:var(--card-h); border:1px solid var(--border);
+      border-radius:10px; padding:.45rem; min-width:220px;
+      box-shadow:0 16px 44px rgba(0,0,0,.55);
+      opacity:0; visibility:hidden; transform:translateY(-6px);
+      transition:opacity .18s ease, transform .18s ease, visibility .18s;
+      z-index:1001;
+    }
+    .join-menu::before { content:''; position:absolute; top:-14px; left:0; right:0; height:14px; }
+    .nav-join:hover .join-menu, .nav-join.open .join-menu, .nav-join:focus-within .join-menu { opacity:1; visibility:visible; transform:translateY(0); }
+    .join-menu a {
+      display:flex !important; align-items:center; gap:.6rem;
+      padding:.6rem .75rem; border-radius:7px; white-space:nowrap;
+      font-size:.82rem !important; font-weight:700 !important;
+      color:var(--white) !important; background:rgba(255,255,255,.04);
+      transition:background .16s;
+    }
+    .join-menu a::after { display:none !important; }
+    .join-menu a:hover { background:rgba(255,255,255,.1); color:var(--white) !important; }
+    .join-menu svg { width:18px; height:18px; flex-shrink:0; }
+    .join-menu .jm-wa svg { color:#25D366; }
+    .join-menu .jm-dc svg { color:#5865F2; }
+    @media (max-width:900px) {
+      .nav-join { width:100%; }
+      .nav-join > .btn-nav { width:100%; justify-content:center; }
+      .nav-join .join-menu {
+        position:static; opacity:1; visibility:visible; transform:none;
+        box-shadow:none; margin-top:.7rem; min-width:0; width:100%;
+        background:transparent; border:none; padding:0;
+      }
+      .nav-join .jn-caret { display:none; }
+    }
 
     /* ─── RESPONSIVE ─── */
     @media (max-width:900px) {
@@ -453,7 +487,6 @@
       .hamburger { display:flex; }
       .why-grid { grid-template-columns:1fr; gap:2rem; }
       .steps, .brand-steps { grid-template-columns:repeat(2,1fr); }
-      .tiers { grid-template-columns:repeat(2,1fr); }
       .calc-cols, .brand-calc-grid { grid-template-columns:1fr; gap:1.8rem; }
       .flow { grid-template-columns:repeat(2,1fr); }
       .terms-grid { grid-template-columns:1fr; }
@@ -468,8 +501,6 @@
       .hero-cta .btn-primary, .hero-cta .btn-ghost { text-align:center; justify-content:center; width:100%; }
       .hero-stats { gap:.6rem; }
       .steps, .brand-steps { grid-template-columns:1fr; }
-      .tiers { grid-template-columns:1fr; }
-      .tiers .tier.hot { order:-1; }
       .flow { grid-template-columns:repeat(2,1fr); gap:.7rem; }
       .flow-c { padding:.85rem .7rem; }
       .fv { font-size:.93rem; }
@@ -493,11 +524,11 @@
       .live-pip { display: inline-block; margin-right: 0.4rem; vertical-align: baseline; }
 
       .terms-grid, .brand-calc-grid, .tr-controls, .offer-grid { grid-template-columns: 1fr; }
-      .steps, .tiers, .flow { grid-template-columns: 1fr 1fr; }
+      .steps, .flow { grid-template-columns: 1fr 1fr; }
       .br-main { margin-bottom: 1rem; }
     }
     @media (max-width:500px) {
-      .steps, .tiers { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
     }
     @media (max-width:400px) {
       nav { padding:.75rem 1rem; }
@@ -527,7 +558,14 @@
   <ul class="nav-links" id="nav-links">
     <li><a href="#" onclick="scrollToSection('how','how-brand')">How it Works</a></li>
     <li><a href="#" onclick="scrollToSection('faq','brand-faq')">FAQ</a></li>
-    <li><a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-nav" target="_blank" rel="noopener">Join Free</a></li>
+    <li><a href="/clipper">Log In</a></li>
+    <li class="nav-join" id="navJoin">
+      <button type="button" class="btn-nav" aria-haspopup="true" aria-expanded="false" onclick="toggleJoin(event)">Join Free <span class="jn-caret">▾</span></button>
+      <div class="join-menu">
+        <a class="jm-wa" href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893A11.821 11.821 0 0020.885 3.488"/></svg>Join on WhatsApp</a>
+        <a class="jm-dc" href="https://discord.gg/zJM6hpQHJ" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>Join on Discord</a>
+      </div>
+    </li>
   </ul>
   <div class="hamburger" id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></div>
 </nav>
@@ -548,25 +586,25 @@
     <div class="ticker-track">
       <span class="ticker-item">India's Performance Clipping Agency <span class="ticker-sep"></span></span>
       <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
-      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹70 per 1,000 views <span class="ticker-sep"></span></span>
       <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
       <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
       <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
       <span class="ticker-item">India's Performance Clipping Agency <span class="ticker-sep"></span></span>
       <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
-      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹70 per 1,000 views <span class="ticker-sep"></span></span>
       <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
       <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
       <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
       <span class="ticker-item">India's Performance Clipping Agency <span class="ticker-sep"></span></span>
       <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
-      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹70 per 1,000 views <span class="ticker-sep"></span></span>
       <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
       <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
       <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
       <span class="ticker-item">India's Performance Clipping Agency <span class="ticker-sep"></span></span>
       <span class="ticker-item">Clip. Post. Earn. <span class="ticker-sep"></span></span>
-      <span class="ticker-item">₹30–₹50 per 1,000 views <span class="ticker-sep"></span></span>
+      <span class="ticker-item">₹30–₹70 per 1,000 views <span class="ticker-sep"></span></span>
       <span class="ticker-item">Zero Investment Required <span class="ticker-sep"></span></span>
       <span class="ticker-item">All Resources Provided <span class="ticker-sep"></span></span>
       <span class="ticker-item">Paid Every Month via UPI <span class="ticker-sep"></span></span>
@@ -593,13 +631,13 @@
         <span class="tag">Zero Investment Required</span><span class="tag">Work From Phone</span><span class="tag">UPI Payouts</span><span class="tag">All Resources Provided</span><span class="tag">Anyone Can Try It</span>
       </div>
       <div class="hero-cta">
-        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" target="_blank" rel="noopener">Join WhatsApp Community</a>
+        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" target="_blank" rel="noopener"><svg class="btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893A11.821 11.821 0 0020.885 3.488"/></svg>Join WhatsApp Community</a>
+        <a href="https://discord.gg/zJM6hpQHJ" class="btn-primary" target="_blank" rel="noopener"><svg class="btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>Join Discord</a>
         <a href="#how" class="btn-ghost">See how it works</a>
       </div>
       <div class="hero-stats">
-        <div class="stat-pill"><div class="sp-val" data-count="30" data-prefix="₹">₹30</div><div class="sp-lbl">Starting CPM</div></div>
-        <div class="stat-pill"><div class="sp-val" data-count="50" data-prefix="₹">₹50</div><div class="sp-lbl">Pro CPM</div></div>
-        <div class="stat-pill"><div class="sp-val">UPI</div><div class="sp-lbl">Monthly Payout</div></div>
+        <div class="stat-pill"><div class="sp-val">₹30–₹70</div><div class="sp-lbl">CPM by Campaign</div></div>
+        <div class="stat-pill"><div class="sp-val">UPI</div><div class="sp-lbl">Weekly Payout</div></div>
         <div class="stat-pill"><div class="sp-val" data-count="500" data-prefix="₹">₹500</div><div class="sp-lbl">Min Withdrawal</div></div>
         <div class="stat-pill"><div class="sp-val">Free</div><div class="sp-lbl">To Join</div></div>
       </div>
@@ -617,14 +655,14 @@
             <li>Brands have long-form content — podcasts, interviews, course previews — getting almost zero reach on YouTube.</li>
             <li>We repurpose it into <strong>30–60 second Reels and Shorts</strong> engineered to go viral.</li>
             <li>You earn by <strong>performance</strong>. Every 1,000 verified views = real money in your UPI account.</li>
-            <li>Better edits, better hooks — the more you earn. <strong>No cap. No ceiling. Complete creative agency.</strong></li>
+            <li>Better edits, better hooks — the more you earn. <strong>No cap on views. Complete creative agency.</strong> Each campaign sets its own maximum payout per clip, shown before you join.</li>
             <li>We provide the brand's raw videos, style guides, caption templates, and posting instructions. <strong>You just create.</strong></li>
           </ul>
           <div class="green-strip">Start with a phone and any free editing app. Zero investment, zero risk. If you have skill, there is <strong>absolutely no reason not to try this.</strong></div>
         </div>
         <div class="why-cards">
-          <div class="why-card reveal delay-1"><div class="wc-bar"></div><div><h4>You — The Clipper</h4><p>Earn ₹30–₹50 per 1,000 verified views with no cap. One viral clip in a big campaign can hit ₹10,000+ in a single month — from your phone, on your time.</p></div></div>
-          <div class="why-card reveal delay-2"><div class="wc-bar"></div><div><h4>The Brand</h4><p>Pays nothing upfront. Every rupee tied to real results. More clips = more reach = more sales. Pure performance marketing.</p></div></div>
+          <div class="why-card reveal delay-1"><div class="wc-bar"></div><div><h4>You — The Clipper</h4><p>Earn ₹30–₹70 per 1,000 verified views — we never stop counting. One viral clip in a big campaign can hit ₹10,000+ in a month, up to that campaign’s max payout per clip. From your phone, on your time.</p></div></div>
+          <div class="why-card reveal delay-2"><div class="wc-bar"></div><div><h4>The Brand</h4><p>Commits a budget, pays it in stages, and is only ever charged for views actually delivered. More clips = more reach = more sales. Pure performance marketing.</p></div></div>
           <div class="why-card reveal delay-3"><div class="wc-bar"></div><div><h4>ClipGrow</h4><p>India's performance clipping agency, started in Kerala. We manage campaigns, verify quality, share all brand resources, and handle payouts. Aligned with everyone's success.</p></div></div>
         </div>
       </div>
@@ -639,10 +677,10 @@
       <h2 class="sec-title reveal delay-1">Four steps from zero to paid.</h2>
       <p class="sec-sub reveal delay-2">No experience. No followers. No investment. Brand provides every resource — you show up and create.</p>
       <div class="steps">
-        <div class="step reveal delay-1"><div class="step-n">1</div><h4>Join the Community</h4><p>Hit the WhatsApp button. Campaigns drop every week — source videos, CPM rates, style guides, caption templates, and post instructions all in one place.</p></div>
+        <div class="step reveal delay-1"><div class="step-n">1</div><h4>Join the Community</h4><p>Hit the Discord button. Campaigns drop every week — source videos, CPM rates, style guides, caption templates, and post instructions all in one place.</p></div>
         <div class="step reveal delay-2"><div class="step-n">2</div><h4>Pick a Campaign</h4><p>Browse active campaigns. Full brand guidelines and source material shared before you commit. No surprises, no hidden rules.</p></div>
         <div class="step reveal delay-3"><div class="step-n">3</div><h4>Edit and Post</h4><p>Download the source video, cut the best 30–60 seconds, add captions using any editing tool (even from your mobile), and post to Instagram Reels or YouTube Shorts.</p></div>
-        <div class="step reveal delay-4"><div class="step-n">4</div><h4>Submit and Get Paid</h4><p>Submit your link at month-end. We verify views and quality. Approved clippers receive UPI payment by the 7th of the following month.</p></div>
+        <div class="step reveal delay-4"><div class="step-n">4</div><h4>Submit and Get Paid</h4><p>Submit your link as soon as you post. We verify views and quality. Payouts go out every Sunday over UPI, once your balance has reached ₹500.</p></div>
       </div>
     </div>
   </section>
@@ -659,19 +697,13 @@
     </div>
   </section>
 
-  <!-- Earnings Tiers -->
+  <!-- Earnings -->
   <section id="earnings">
     <div class="container">
       <div class="sec-eyebrow reveal">What You Earn</div>
-      <h2 class="sec-title reveal delay-1">Performance-based tiers.</h2>
-      <p class="sec-sub reveal delay-2">More views this month = higher CPM. Tiers auto-calculate from your verified views every 30 days.</p>
-      <div class="tiers">
-        <div class="tier reveal delay-1"><span class="tier-tag">Beginner</span><div class="tier-cpm"><span class="rs">₹</span>30</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">0 – 10,000 views / month</div><div class="tier-desc">Start from zero. No minimum clip count. Earn while you learn the skill.</div></div>
-        <div class="tier hot reveal delay-2"><span class="tier-tag">Active</span><div class="tier-cpm"><span class="rs">₹</span>40</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">10,000 – 50,000 views / month</div><div class="tier-desc">Most clippers hit Active in 2–4 weeks. Consistent posting with strong hooks gets you here.</div></div>
-        <div class="tier reveal delay-3"><span class="tier-tag">Pro</span><div class="tier-cpm"><span class="rs">₹</span>50</div><div class="tier-unit">per 1,000 verified views</div><div class="tier-range">50,000 – 1,00,000 views / month</div><div class="tier-desc">For dedicated clippers building consistent reach across multiple campaigns.</div></div>
-        <div class="tier reveal delay-4"><span class="tier-tag">Elite</span><div class="tier-cpm" style="font-size:clamp(1.2rem,4vw,1.55rem);margin-top:.4rem;color:var(--neon)">Contact us</div><div class="tier-unit">custom rate + bonuses</div><div class="tier-range">1,00,000+ views / month</div><div class="tier-desc">Hit 1L views and we negotiate a custom CPM plus monthly performance bonuses.</div></div>
-      </div>
-      <div class="payout-strip reveal"><strong>Monthly payout cycle.</strong> Views locked last day of month. UPI payments by the 7th. Min payout ₹500 — balance rolls over.</div>
+      <h2 class="sec-title reveal delay-1">Paid per campaign, per 1,000 views.</h2>
+      <p class="sec-sub reveal delay-2">Every clipper on a campaign earns the same CPM — no tiers, no ranking, no seniority. Rates run from <strong>₹30 to ₹70 per 1,000 views</strong> depending on the campaign, and the rate is set by the campaign, not by you. Check the live rate on each campaign above before you join.</p>
+      <div class="payout-strip reveal"><strong>Weekly payout cycle.</strong> Views verified continuously, UPI payouts every Sunday. Min payout ₹500 per run — anything below that rolls over to the next Sunday.</div>
     </div>
   </section>
 
@@ -680,13 +712,13 @@
     <div class="container">
       <div class="sec-eyebrow reveal">Earnings Calculator</div>
       <h2 class="sec-title reveal delay-1">How much could you make?</h2>
-      <p class="sec-sub reveal delay-2">Move the sliders. See your real potential based on clips posted and average views.</p>
+      <p class="sec-sub reveal delay-2">Move the sliders. See your real potential based on clips posted and average views. Figures are a monthly projection — payouts go out weekly, and this estimate does not apply any campaign’s per-clip ceiling.</p>
       <div class="calc-box reveal">
         <div class="calc-cols">
           <div>
             <div class="s-wrap"><label class="c-lbl">Clips posted per month</label><div class="s-row"><span class="s-hint">1</span><span class="s-cur" id="c-clips">15 clips</span><span class="s-hint">60</span></div><input type="range" id="sl-clips" min="1" max="60" value="15" oninput="calcUpdate()"></div>
             <div class="s-wrap"><label class="c-lbl">Average views per clip</label><div class="s-row"><span class="s-hint">500</span><span class="s-cur" id="c-views">5,000</span><span class="s-hint">1L</span></div><input type="range" id="sl-views" min="500" max="100000" step="500" value="5000" oninput="calcUpdate()"></div>
-            <div><label class="c-lbl" style="margin-bottom:.6rem">Your tier</label><div class="pills"><button class="pill on" onclick="setTier(30,this)">₹30 Beginner</button><button class="pill" onclick="setTier(40,this)">₹40 Active</button><button class="pill" onclick="setTier(50,this)">₹50 Pro</button></div></div>
+            <div><label class="c-lbl" style="margin-bottom:.6rem">Campaign CPM</label><div class="pills"><button class="pill on" onclick="setTier(30,this)">₹30</button><button class="pill" onclick="setTier(40,this)">₹40</button><button class="pill" onclick="setTier(50,this)">₹50</button><button class="pill" onclick="setTier(60,this)">₹60</button><button class="pill" onclick="setTier(70,this)">₹70</button></div></div>
           </div>
           <div class="calc-out">
             <div class="result-box"><div class="r-lbl">Estimated Monthly Earnings</div><div class="r-num" id="r-earn">₹2,250</div><div class="r-sub" id="r-sub">from 75,000 total views</div></div>
@@ -718,7 +750,7 @@
         <div class="term no"><div class="t-badge v">Violation</div><div><h4>False or exaggerated claims</h4><p>Do not make claims the brand hasn't approved — no fake testimonials, fabricated income figures, or misleading statistics.</p></div></div>
         <div class="term no"><div class="t-badge v">Violation</div><div><h4>Spam distribution</h4><p>Do not push clips into unrelated groups. Post only where audiences genuinely match the content niche.</p></div></div>
       </div>
-      <div class="terms-note reveal"><strong>Brand-specific terms</strong> — restrictions, posting schedule, account requirements — disclosed in full in the WhatsApp community <span class="nc">before you commit to any campaign.</span></div>
+      <div class="terms-note reveal"><strong>Brand-specific terms</strong> — restrictions, posting schedule, account requirements — disclosed in full in the Discord community <span class="nc">before you commit to any campaign.</span></div>
     </div>
   </section>
 
@@ -731,9 +763,9 @@
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">Do I need followers or an existing account? <span class="faq-ic">+</span></div><div class="faq-a">No. You can start on a brand new account with zero followers. What determines your earnings is edit quality and your hook — not your audience size. Many clippers on fresh accounts have generated lakhs of views in their first month.</div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What do I need to get started? <span class="faq-ic">+</span></div><div class="faq-a">A smartphone is all you need.<ul><li>Any free video editing app</li><li>Instagram or YouTube account — free to create</li><li>Stable internet for uploads</li></ul>We provide all brand source videos, style guides, caption templates, and posting instructions inside the community.</div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What resources does ClipGrow provide? <span class="faq-ic">+</span></div><div class="faq-a">Everything you need:<ul><li>Brand source videos (raw footage to clip from)</li><li>Brand style guide and tone of voice</li><li>Caption and CTA templates</li><li>Posting schedule and platform guidelines</li><li>A community of clippers to learn from</li></ul></div></div>
-        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">When exactly do I get paid? <span class="faq-ic">+</span></div><div class="faq-a">Views locked last day of month. UPI payments by the 7th of the following month.<ul><li>Minimum payout: ₹500</li><li>Balance below ₹500 rolls over</li><li>Supported: GPay, PhonePe, Paytm</li></ul></div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">When exactly do I get paid? <span class="faq-ic">+</span></div><div class="faq-a">Payouts run every Sunday over UPI.<ul><li>Minimum payout: ₹500 per run</li><li>Anything below ₹500 rolls over to the next Sunday</li><li>Supported: GPay, PhonePe, Paytm</li></ul></div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">Is there any fee to join? <span class="faq-ic">+</span></div><div class="faq-a">None. ClipGrow is completely free. No fee to access campaigns, receive payouts, or participate. Zero investment — ever. You clip, we verify, you get paid.</div></div>
-        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What if a clip goes viral — millions of views? <span class="faq-ic">+</span></div><div class="faq-a">You get paid for every verified view with no cap. 10L views at ₹50 CPM = ₹50,000 from a single month. One algorithm-catching clip can change your income entirely.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What if a clip goes viral — millions of views? <span class="faq-ic">+</span></div><div class="faq-a">There’s no cap on views — we keep counting however far a clip travels. 10L views at ₹50 CPM = ₹50,000 in a month. Each campaign does set a maximum payout per clip, shown on the campaign before you join, so check that ceiling when you pick one.</div></div>
       </div>
     </div>
   </section>
@@ -743,8 +775,11 @@
     <div class="container">
       <div class="cta-wrap reveal">
         <h2>Get paid for your skill.<br><span class="nc">There's no reason not to try.</span></h2>
-        <p>Zero investment. Zero followers required. All resources provided. One WhatsApp join and you're in India's performance clipping agency — earning on your own terms.</p>
-        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" style="font-size:1rem;padding:1rem 2.5rem" target="_blank" rel="noopener">Join WhatsApp Community — Free</a>
+        <p>Zero investment. Zero followers required. All resources provided. One Discord join and you're in India's performance clipping agency — earning on your own terms.</p>
+        <div class="cta-btns">
+        <a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="btn-primary" style="font-size:1rem;padding:1rem 2.5rem" target="_blank" rel="noopener"><svg class="btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893A11.821 11.821 0 0020.885 3.488"/></svg>Join WhatsApp Community — Free</a>
+        <a href="https://discord.gg/zJM6hpQHJ" class="btn-primary" style="font-size:1rem;padding:1rem 2.5rem" target="_blank" rel="noopener"><svg class="btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>Join Discord — Free</a>
+        </div>
         <p class="cta-fine">No followers required &nbsp;·&nbsp; No joining fee &nbsp;·&nbsp; All resources provided &nbsp;·&nbsp; Paid every month via UPI</p>
       </div>
     </div>
@@ -797,16 +832,16 @@
         <span class="word c-neon" style="animation-delay:.25s">for</span>
         <span class="word c-neon" style="animation-delay:.38s">results.</span>
       </h1>
-      <p class="hero-sub">We run short-form video campaigns across dozens of creators for your brand. <span class="kw">Your marketing budget will be used only for verified views.</span> Zero upfront, zero risk.</p>
+      <p class="hero-sub">We run short-form video campaigns across dozens of creators for your brand. <span class="kw">Your marketing budget will be used only for verified views.</span> You pay 40% to start and the rest as it is used — anything unspent comes back.</p>
       <div class="hero-tags">
-        <span class="tag">No Upfront Cost</span><span class="tag">Performance Based</span><span class="tag">We Handle Distribution</span><span class="tag">Guidelines Verified</span><span class="tag">20% Management Fee</span>
+        <span class="tag">40% To Start</span><span class="tag">Performance Based</span><span class="tag">We Handle Distribution</span><span class="tag">Guidelines Verified</span><span class="tag">20% Management Fee</span>
       </div>
       <div class="hero-cta">
         <a href="https://wa.me/918086555528?text=Hi%20ClipGrow%2C%20I%27m%20interested%20in%20running%20a%20campaign%20for%20my%20brand." class="btn-primary" target="_blank" rel="noopener">Message Us on WhatsApp</a>
         <a href="#brand-calc-sec" class="btn-ghost">See the calculator</a>
       </div>
       <div class="hero-stats">
-        <div class="stat-pill"><div class="sp-val">0</div><div class="sp-lbl">Upfront Cost</div></div>
+        <div class="stat-pill"><div class="sp-val">40%</div><div class="sp-lbl">Paid Upfront</div></div>
         <div class="stat-pill"><div class="sp-val">20%</div><div class="sp-lbl">Management Fee</div></div>
         <div class="stat-pill"><div class="sp-val">100%</div><div class="sp-lbl">Distribution Handled</div></div>
         <div class="stat-pill"><div class="sp-val">0</div><div class="sp-lbl">Pay if No Results</div></div>
@@ -821,7 +856,7 @@
       <h2 class="sec-title reveal delay-1">An offer you can't refuse.</h2>
       <p class="sec-sub reveal delay-2">A model so aligned with your success that there is literally no reason not to say yes.</p>
       <div class="offer-grid">
-        <div class="offer-card reveal delay-1"><span class="oc-icon">🎯</span><h3>Pay Only for Results</h3><p>No results, no payment. We only earn when your campaign generates real sales or traffic. Every rupee you spend is tied to measurable outcomes.</p></div>
+        <div class="offer-card reveal delay-1"><span class="oc-icon">🎯</span><h3>Pay Only for Delivery</h3><p>Your budget only ever converts into views that actually happened. Stop on five days’ notice and whatever has not been spent is refunded — we only earn our fee on what was delivered.</p></div>
         <div class="offer-card reveal delay-2"><span class="oc-icon">📦</span><h3>We Handle Everything</h3><p>Campaign brief, creator recruitment, content review, distribution, compliance — handled entirely by ClipGrow. You share your product. We do the rest.</p></div>
         <div class="offer-card reveal delay-3"><span class="oc-icon">🛡️</span><h3>Brand Safety Guaranteed</h3><p>Every clip is reviewed before it counts. We verify CTA accuracy, guideline compliance, and that your brand is portrayed positively. Violations disqualify clippers permanently.</p></div>
       </div>
@@ -832,7 +867,7 @@
         <div class="brand-steps" style="margin-top:1.5rem">
           <div class="step reveal delay-1"><div class="step-n">1</div><h4>Share Your Product</h4><p>Send us your product details, existing content (if any), and campaign objective. We build the brief, recruit clippers, and set brand guidelines.</p></div>
           <div class="step reveal delay-2"><div class="step-n">2</div><h4>We Distribute</h4><p>Dozens of creators clip and post verified content to their Instagram Reels and YouTube Shorts audiences. We review every single clip for brand compliance before it counts.</p></div>
-          <div class="step reveal delay-3"><div class="step-n">3</div><h4>You Pay for Results</h4><p>Tracked via your custom link. Sales and traffic are measured. At month-end, you pay only for the outcomes delivered. No outcome = no invoice.</p></div>
+          <div class="step reveal delay-3"><div class="step-n">3</div><h4>You Pay for Delivery</h4><p>Tracked via your custom link. Sales and traffic are measured. You pay 40% to start and the remaining 60% as that first tranche runs down — only ever for views actually delivered. Stop on five days’ notice and the unspent balance comes back.</p></div>
         </div>
       </div>
     </div>
@@ -885,7 +920,7 @@
                 </div>
               </div>
               <div class="green-strip" style="margin-top:.8rem;font-size:.78rem">
-                <strong>How it works:</strong> 20% of your budget = ClipGrow's management fee. 80% goes directly to paying editors based on the CPM you set. Editors keep posting until the editor pool is fully used.
+                <strong>How it works:</strong> 100% of your budget pays clippers at the CPM you set — we take nothing out of it. Our 20% management fee sits on top, so your total is 120% of the budget. Clippers keep posting until the pool is fully used.
               </div>
             </div>
             <div class="brand-results">
@@ -896,7 +931,7 @@
               </div>
               <div class="br-grid">
                 <div class="br-card"><div class="br-card-lbl">ClipGrow Fee (20%)</div><div class="br-card-val" id="bs-fee">₹10,000</div></div>
-                <div class="br-card"><div class="br-card-lbl">Editor Pool (80%)</div><div class="br-card-val" id="bs-pool">₹40,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Clipper Pool (100%)</div><div class="br-card-val" id="bs-pool">₹50,000</div></div>
                 <div class="br-card"><div class="br-card-lbl">Views Generated</div><div class="br-card-val" id="bs-views">13,33,333</div></div>
                 <div class="br-card"><div class="br-card-lbl">Estimated Sales</div><div class="br-card-val green" id="bs-sales">133</div></div>
               </div>
@@ -904,7 +939,7 @@
                 <div class="br-row"><span>Link clicks (1% CTR)</span><span id="bs-clicks">13,333</span></div>
                 <div class="br-row"><span>Sales (1% of clicks)</span><span id="bs-sales2">133</span></div>
                 <div class="br-row"><span>Revenue (sales × price)</span><span id="bs-rev2" style="color:var(--neon)">₹10,64,000</span></div>
-                <div class="br-row"><span>Your cost (total budget)</span><span id="bs-cost">₹50,000</span></div>
+                <div class="br-row"><span>Your total cost (budget + 20% fee)</span><span id="bs-cost">₹60,000</span></div>
                 <div class="br-row"><span>ROI</span><span id="bs-roival" style="color:var(--neon)">2,028%</span></div>
                 <div class="br-row"><span>Cost per sale</span><span id="bs-cps">₹376</span></div>
               </div>
@@ -939,7 +974,7 @@
                 </div>
               </div>
               <div class="green-strip" style="margin-top:.8rem;font-size:.78rem">
-                <strong>How it works:</strong> 20% goes to ClipGrow. 80% pays editors via your CPM rate. The content drives traffic to your landing page or social profiles — brand awareness at scale.
+                <strong>How it works:</strong> 100% of your budget pays clippers via your CPM rate — our 20% management fee sits on top, for a total of 120%. The content drives traffic to your landing page or social profiles — brand awareness at scale.
               </div>
             </div>
             <div class="brand-results">
@@ -950,16 +985,16 @@
               </div>
               <div class="br-grid">
                 <div class="br-card"><div class="br-card-lbl">ClipGrow Fee (20%)</div><div class="br-card-val" id="bt-fee">₹10,000</div></div>
-                <div class="br-card"><div class="br-card-lbl">Editor Pool (80%)</div><div class="br-card-val" id="bt-pool">₹40,000</div></div>
+                <div class="br-card"><div class="br-card-lbl">Clipper Pool (100%)</div><div class="br-card-val" id="bt-pool">₹50,000</div></div>
                 <div class="br-card"><div class="br-card-lbl">Views Generated</div><div class="br-card-val" id="bt-views">13,33,333</div></div>
                 <div class="br-card"><div class="br-card-lbl">Cost per Visitor</div><div class="br-card-val green" id="bt-cpv">₹3.75</div></div>
               </div>
               <div class="br-breakdown">
-                <div class="br-row"><span>Total views (from editor pool)</span><span id="bt-views2">13,33,333</span></div>
+                <div class="br-row"><span>Total views (from clipper pool)</span><span id="bt-views2">13,33,333</span></div>
                 <div class="br-row"><span>Website visitors (at set CTR)</span><span id="bt-vis2" style="color:var(--neon)">13,333</span></div>
                 <div class="br-row"><span>Cost per visitor</span><span id="bt-cpv2" style="color:var(--neon)">₹3.75</span></div>
                 <div class="br-row"><span>Equivalent Google Ads spend*</span><span id="bt-gads">₹6,66,650</span></div>
-                <div class="br-row"><span>Your total budget</span><span id="bt-cost">₹50,000</span></div>
+                <div class="br-row"><span>Your total cost (budget + 20% fee)</span><span id="bt-cost">₹60,000</span></div>
               </div>
               <p style="font-size:.68rem;color:var(--muted);margin-top:.5rem">*Google Ads avg CPC ₹50. Comparison for reference only.</p>
             </div>
@@ -973,17 +1008,18 @@
   <section style="background:var(--bg-mid)">
     <div class="container">
       <div class="sec-eyebrow reveal">Why ClipGrow</div>
-      <h2 class="sec-title reveal delay-1">Everything handled. Zero risk.</h2>
+      <h2 class="sec-title reveal delay-1">Everything handled. Nothing wasted.</h2>
       <p class="sec-sub reveal delay-2">We're not an ad agency. We're a performance network that only wins when you win.</p>
       <div class="why-grid" style="margin-top:2rem">
         <div class="reveal-l">
           <ul class="bullet-list">
-            <li>You <strong>never pay upfront</strong>. Budget is allocated, not charged. Payment only occurs on results.</li>
+            <li>You pay in two stages — <strong>40% to start</strong>, the remaining 60% once that first tranche is nearly used. Your budget converts into views at the agreed CPM; you are never charged for views you did not get.</li>
+            <li>Stop any time on <strong>five days’ notice</strong> — we need it so clippers with videos already scheduled can be told, and those clips are compensated. <strong>Everything unspent is refunded.</strong></li>
             <li>We recruit and manage <strong>dozens of creators</strong> for your campaign — you approve the brief, we handle distribution.</li>
             <li>Every clip is <strong>verified against your brand guidelines</strong> before it counts. We check CTA, tone, accuracy, and brand portrayal.</li>
             <li>All creators <strong>follow guidelines that protect your brand</strong> — no false claims, no misleading statistics, no off-brand content.</li>
             <li>You get a <strong>custom tracking link</strong> — every attributed sale or visit is measured. Full transparency, no guesswork.</li>
-            <li>Our fee is <strong>20% of your marketing budget</strong> as a management fee. The remaining 80% goes directly to paying editors based on your CPM.</li>
+            <li><strong>100% of your budget goes to the clippers</strong> — we take nothing out of it. Our <strong>20% management fee sits on top</strong>, so your total commitment is 120% of the campaign budget.</li>
           </ul>
         </div>
         <div class="why-cards">
@@ -995,13 +1031,33 @@
     </div>
   </section>
 
+  <!-- Budget, notice and refunds -->
+  <section id="brand-terms" style="background:var(--bg-mid)">
+    <div class="container">
+      <div class="sec-eyebrow reveal">Budget &amp; Refunds</div>
+      <h2 class="sec-title reveal delay-1">Your money, and how to get it back.</h2>
+      <p class="sec-sub reveal delay-2">No lock-in, no minimum term. You fund the campaign in two stages, we only ever draw against views that actually happened, and you can stop whenever you want.</p>
+      <div class="offer-grid">
+        <div class="offer-card reveal delay-1"><span class="oc-icon">💳</span><h3>What You Commit</h3><p><strong>120% of the campaign budget.</strong> The full 100% becomes the clipper pool and is paid out at the CPM you set — we take nothing from it. The separate <strong>20% management fee</strong> is the only money ClipGrow earns.</p></div>
+        <div class="offer-card reveal delay-2"><span class="oc-icon">📆</span><h3>When You Pay</h3><p><strong>40% upfront</strong> to put the campaign live and give clippers a pool to earn against. The remaining <strong>60%</strong> falls due only once that first tranche is close to used up — never before.</p></div>
+        <div class="offer-card reveal delay-3"><span class="oc-icon">↩️</span><h3>Stopping &amp; Refunds</h3><p>End the campaign any time on <strong>five days’ notice</strong>. We keep only what was spent on delivered views, plus our fee on that portion. <strong>Everything else is refunded.</strong></p></div>
+      </div>
+      <div class="green-strip reveal" style="margin-top:1.6rem">
+        <strong>Worked example.</strong> A ₹1,00,000 budget means a ₹1,20,000 total commitment, of which you pay <strong>₹48,000</strong> upfront. You decide to stop at 30% utilisation: ₹30,000 has gone to clippers and ₹6,000 is our fee on that — ₹36,000 consumed. <strong>₹12,000 comes straight back to you</strong>, less any clips already scheduled inside the notice window.
+      </div>
+      <div class="terms-note reveal"><strong>Why five days?</strong> Clippers plan and schedule content days ahead. The notice window lets us tell everyone working your campaign to stand down — <span class="nc">and any clips they had already scheduled inside that window are compensated, so nobody loses work they had already committed to.</span> It is the one thing we ask for in exchange for letting you leave at will.</div>
+      <div class="terms-note reveal"><strong>What your budget can and cannot be spent on.</strong> Every rupee of the clipper pool is drawn down by verified views at your agreed CPM — nothing else touches it. <span class="nc">Clips that fail brand-guideline review are disqualified and never draw from your budget.</span> Unspent budget is never treated as earned, never expires while the campaign is live, and is returned in full if you close the campaign.</div>
+    </div>
+  </section>
+
   <!-- Brand FAQ -->
   <section id="brand-faq">
     <div class="container">
       <div class="sec-eyebrow reveal">Brand Questions</div>
       <h2 class="sec-title reveal delay-1">FAQ — For Brands</h2>
       <div class="faq-list reveal">
-        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How does the payment model work exactly? <span class="faq-ic">+</span></div><div class="faq-a">You set a marketing budget. 20% goes to ClipGrow as a management/distribution fee. The remaining 80% forms the editor pool — paid to creators based on the CPM you set, until the pool is exhausted. If results don't meet your expectations, you renegotiate the next campaign or walk away. No lock-in.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How does the payment model work exactly? <span class="faq-ic">+</span></div><div class="faq-a">You set a campaign budget. <strong>100% of it forms the clipper pool</strong>, paid out at the CPM you set — we take nothing from it. Our <strong>20% management fee sits on top</strong>, so your total commitment is 120% of the budget. You pay <strong>40% of that upfront</strong> and the remaining 60% as the first tranche runs down. Stop any time on <strong>five days’ notice</strong> — clippers with videos already scheduled are compensated, and everything unspent is refunded. No lock-in.</div></div>
+        <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">Can I stop a campaign, and what happens to my money? <span class="faq-ic">+</span></div><div class="faq-a">Yes, any time — we ask for <strong>five days’ notice</strong> so we can tell clippers to stop, and any clips they had already scheduled in that window are compensated.<ul><li>We keep only what was spent on views actually delivered, plus our 20% fee on that portion</li><li>Everything unspent is refunded</li><li>No lock-in, no minimum term, no cancellation charge</li></ul>Example: on a ₹1,00,000 budget you pay ₹48,000 upfront. Stop at 30% utilisation and ₹36,000 is consumed — ₹12,000 is returned.</div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How do you verify brand guidelines? <span class="faq-ic">+</span></div><div class="faq-a">Every clip is manually reviewed before it counts toward payout or reporting. We check: CTA accuracy, brand tone, visual style, no false claims, no off-brand content. Clips that fail are disqualified — the clipper is not paid and the content is flagged. Your brand is always shown in a positive, accurate light.</div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">What is the minimum budget to run a campaign? <span class="faq-ic">+</span></div><div class="faq-a">Contact us to discuss — we tailor campaigns based on your product price, target audience, and objectives. We'll recommend a budget that makes mathematical sense for your ROI expectations before you commit.</div></div>
         <div class="faq-item"><div class="faq-q" onclick="toggleFaq(this)">How do you track sales and traffic? <span class="faq-ic">+</span></div><div class="faq-a">You provide a unique tracked link (UTM-tagged or your own tracking tool). Every sale or click that comes through that link is attributed to the campaign. We don't touch your backend — you have full visibility at all times.</div></div>
@@ -1037,11 +1093,12 @@
     <a href="/terms">Terms</a>
   </div>
   <p class="foot-note">© 2026 ClipGrow — India's Performance Clipping Agency. All rights reserved.</p>
-  <p class="foot-note">Monthly UPI payouts &nbsp;·&nbsp; Verified views only &nbsp;·&nbsp; Free to join &nbsp;·&nbsp; All resources provided</p>
+  <p class="foot-note">Weekly UPI payouts &nbsp;·&nbsp; Verified views only &nbsp;·&nbsp; Free to join &nbsp;·&nbsp; All resources provided</p>
 </footer>
 
 <!-- WA FLOAT -->
-<a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="wa-float" title="Join ClipGrow on WhatsApp" target="_blank" rel="noopener">💬</a>
+<a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="wa-float" title="Join ClipGrow on WhatsApp" aria-label="Join ClipGrow on WhatsApp" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893A11.821 11.821 0 0020.885 3.488"/></svg></a>
+<a href="https://discord.gg/zJM6hpQHJ" class="dc-float" title="Join ClipGrow on Discord" aria-label="Join ClipGrow on Discord" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg></a>
 
 <script>
   /* ── Cursor Glow (CSS depth shadow, no rAF loop) ── */
@@ -1070,6 +1127,15 @@
   }
   navLinks.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{navLinks.classList.remove('nav-open');burger.querySelectorAll('span').forEach(s=>{s.style.transform='';s.style.opacity='';});}));
   document.addEventListener('click',e=>{if(!navLinks.contains(e.target)&&!burger.contains(e.target)){navLinks.classList.remove('nav-open');burger.querySelectorAll('span').forEach(s=>{s.style.transform='';s.style.opacity='';})}});
+
+  /* ── Nav "Join Free" dropdown ── */
+  const navJoin=document.getElementById('navJoin');
+  window.toggleJoin=function(e){
+    e.preventDefault();e.stopPropagation();
+    const open=navJoin.classList.toggle('open');
+    navJoin.querySelector('.btn-nav').setAttribute('aria-expanded',open?'true':'false');
+  };
+  document.addEventListener('click',e=>{if(navJoin&&!navJoin.contains(e.target)){navJoin.classList.remove('open');navJoin.querySelector('.btn-nav').setAttribute('aria-expanded','false');}});
 
   /* ── Mode Switch ── */
   let currentMode='clipper';
@@ -1176,13 +1242,14 @@
     const price=+document.getElementById('b-price').value||8000;
     const bcpm=+document.getElementById('b-cpm').value||30;
     const fee=Math.round(budget*.20);
-    const pool=budget-fee;
+    const pool=budget;          // 100% of the budget goes to clippers
+    const total=budget+fee;     // what the brand actually pays: 120%
     const views=Math.round((pool/bcpm)*1000);
     const clicks=Math.round(views*.01);
     const sales=Math.round(clicks*.01);
     const revenue=sales*price;
-    const roi=budget>0?Math.round((revenue/budget-1)*100):0;
-    const cps=sales>0?Math.round(budget/sales):0;
+    const roi=total>0?Math.round((revenue/total-1)*100):0;
+    const cps=sales>0?Math.round(total/sales):0;
     document.getElementById('bs-revenue').textContent=rs(revenue);
     document.getElementById('bs-roi-sub').textContent=roi>0?'ROI: +'+roi+'% on your budget':'ROI: calculating...';
     document.getElementById('bs-fee').textContent=rs(fee);
@@ -1192,7 +1259,7 @@
     document.getElementById('bs-clicks').textContent=fmt(clicks);
     document.getElementById('bs-sales2').textContent=sales.toLocaleString('en-IN');
     document.getElementById('bs-rev2').textContent=rs(revenue);
-    document.getElementById('bs-cost').textContent=rs(budget);
+    document.getElementById('bs-cost').textContent=rs(total);
     document.getElementById('bs-roival').textContent=(roi>0?'+':'')+roi+'%';
     document.getElementById('bs-cps').textContent=cps>0?rs(cps):'—';
   }
@@ -1203,10 +1270,11 @@
     const bcpm=+document.getElementById('t-cpm').value||30;
     const ctr=(+document.getElementById('t-ctr').value||1)/100;
     const fee=Math.round(budget*.20);
-    const pool=budget-fee;
+    const pool=budget;          // 100% of the budget goes to clippers
+    const total=budget+fee;     // what the brand actually pays: 120%
     const views=Math.round((pool/bcpm)*1000);
     const visitors=Math.round(views*ctr);
-    const cpv=visitors>0?(budget/visitors).toFixed(2):0;
+    const cpv=visitors>0?(total/visitors).toFixed(2):0;
     const gads=Math.round(visitors*50);
     document.getElementById('t-ctr-lbl').textContent=(ctr*100).toFixed(1)+'%';
     document.getElementById('bt-visitors').textContent=fmt(visitors);
@@ -1219,7 +1287,7 @@
     document.getElementById('bt-vis2').textContent=fmt(visitors);
     document.getElementById('bt-cpv2').textContent='₹'+cpv;
     document.getElementById('bt-gads').textContent=rs(gads);
-    document.getElementById('bt-cost').textContent=rs(budget);
+    document.getElementById('bt-cost').textContent=rs(total);
   }
 
   /* ── FAQ ── */
@@ -1271,7 +1339,6 @@
         <div class="camp-head">
           <div class="live-tag" style="${open?'':'color:var(--muted)'}">${open?'<span class="live-pip2"></span>':''}${STATUS_LABEL[c.status]||c.status}</div>
           <h3>${c.slug?`<a href="/campaigns/${esc(c.slug)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(c.name)}</a>`:esc(c.name)}</h3>
-          ${c.description?`<p>${esc(c.description)}</p>`:''}
         </div>
         <div class="camp-body">
           <div class="camp-nums">
@@ -1291,7 +1358,7 @@
             ${terms?`<div class="cd-group"><div class="cd-title">Terms &amp; Liability</div><ul class="cd-list bulleted cd-terms">${terms}</ul></div>`:''}
             <div style="margin-top:1.2rem" onclick="event.stopPropagation()">
               ${open
-                ? `<a href="https://chat.whatsapp.com/DUU9U19edO04sBSg8K25Mf" class="camp-btn" target="_blank" rel="noopener">Join Community to Apply</a>`
+                ? `<a href="https://discord.gg/zJM6hpQHJ" class="camp-btn" target="_blank" rel="noopener">Join Discord to Apply</a>`
                 : `<span class="camp-btn" style="background:var(--border);color:var(--muted-l);cursor:default;box-shadow:none">${c.status==='budget_full'?'Budget Fully Allocated':'Campaign Closed'}</span>`}
             </div>
           </div>
@@ -1364,7 +1431,7 @@
     {
       "@type": "Question",
       "name": "When exactly do I get paid?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Views lock on the last day of the month. UPI payments go out by the 7th of the following month. Minimum payout is ₹500; any balance below that rolls over. Supported: GPay, PhonePe, Paytm." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Payouts run every Sunday over UPI. The minimum payout is ₹500 per run; anything below that rolls over to the next Sunday. Supported: GPay, PhonePe, Paytm." }
     },
     {
       "@type": "Question",
@@ -1374,12 +1441,17 @@
     {
       "@type": "Question",
       "name": "What if a clip goes viral with millions of views?",
-      "acceptedAnswer": { "@type": "Answer", "text": "You get paid for every verified view with no cap. 10 lakh views at ₹50 CPM equals ₹50,000 from a single month — one algorithm-catching clip can change your income entirely." }
+      "acceptedAnswer": { "@type": "Answer", "text": "There is no cap on views — ClipGrow keeps counting however far a clip travels. 10 lakh views at ₹50 CPM equals ₹50,000. Each campaign sets a maximum payout per clip, shown on the campaign page before you join." }
     },
     {
       "@type": "Question",
       "name": "How does the payment model work for brands?",
-      "acceptedAnswer": { "@type": "Answer", "text": "The brand sets a marketing budget. 20% goes to ClipGrow as a management/distribution fee. The remaining 80% forms the editor pool, paid to creators based on the CPM set, until the pool is exhausted. If results don't meet expectations, the brand renegotiates the next campaign or walks away — no lock-in." }
+      "acceptedAnswer": { "@type": "Answer", "text": "The brand commits 120% of the campaign budget: the full 100% forms the clipper pool and a separate 20% is ClipGrow's management fee. 40% of that total is paid upfront and the remaining 60% falls due as the first tranche nears exhaustion. The entire 100% is paid to creators at the agreed CPM — ClipGrow takes no cut of the budget itself. Brands can stop on five days notice; anything not spent on delivered views is refunded." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can a brand stop a ClipGrow campaign and get a refund?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes, at any time, with five days notice so clippers can be told to stop; clips already scheduled inside that notice window are compensated. ClipGrow keeps only what was spent on views actually delivered plus the 20% management fee on that portion, and everything unspent is refunded. There is no lock-in, no minimum term and no cancellation charge. Example: on a 1,00,000 rupee budget the brand pays 48,000 upfront; stopping at 30% utilisation consumes 36,000 and 12,000 is returned." }
     },
     {
       "@type": "Question",

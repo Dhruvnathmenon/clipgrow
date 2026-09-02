@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "discord": {
+      "type": "http",
+      "url": "http://localhost:8085/mcp"
+    }
+  }
+}
