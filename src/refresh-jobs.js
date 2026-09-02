@@ -23,6 +23,7 @@ import { getAdapter, campaignPlatforms } from './platforms.js';
 import { withAccount, markAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
+import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError } from './refresh-events.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -243,6 +244,17 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
     if (!account || account.status !== 'connected' || !account.access_token) {
       pending.shift();
       stats.skipped += countClips(item);
+      // Was a completely silent drop: the clips simply never got looked at and
+      // nothing anywhere said why.
+      const affected = item.t === 'yt_views' ? item.s : (item.t === 'ig_view' ? [item.s] : []);
+      if (affected.length) {
+        await recordClipEvents(db, affected, {
+          jobId, accountId: item.a, outcome: 'skipped', kind: 'reauth',
+          code: 'ACCOUNT_UNAVAILABLE',
+          message: 'The social account was disconnected or revoked while this refresh was running, so its clips were not checked.',
+          fix: 'Ask the clipper to reconnect the account, then run the refresh again.'
+        });
+      }
       continue;
     }
 
@@ -277,7 +289,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
       if (item.t === 'import') {
         stats.imported += await runImport(db, env, account, counter, adapters);
       } else {
-        const r = await runViews(db, env, account, item, counter, adapters);
+        const r = await runViews(db, env, account, item, counter, adapters, jobId);
         stats.fetched += r.ok;
         stats.failed += r.failed;
         stats.skipped += r.skipped;
@@ -288,6 +300,29 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
       // the per-clip sync already follows.
       stats.failed += countClips(item);
       recordAccountError(acctStats, item.a, account, e);
+
+      // This throw happens BEFORE any per-clip write, so until now the clips
+      // in this item kept whatever stale sync_error they already had (often
+      // none) while clips_failed went up by their count. The reason existed
+      // only as one account-level code in JSON nothing read. Record each clip
+      // properly, with the adapter's own message and fix.
+      const affected = item.t === 'yt_views' ? item.s : (item.t === 'ig_view' ? [item.s] : []);
+      if (affected.length) {
+        await recordClipEvents(db, affected, {
+          jobId, accountId: item.a, outcome: 'failed',
+          code: (e && e.code) || 'UNKNOWN', message: (e && e.message) || null,
+          fix: (e && e.fix) || null, kind: classifyError(e, e && e.code)
+        });
+      } else {
+        // An import leg. countClips() returns 0 for these, so a failed import
+        // added nothing to any counter and was invisible everywhere -- the one
+        // failure whose only symptom is new uploads quietly not arriving.
+        await recordAccountEvent(db, {
+          jobId, account, outcome: 'failed', leg: 'import',
+          code: (e && e.code) || 'UNKNOWN', message: (e && e.message) || null,
+          fix: (e && e.fix) || null, kind: classifyError(e, e && e.code)
+        });
+      }
       // The job's own JSON is thrown away when the panel closes. An auth
       // failure has to land on the ACCOUNT row too, because that is what every
       // screen reads to decide whether to warn the clipper and offer Reconnect.
@@ -374,8 +409,19 @@ export function publicJob(row) {
   let pendingCount = 0;
   try { pendingCount = JSON.parse(row.pending_json || '[]').length; } catch { pendingCount = 0; }
 
+  // pending_json holds the exact remaining submission ids. publicJob reduced
+  // the whole thing to `.length`, so "what is still pending" was a number when
+  // the actual list was one line away.
+  let pendingClips = [];
+  try {
+    pendingClips = JSON.parse(row.pending_json || '[]')
+      .flatMap(i => (i.t === 'yt_views' ? i.s : (i.t === 'ig_view' ? [i.s] : [])))
+      .filter(Boolean);
+  } catch { pendingClips = []; }
+
   const done = row.clips_fetched + row.clips_failed + row.clips_skipped;
   return {
+    pending_clips: pendingClips,
     id: row.id,
     kind: row.kind,
     clipper_id: row.clipper_id,
@@ -442,6 +488,36 @@ export async function reapStalledJobs(db, { now = Date.now() } = {}) {
     }
   }
   return reaped;
+}
+
+/**
+ * Ends a job now and frees everything it holds.
+ *
+ * There was no way to do this at all: a job wedged in 'running' blocked every
+ * later refresh via the partial unique index, kept its accounts locked through
+ * claimAccount, and could only be cleared by the cron reaper on its next pass.
+ */
+export async function cancelJob(db, jobId, { reason = 'Cancelled by an admin.' } = {}) {
+  const job = await getJob(db, jobId);
+  if (!job) return { error: 'Job not found', status: 404 };
+  if (job.status === 'done') return { error: 'That refresh already finished.', status: 400 };
+
+  const res = await db.prepare(
+    `UPDATE refresh_jobs SET status = 'failed', error = ?, finished_at = ?, updated_at = ?
+     WHERE id = ? AND status IN ('queued','running')`
+  ).bind(reason, Date.now(), Date.now(), jobId).run();
+
+  if (!(res.meta && res.meta.changes)) return { error: 'That refresh is no longer running.', status: 409 };
+  await releaseAccounts(db, jobId);
+  return { ok: true, job_id: jobId };
+}
+
+/** The most recent jobs, so a run can be found without already knowing its id. */
+export async function listJobs(db, { limit = 20 } = {}) {
+  const { results } = await db.prepare(
+    `SELECT * FROM refresh_jobs ORDER BY id DESC LIMIT ?`
+  ).bind(limit).all();
+  return (results || []).map(publicJob);
 }
 
 /** Puts a stalled or failed job back on the queue, resuming from pending_json. */
@@ -563,7 +639,7 @@ async function runImport(db, env, account, counter, adapters) {
  * the rule that a settled clip is frozen history, which is the single most
  * load-bearing guarantee in the payout system.
  */
-async function runViews(db, env, account, item, counter, adapters) {
+async function runViews(db, env, account, item, counter, adapters, jobId = null) {
   const adapter = (adapters && adapters[account.platform]) || getAdapter(account.platform);
   const ids = item.t === 'yt_views' ? item.m : [item.m];
   const subIds = item.t === 'yt_views' ? item.s : [item.s];
@@ -590,6 +666,12 @@ async function runViews(db, env, account, item, counter, adapters) {
         'UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL',
         ['MEDIA_NOT_FOUND', now, subId]);
       changed ? failed++ : skipped++;
+      await recordClipEvent(db, {
+        jobId, submissionId: subId, accountId: account.account_id || account.id,
+        outcome: changed ? 'failed' : 'skipped', code: 'MEDIA_NOT_FOUND',
+        message: 'The platform returned nothing for this post — it has most likely been deleted or made private.',
+        fix: 'Ask the clipper whether the post still exists. If it is gone the clip cannot earn and can be disqualified.'
+      });
       continue;
     }
     if (!r.ok) {
@@ -598,12 +680,27 @@ async function runViews(db, env, account, item, counter, adapters) {
         'UPDATE submissions SET sync_error = ?, last_synced_at = ? WHERE id = ? AND locked_at IS NULL',
         [r.code, now, subId]);
       changed ? failed++ : skipped++;
+      // The adapter already produced a human explanation and a fix; only the
+      // bare code used to survive, and even that was overwritten next run.
+      await recordClipEvent(db, {
+        jobId, submissionId: subId, accountId: account.account_id || account.id,
+        outcome: changed ? 'failed' : 'skipped',
+        code: r.code, message: r.message || null, fix: r.fix || null,
+        kind: classifyError(r, r.code)
+      });
       continue;
     }
     const changed = await writeGuarded(db,
       'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ? AND locked_at IS NULL',
       [r.views, now, now, subId]);
     changed ? ok++ : skipped++;
+    // Successes are recorded as well as failures -- without them the panel can
+    // say what broke but not what it actually got through, which is half of
+    // "what has been refreshed and what is still pending".
+    await recordClipEvent(db, {
+      jobId, submissionId: subId, accountId: account.account_id || account.id,
+      outcome: changed ? 'ok' : 'skipped', code: null, kind: null
+    });
   }
 
   // Only flag when nothing succeeded. A batch where some clips read fine is a

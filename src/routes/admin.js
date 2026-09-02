@@ -6,7 +6,8 @@ import {
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
-import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, STALL_AFTER_MS } from '../refresh-jobs.js';
+import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
+import { jobEvents, jobFailureSummary } from '../refresh-events.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
@@ -970,11 +971,30 @@ export async function handleAdmin(request, env, url) {
     });
   }
 
+  // Listed BEFORE /:jobId so the literal path is not swallowed by the param.
+  if (pathname === '/api/admin/refresh/jobs' && method === 'GET') {
+    // There was no way to find a running job without already knowing its id:
+    // if you had not clicked the button yourself, the run was invisible.
+    return json({ jobs: await listJobs(env.DB, { limit: 20 }) });
+  }
+
   params = matchPath('/api/admin/refresh/:jobId', pathname);
   if (params && method === 'GET') {
     const job = await getJob(env.DB, Number(params.jobId));
     if (!job) return err('Not found', 404);
-    return json({ job: publicJob(job) });
+    // The panel's whole point: which clip of which clipper failed, and why.
+    return json({
+      job: publicJob(job),
+      failures: await jobFailureSummary(env.DB, Number(params.jobId)),
+      events: await jobEvents(env.DB, Number(params.jobId), { limit: 200 })
+    });
+  }
+
+  params = matchPath('/api/admin/refresh/:jobId/cancel', pathname);
+  if (params && method === 'POST') {
+    const r = await cancelJob(env.DB, Number(params.jobId));
+    if (r.error) return err(r.error, r.status || 400);
+    return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))) });
   }
 
   params = matchPath('/api/admin/refresh/:jobId/retry', pathname);
