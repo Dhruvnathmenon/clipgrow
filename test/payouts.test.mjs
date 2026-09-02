@@ -238,7 +238,10 @@ test('settlePayment: still pays selected clips and write-offs explicitly-selecte
     ]
   });
   const result = await settlePayment(db, {
-    clipperId: 1, submissionIds: [1], writeOffIds: [2], amount: 200, campaignId: 1
+    // Rs 200 is below the Rs 500 payout floor; this test is about pairing a
+    // payment with a write-off, not about the minimum, so it opts out.
+    clipperId: 1, submissionIds: [1], writeOffIds: [2], amount: 200, campaignId: 1,
+    allowBelowMinimum: true
   });
   assert.equal(result.ok, true);
   assert.equal(result.paid_clips, 1);

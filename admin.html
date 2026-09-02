@@ -270,7 +270,8 @@
         <div class="form-grid">
           <div><label>Clipper <span class="req">*</span></label><select id="po-clipper" class="form-control" onchange="loadPayable()"></select></div>
           <div><label>Period</label><select id="po-days" class="form-control" onchange="loadPayable()">
-            <option value="30" selected>Last 30 days</option>
+            <option value="7" selected>Last 7 days (weekly run)</option>
+            <option value="30">Last 30 days</option>
             <option value="60">Last 60 days</option>
             <option value="90">Last 90 days</option>
             <option value="all">All time</option>
@@ -304,6 +305,9 @@
         </div>
         <div id="po-summary" class="banner" style="margin-top:1rem"></div>
         <div style="margin-top:1rem;display:flex;gap:.7rem;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:.45rem;font-size:.76rem;color:var(--muted-l);margin-bottom:.6rem">
+            <input type="checkbox" id="po-below-min" /> Pay below the ₹500 minimum (deliberate — the site tells clippers small balances roll over)
+          </label>
           <button class="btn" id="po-pay" onclick="settlePayout()">Pay &amp; Lock Selected</button>
           <button class="btn btn-ghost" onclick="loadPayable()">Reset selection</button>
         </div>
@@ -544,7 +548,16 @@
         await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:document.getElementById('admin-pass').value})});
         document.getElementById('auth-overlay').style.display='none';
         loadAll();
-      }catch{ document.getElementById('auth-error').style.display='block'; }
+      }catch(e){
+        // A network failure or a 500 used to render as "Incorrect password",
+        // sending you hunting for a password that was never the problem.
+        const m=String(e&&e.message||'');
+        const el=document.getElementById('auth-error');
+        el.textContent=/401|unauthor|incorrect|invalid|password/i.test(m)
+          ? 'Incorrect password'
+          : `Could not sign in — ${m||'the server did not respond'}`;
+        el.style.display='block';
+      }
     };
     window.logout=async function(){ await api('/api/admin/logout',{method:'POST'}).catch(()=>{}); location.reload(); };
 
@@ -824,16 +837,25 @@
         if(t.dataset.kind==='pay'){ pay++; total+=Number(t.dataset.amt||0); } else off++;
       });
       document.getElementById('po-amount').value=total||'';
+      // Answer "why can't I pay this?" on screen, before the server has to.
+      const min=(PAYABLE&&PAYABLE.totals&&PAYABLE.totals.payout_minimum)||500;
+      const under=pay>0&&total<min;
       document.getElementById('po-summary').innerHTML=
         `<strong>${pay}</strong> video(s) to pay, totalling <strong>${money(total)}</strong>` +
         (off?` &nbsp;·&nbsp; <strong>${off}</strong> video(s) to close out at ₹0`:'') +
+        (under?`<div class="note" style="margin-top:.4rem;color:var(--red)">Below the ${money(min)} minimum — this balance rolls over to the next run, which is what the site tells clippers. Tick the box below to send it anyway.</div>`:'') +
         `<div class="note" style="margin-top:.4rem">Locking is permanent unless you reverse the payment from the Payments tab.</div>`;
       document.getElementById('po-pay').disabled=(pay+off)===0;
     };
 
-    window.unlockClip=async function(id){
-      if(!confirm('Reopen this video so it can earn again?')) return;
-      try{ await api(`/api/admin/submissions/${id}/unlock`,{method:'POST'}); toast('Video reopened'); loadPayable(); }
+    window.unlockClip=async function(id,from){
+      if(!confirm('Reopen this video so it can earn again?\n\nIt goes back into the campaign\'s budget allocation and can be paid in a later run.')) return;
+      try{
+        await api(`/api/admin/submissions/${id}/unlock`,{method:'POST'});
+        toast('Video reopened');
+        // Called from two places now; refresh whichever one you are looking at.
+        if(from==='campaign') loadCampaigns(); else loadPayable();
+      }
       catch(e){ toast(e.message,true); }
     };
 
@@ -844,6 +866,7 @@
         (t.dataset.kind==='pay'?payIds:offIds).push(Number(t.dataset.id));
       });
       const amount=Number(document.getElementById('po-amount').value||0);
+      const allowBelowMin=document.getElementById('po-below-min').checked;
       const expected=payIds.reduce((n,id)=>{
         const c=PAYABLE.clips.find(x=>x.id===id); return n+(c?c.earning:0);
       },0);
@@ -866,7 +889,8 @@
           method:document.getElementById('po-method').value,
           reference:document.getElementById('po-reference').value,
           note:document.getElementById('po-note-in').value,
-          paid_at:dateVal?new Date(dateVal).getTime():null
+          paid_at:dateVal?new Date(dateVal).getTime():null,
+          allow_below_minimum:allowBelowMin
         })});
         toast(`Settled ${r.paid_clips} video(s) — ${money(r.amount)} recorded and locked`);
         document.getElementById('po-reference').value='';
@@ -1206,7 +1230,7 @@
         box.innerHTML=`
           <div class="sub-h">Participants (${participants.length})</div>
           ${participants.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Clipper</th><th>Account</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${participants.map(p=>`<tr>
               <td class="handle">${esc(p.display_name||p.username)}</td>
               <td>${linkedAccounts(p,{badge:true})}</td>
@@ -1228,18 +1252,30 @@
               <td class="muted">${s.account_username?'@'+esc(s.account_username):'—'}</td>
               <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
               <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
-              <td>${num(s.views)}</td><td class="money">${money(s.earning)}</td>
-              <td>${s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+              <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
+              <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
+                    :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
+                    :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
                     :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
                     :s.sync_error?`<span class="badge needs_reauth">${esc(s.sync_error)}</span>`
                     :'<span class="badge active">ok</span>'}</td>
               <td><div class="actions">
-                ${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
-                ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
-                ${s.status!=='disqualified'
-                  ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
-                  :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
-                <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>
+                ${s.lock_reason==='paid'
+                  /* Settled and tied to a payment: the API refuses every one of
+                     these, and rightly so -- it is financial history. Reverse
+                     the payment from the Payments tab if it really must move. */
+                  ? '<span class="muted" style="font-size:.72rem">settled — reverse the payment to change it</span>'
+                  : s.locked_at
+                    /* Closed at zero with no payment (a below-minimum write-off).
+                       Unlock accepts this; Pause/Disqualify still do not. */
+                    ? `<button class="btn btn-ghost btn-sm" onclick="unlockClip(${s.id},'campaign')">Reopen</button>
+                       <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`
+                    : `${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
+                       ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
+                       ${s.status!=='disqualified'
+                         ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
+                         :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
+                       <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`}
               </div></td></tr>`).join('')}</tbody></table></div>`
             :'<p class="muted">No videos submitted yet.</p>'}`;
       }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
@@ -1571,7 +1607,22 @@
 
     // loadTesters runs on every refresh, not just when its tab is opened, so
     // the pending-approval badge is accurate from the moment you sign in.
-    function loadAll(){ loadOverview(); loadCampaigns(); loadClippers(); loadTesters(); }
+    // Every one of these used to be fired un-awaited with no .catch, so any
+    // failure left "Loading…" on screen forever with nothing in the console
+    // and no toast -- the panel simply looked empty rather than broken.
+    function loadAll(){
+      const run=(name,fn,elId)=>Promise.resolve().then(fn).catch(e=>{
+        const el=elId&&document.getElementById(elId);
+        if(el) el.innerHTML=`<div class="alert bad"><strong>${name} failed to load</strong> — ${esc(e.message||'unknown error')}</div>`;
+        toast(`${name} failed to load: ${e.message||'unknown error'}`,true);
+      });
+      return Promise.all([
+        run('Overview',loadOverview,'health'),
+        run('Campaigns',loadCampaigns,'campaigns-body'),
+        run('Clippers',loadClippers,'clippers-body'),
+        run('Access requests',loadTesters,null)
+      ]);
+    }
     /* ── Instagram tester queue ── */
     const TESTER_BADGE={requested:'pending',invited:'needs_reauth',confirmed:'connected',rejected:'kicked'};
     // Clippers are blocked until these are actioned, so the count rides on the

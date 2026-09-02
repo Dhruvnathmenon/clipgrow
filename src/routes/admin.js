@@ -394,7 +394,13 @@ export async function handleAdmin(request, env, url) {
     const campaign = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!campaign) return err('Not found', 404);
     const { results: submissions } = await env.DB.prepare(
+      // locked_at / lock_reason / payment_id were missing, so the UI could not
+      // tell a settled clip from an open one and rendered Pause, Disqualify and
+      // Delete on every row -- all three of which the API rejects with a 409
+      // once a clip is paid. Every one of those buttons was guaranteed to fail
+      // after the first payout run, which is the error the founder walked into.
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at, s.source, s.platform,
+              s.locked_at, s.locked_earning, s.lock_reason, s.payment_id,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
@@ -407,7 +413,9 @@ export async function handleAdmin(request, env, url) {
     const payload = await readJson(request);
     const existing = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!existing) return err('Not found', 404);
-    if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) return err('Invalid status');
+    if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) {
+      return err(`'${payload.status}' is not a valid campaign status. Accepted: ${CAMPAIGN_STATUSES.join(', ')}.`);
+    }
     const priorBlueprint = JSON.parse(existing.blueprint_json || '{}');
     const merged = { ...priorBlueprint, ...pickBlueprint(payload) };
     // The per-video cap lives in the blueprint, not in a column, so a change to
@@ -459,7 +467,9 @@ export async function handleAdmin(request, env, url) {
     const { status, note, account_id } = await readJson(request);
     const part = await env.DB.prepare('SELECT * FROM participations WHERE id = ?').bind(params.id).first();
     if (!part) return err('Not found', 404);
-    if (status && !PART_STATUSES.includes(status)) return err('Invalid status');
+    if (status && !PART_STATUSES.includes(status)) {
+      return err(`'${status}' is not a valid participation status. Accepted: ${PART_STATUSES.join(', ')}.`);
+    }
     await env.DB.prepare(
       'UPDATE participations SET status = ?, status_note = ?, status_changed_at = ?, account_id = ? WHERE id = ?'
     ).bind(
@@ -544,7 +554,9 @@ export async function handleAdmin(request, env, url) {
     const { status, note } = await readJson(request);
     const reqRow = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(params.id).first();
     if (!reqRow) return err('Not found', 404);
-    if (status && !TESTER_STATUSES.includes(status)) return err('Invalid status');
+    if (status && !TESTER_STATUSES.includes(status)) {
+      return err(`'${status}' is not a valid access-request status. Accepted: ${TESTER_STATUSES.join(', ')}.`);
+    }
 
     const nextStatus = status || reqRow.status;
     await env.DB.prepare(
@@ -597,7 +609,14 @@ export async function handleAdmin(request, env, url) {
       // 'disqualified' = permanently rejected. Both earn nothing and hand their
       // share of the budget back; only 'active' accrues.
       const { status } = await readJson(request);
-      if (!['active', 'paused', 'disqualified'].includes(status)) return err('Invalid status');
+      // Was a bare 'Invalid status' with no guard against an unparseable body,
+      // so a malformed request and a genuinely wrong value produced the same
+      // uninformative message -- one of the two strings behind the founder's
+      // "invalid request" report.
+      if (status == null) return err("This needs a 'status' field. Accepted: active, paused, disqualified.");
+      if (!['active', 'paused', 'disqualified'].includes(status)) {
+        return err(`'${status}' is not a valid video status. Accepted: active, paused, disqualified.`);
+      }
       await env.DB.prepare('UPDATE submissions SET status = ? WHERE id = ?').bind(status, params.id).run();
     }
     await reallocateCampaign(env.DB, sub.campaign_id);
@@ -720,9 +739,15 @@ export async function handleAdmin(request, env, url) {
       method: body.method,
       reference: body.reference,
       note: body.note,
-      paidAt: body.paid_at
+      paidAt: body.paid_at,
+      // Deliberate, per-run override of the Rs 500 floor.
+      allowBelowMinimum: !!body.allow_below_minimum
     });
-    if (result.error) return json({ error: result.error, locked_ids: result.locked_ids }, result.status || 400);
+    if (result.error) {
+      return json({ error: result.error, locked_ids: result.locked_ids,
+                    below_minimum: result.below_minimum, payout_minimum: result.payout_minimum },
+                  result.status || 400);
+    }
     return json({ ...result, money: await clipperFinancials(env.DB, body.clipper_id) }, 201);
   }
 

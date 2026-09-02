@@ -146,7 +146,7 @@
           <div class="stat"><div class="stat-val">${money(c.cpm)}</div><div class="stat-lbl">Per 1,000 Views</div></div>
           <div class="stat"><div class="stat-val">${money(c.budget)}</div><div class="stat-lbl">Total Budget</div></div>
           <div class="stat"><div class="stat-val">${pct}%</div><div class="stat-lbl">Utilization</div></div>
-          <div class="stat"><div class="stat-val g">${money(c.remaining)}</div><div class="stat-lbl">Left to Pay</div></div>
+          <div class="stat"><div class="stat-val g">${money(c.remaining)}</div><div class="stat-lbl">Budget Remaining</div></div>
         </div>
         <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
         <p class="note">Minimum ${num(c.min_views)} views per video before it earns</p>
@@ -155,7 +155,7 @@
       <div class="panel">
         <h2 class="panel-title">Clippers on this campaign</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Instagram</th><th>Videos</th><th>Views</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Account</th><th>Videos</th><th>Views</th></tr></thead>
           <tbody>${d.clippers.length?d.clippers.map(x=>`<tr>
             <td class="handle">${esc(x.clipper_name)}</td>
             <td class="muted">${x.account_username?'@'+esc(x.account_username):'—'}</td>

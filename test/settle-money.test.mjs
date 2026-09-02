@@ -9,6 +9,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makePayoutsDb } from './helpers/fake-payouts-db.mjs';
+// These fixtures settle small amounts on purpose; allowBelowMinimum opts them
+// out of the Rs 500 payout floor, which is a separate rule tested in
+// payout-minimum.test.mjs.
 import { settlePayment, reversePayment } from '../src/payouts.js';
 
 function campaign(o = {}) {
@@ -33,7 +36,7 @@ test('settlePayment: refuses when the clips are now worth more than the page sho
   const db = makePayoutsDb({ campaigns: [campaign()], submissions: [sub({ id: 7, earning: 360 })] });
 
   const r = await settlePayment(db, {
-    clipperId: 1, submissionIds: [7], amount: 120, expectedClipsTotal: 120
+    clipperId: 1, submissionIds: [7], amount: 120, expectedClipsTotal: 120, allowBelowMinimum: true
   });
 
   assert.equal(r.status, 409, 'must refuse a stale settle');
@@ -49,7 +52,7 @@ test('settlePayment: proceeds when the page total still matches the server', asy
   const db = makePayoutsDb({ campaigns: [campaign()], submissions: [sub({ id: 7, earning: 360 })] });
 
   const r = await settlePayment(db, {
-    clipperId: 1, submissionIds: [7], amount: 360, expectedClipsTotal: 360
+    clipperId: 1, submissionIds: [7], amount: 360, expectedClipsTotal: 360, allowBelowMinimum: true
   });
 
   assert.equal(r.ok, true);
@@ -61,7 +64,7 @@ test('settlePayment: proceeds when the page total still matches the server', asy
 
 test('settlePayment: an omitted expected total still settles, so an older page keeps working', async () => {
   const db = makePayoutsDb({ campaigns: [campaign()], submissions: [sub({ id: 7, earning: 200 })] });
-  const r = await settlePayment(db, { clipperId: 1, submissionIds: [7], amount: 200 });
+  const r = await settlePayment(db, { clipperId: 1, submissionIds: [7], amount: 200, allowBelowMinimum: true });
   assert.equal(r.ok, true);
 });
 
@@ -81,7 +84,7 @@ test('settlePayment: a clip locked mid-flight records no payment and leaves no p
     return realPrepare(sql);
   };
 
-  const r = await settlePayment(db, { clipperId: 1, submissionIds: [7], amount: 200 });
+  const r = await settlePayment(db, { clipperId: 1, submissionIds: [7], amount: 200, allowBelowMinimum: true });
 
   assert.equal(r.status, 409, 'must report the conflict rather than returning ok');
   assert.equal(db._state.payments.length, 0, 'the payment row must be rolled back, not left in the ledger');
@@ -163,7 +166,7 @@ test('a rolled-back settle also releases the write-offs it locked, not just the 
   };
 
   const r = await settlePayment(db, {
-    clipperId: 1, submissionIds: [7], writeOffIds: [8], amount: 200
+    clipperId: 1, submissionIds: [7], writeOffIds: [8], amount: 200, allowBelowMinimum: true
   });
 
   assert.equal(r.status, 409, 'must report the conflict');

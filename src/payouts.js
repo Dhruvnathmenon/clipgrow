@@ -14,6 +14,25 @@ import { reallocateCampaign } from './earnings.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * The smallest payout that may leave the account, in rupees.
+ *
+ * clipgrow.in has advertised "Minimum payout Rs 500 -- balance rolls over"
+ * since launch, in the hero, the payout strip, the FAQ and the indexed FAQ
+ * structured data. It was never implemented anywhere: a grep across src/,
+ * admin.html and dashboard.html found no payout-minimum constant or check at
+ * all, and db.js records that `min_payout` was deliberately dropped from the
+ * accepted campaign blueprint fields. The site stated a payout rule the
+ * system could not honour or evidence.
+ *
+ * NOT to be confused with a campaign's `min_views` write-off rule, which
+ * writeOffAllBelowMin implements and which also uses the words "below min".
+ * That one is about a clip that never earned. This one is about a clipper's
+ * cash balance being too small to be worth transferring; the balance is not
+ * lost, it simply stays unlocked and rolls into the next run.
+ */
+export const PAYOUT_MINIMUM = 500;
+
 // A clip that never reached the campaign minimum is closed the moment it is
 // looked at during a payout run -- not after some fixed grace period. The
 // grace period a clip effectively gets is however wide the admin's own payout
@@ -116,9 +135,16 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
     };
   });
 
+  const payableNow = clips.filter(c => c.selectable).reduce((n, c) => n + c.earning, 0);
+
   const totals = {
+    payout_minimum: PAYOUT_MINIMUM,
+    // Whether a full payout of everything selectable would clear the bar. The
+    // admin sees this before selecting anything, so "why can't I pay them?"
+    // is answered on the screen rather than by a rejected request.
+    meets_minimum: payableNow >= PAYOUT_MINIMUM,
     clips: clips.length,
-    payable_now: clips.filter(c => c.selectable).reduce((n, c) => n + c.earning, 0),
+    payable_now: payableNow,
     payable_clips: clips.filter(c => c.selectable).length,
     already_settled: clips.filter(c => c.locked).reduce((n, c) => n + (c.locked_earning || 0), 0),
     settled_clips: clips.filter(c => c.locked).length,
@@ -157,7 +183,7 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
 export async function settlePayment(db, {
   clipperId, submissionIds = [], writeOffIds = [], amount,
   campaignId = null, method = 'UPI', reference = '', note = '', paidAt = null,
-  expectedClipsTotal = null
+  expectedClipsTotal = null, allowBelowMinimum = false
 }) {
   const payIds = [...new Set(submissionIds.map(Number).filter(Boolean))];
   const offIds = [...new Set(writeOffIds.map(Number).filter(Boolean))];
@@ -185,6 +211,21 @@ export async function settlePayment(db, {
   const foreign = (rows || []).filter(r => r.clipper_id !== Number(clipperId));
   if (foreign.length) {
     return { error: `Clip ${foreign[0].id} belongs to a different clipper.`, status: 400 };
+  }
+
+  // The Rs 500 floor. Applied to cash actually leaving the account, which is
+  // what the site promises a clipper. Write-off-only runs are exempt: nothing
+  // is being transferred, so there is no payout to be under the minimum.
+  // Blocked rather than warned -- an under-minimum transfer contradicts a
+  // published term -- but overridable, because a clipper leaving with Rs 300
+  // owed should still be payable as a deliberate act.
+  if (payIds.length && !allowBelowMinimum && Number(amount) < PAYOUT_MINIMUM) {
+    return {
+      error: `Payouts start at Rs ${PAYOUT_MINIMUM}. This one is Rs ${Number(amount) || 0}, so it stays unlocked and rolls into the next run — which is what the site tells clippers. Tick "pay below the minimum" if you mean to send it anyway.`,
+      status: 409,
+      below_minimum: true,
+      payout_minimum: PAYOUT_MINIMUM
+    };
   }
 
   const alreadyLocked = (rows || []).filter(r => r.locked_at);
