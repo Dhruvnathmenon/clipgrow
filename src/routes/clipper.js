@@ -4,7 +4,7 @@ import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
-  unlinkParticipationAccount
+  unlinkParticipationAccount, SPEND_EXPR, spendExpr
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
 import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
@@ -216,13 +216,18 @@ export async function handleClipper(request, env, url) {
       }
 
       const stats = await env.DB.prepare(
-        `SELECT COUNT(*) AS videos, COALESCE(SUM(views),0) AS views, COALESCE(SUM(earning),0) AS earned
-         FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND status = 'active'`
+        `SELECT COUNT(CASE WHEN status = 'active' THEN 1 END) AS videos,
+                COALESCE(SUM(CASE WHEN status = 'active' THEN views ELSE 0 END),0) AS views,
+                ${SPEND_EXPR} AS earned
+         FROM submissions WHERE clipper_id = ? AND campaign_id = ?`
       ).bind(clipperId, c.id).first();
 
       const { results: platStats } = await env.DB.prepare(
-        `SELECT platform, COUNT(*) AS videos, COALESCE(SUM(views),0) AS views, COALESCE(SUM(earning),0) AS earned
-         FROM submissions WHERE clipper_id = ? AND campaign_id = ? AND status = 'active'
+        `SELECT platform,
+                COUNT(CASE WHEN status = 'active' THEN 1 END) AS videos,
+                COALESCE(SUM(CASE WHEN status = 'active' THEN views ELSE 0 END),0) AS views,
+                ${SPEND_EXPR} AS earned
+         FROM submissions WHERE clipper_id = ? AND campaign_id = ?
          GROUP BY platform`
       ).bind(clipperId, c.id).all();
 
@@ -598,10 +603,10 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/directory' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT cl.id, cl.username, cl.display_name,
-              COALESCE(SUM(s.views),0) AS views,
-              COALESCE(SUM(s.earning),0) AS earned
+              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) AS views,
+              ${spendExpr('s')} AS earned
        FROM clippers cl
-       LEFT JOIN submissions s ON s.clipper_id = cl.id AND s.status = 'active'
+       LEFT JOIN submissions s ON s.clipper_id = cl.id
        WHERE cl.status = 'active'
        GROUP BY cl.id
        ORDER BY earned DESC, views DESC, cl.display_name ASC`

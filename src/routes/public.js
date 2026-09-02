@@ -1,5 +1,5 @@
 import { json, matchPath, err } from '../http.js';
-import { publicCampaign, campaignSpend } from '../db.js';
+import { publicCampaign, campaignSpend, spendExpr } from '../db.js';
 import { getSession } from '../auth.js';
 
 // Only the campaign list is genuinely public -- the homepage renders its
@@ -32,13 +32,18 @@ export async function handlePublic(request, env, url) {
   if (pathname === '/api/public/leaderboard') {
     const { results } = await env.DB.prepare(
       `SELECT cl.id, cl.username, cl.display_name,
-              COUNT(s.id) AS video_count,
-              COALESCE(SUM(s.views),0) AS total_views,
-              COALESCE(SUM(s.earning),0) AS total_earnings
+              COUNT(CASE WHEN s.status = 'active' THEN 1 END) AS video_count,
+              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) AS total_views,
+              ${spendExpr('s')} AS total_earnings
        FROM clippers cl
-       JOIN submissions s ON s.clipper_id = cl.id AND s.status = 'active'
+       JOIN submissions s ON s.clipper_id = cl.id
        WHERE cl.status = 'active'
        GROUP BY cl.id
+       -- Dropping the status filter from the JOIN is what lets a paid-then-
+       -- disqualified clip still count its settled money. HAVING keeps a
+       -- clipper whose only clips are disqualified and unpaid off the public
+       -- board, which the old JOIN filter did implicitly.
+       HAVING video_count > 0 OR total_earnings > 0
        ORDER BY total_earnings DESC, total_views DESC`
     ).all();
     return json({ leaderboard: results || [] });

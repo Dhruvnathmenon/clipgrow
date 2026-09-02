@@ -304,8 +304,13 @@ export function publicCampaign(row, spent) {
  * disqualifying the clip afterwards. Only unlocked clips are contingent on
  * still being 'active'.
  */
-export const SPEND_EXPR =
-  "COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) WHEN status = 'active' THEN earning ELSE 0 END), 0)";
+export function spendExpr(alias = '') {
+  const p = alias ? alias + '.' : '';
+  return `COALESCE(SUM(CASE WHEN ${p}locked_at IS NOT NULL THEN COALESCE(${p}locked_earning,0) ` +
+         `WHEN ${p}status = 'active' THEN ${p}earning ELSE 0 END), 0)`;
+}
+
+export const SPEND_EXPR = spendExpr();
 
 export async function campaignSpend(db, campaignId) {
   const row = await db
@@ -454,6 +459,32 @@ export async function clipperTotals(db, clipperId) {
  * what was owed and what was actually transferred can never silently roll into
  * the next payout.
  */
+/**
+ * What the agency owes every clipper, added up.
+ *
+ * Deliberately the SUM of each clipper's own `owed` -- max(0, pending -
+ * unrecovered advances) -- with the floor applied PER CLIPPER, so it agrees
+ * with clipperFinancials() row for row. A single global expression cannot:
+ * flooring once at the end nets one clipper's payments against another
+ * clipper's unpaid earnings, which is exactly what the admin Overview used to
+ * do. Lives here, next to the rule it mirrors, so the two cannot drift.
+ */
+export async function totalOutstanding(db) {
+  const row = await db.prepare(
+    `SELECT COALESCE(SUM(MAX(0, owed)), 0) AS outstanding FROM (
+       SELECT COALESCE(sub.pending, 0) - COALESCE(pay.advanced, 0) AS owed
+         FROM clippers cl
+         LEFT JOIN (SELECT clipper_id,
+                           SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN earning ELSE 0 END) AS pending
+                      FROM submissions GROUP BY clipper_id) sub ON sub.clipper_id = cl.id
+         LEFT JOIN (SELECT clipper_id,
+                           SUM(CASE WHEN kind = 'advance' THEN amount - COALESCE(recovered_amount,0) ELSE 0 END) AS advanced
+                      FROM payments GROUP BY clipper_id) pay ON pay.clipper_id = cl.id
+     )`
+  ).first();
+  return row.outstanding || 0;
+}
+
 export async function clipperFinancials(db, clipperId) {
   const row = await db.prepare(
     `SELECT

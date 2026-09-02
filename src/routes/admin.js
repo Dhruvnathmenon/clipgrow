@@ -3,7 +3,7 @@ import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } fr
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify,
-  disconnectSocialAccount
+  disconnectSocialAccount, SPEND_EXPR, totalOutstanding
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, STALL_AFTER_MS } from '../refresh-jobs.js';
@@ -75,12 +75,10 @@ export async function handleAdmin(request, env, url) {
       `SELECT
         (SELECT COUNT(*) FROM clippers WHERE status='active') AS active_clippers,
         (SELECT COUNT(*) FROM campaigns WHERE status='active') AS active_campaigns,
-        (SELECT COALESCE(SUM(earning),0) FROM submissions WHERE status='active') AS total_earned,
+        (SELECT ${SPEND_EXPR} FROM submissions) AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
-        -- Outstanding nets off settlements and advances only. A bonus is money
-        -- given on top of what was earned, so counting it here understated what
-        -- is still owed to clippers on the one figure used to judge cash position.
-        (SELECT COALESCE(SUM(CASE WHEN kind != 'bonus' THEN amount ELSE 0 END),0) FROM payments) AS total_paid_against_earnings,
+        -- outstanding is computed separately by totalOutstanding()
+        -- in db.js, beside the per-clipper rule it must agree with.
         (SELECT COUNT(*) FROM social_accounts WHERE status='needs_reauth') AS accounts_needing_reauth,
         -- Accounts whose last auto-import attempt failed for a non-auth
         -- reason. These still read as 'connected' and their existing clips
@@ -159,7 +157,7 @@ export async function handleAdmin(request, env, url) {
     ).bind(Date.now() - STALL_AFTER_MS).all();
 
     return json({
-      overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid_against_earnings || 0)) },
+      overview: { ...s, outstanding: await totalOutstanding(env.DB) },
       problem_accounts: problemAccounts || [],
       stuck_accounts: stuckAccounts || [],
       stalled_jobs: stalledJobs || []
@@ -382,7 +380,7 @@ export async function handleAdmin(request, env, url) {
                  WHERE pa.participation_id = p.id) AS linked_accounts,
               (SELECT COUNT(*) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS videos,
               (SELECT COALESCE(SUM(views),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS views,
-              (SELECT COALESCE(SUM(earning),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS earned
+              (SELECT ${SPEND_EXPR} FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS earned
        FROM participations p
        JOIN clippers cl ON cl.id = p.clipper_id
        LEFT JOIN social_accounts a ON a.id = p.account_id
