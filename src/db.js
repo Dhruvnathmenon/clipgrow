@@ -102,7 +102,7 @@ export async function unlinkParticipationAccount(db, participationId, platform) 
  * Returns the affected campaign ids so the caller can re-run allocation;
  * deleting pending clips changes what the remaining ones are owed.
  */
-export async function disconnectSocialAccount(db, accountId) {
+export async function disconnectSocialAccount(db, accountId, { preserveClips = false } = {}) {
   const account = await db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(accountId).first();
   if (!account) return null;
 
@@ -126,7 +126,18 @@ export async function disconnectSocialAccount(db, accountId) {
 
   const stmts = [
     db.prepare('DELETE FROM participation_accounts WHERE account_id = ?').bind(accountId),
-    db.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(accountId),
+    db.prepare('UPDATE participations SET account_id = NULL WHERE account_id = ?').bind(accountId)
+  ];
+
+  // preserveClips keeps every submission AND the account row they point at.
+  // Archiving a clipper uses it. That dialog promises "every video and payment
+  // stays on record" while this function was deleting every unpaid clip --
+  // destroying earned-but-unpaid money history with no undo. Only the explicit
+  // single-account disconnect deletes now, and its dialog states the real
+  // count and value before you confirm.
+  const keepAccountRow = preserveClips || settled.length > 0;
+
+  if (!preserveClips) {
     // ig_api_calls has a NOT NULL foreign key onto social_accounts, and every
     // Instagram view fetch writes a row. When an account has no settled clips
     // the branch below DELETEs the account outright, which that key refuses --
@@ -134,17 +145,17 @@ export async function disconnectSocialAccount(db, accountId) {
     // bare "internal server error" and no way to swap the account. The rows are
     // only the rolling 200/hour rate-limit ledger, meaningless once the account
     // is gone, so they go with it.
-    db.prepare('DELETE FROM ig_api_calls WHERE social_account_id = ?').bind(accountId)
-  ];
+    stmts.push(db.prepare('DELETE FROM ig_api_calls WHERE social_account_id = ?').bind(accountId));
 
-  if (pending.length) {
-    const ph = pending.map(() => '?').join(',');
-    stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
+    if (pending.length) {
+      const ph = pending.map(() => '?').join(',');
+      stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
+    }
   }
 
-  if (settled.length) {
-    // Settled clips still reference this row, so it stays -- stripped of
-    // anything that could still be used to call the platform.
+  if (keepAccountRow) {
+    // Clips still reference this row, so it stays -- stripped of anything that
+    // could still be used to call the platform.
     stmts.push(db.prepare(
       "UPDATE social_accounts SET status='revoked', access_token=NULL, refresh_token=NULL, token_expires_at=NULL WHERE id = ?"
     ).bind(accountId));
@@ -157,9 +168,10 @@ export async function disconnectSocialAccount(db, accountId) {
   return {
     platform: account.platform,
     username: account.username,
-    deleted_pending: pending.length,
+    deleted_pending: preserveClips ? 0 : pending.length,
+    preserved_pending: preserveClips ? pending.length : 0,
     kept_settled: settled.length,
-    account_row_kept: settled.length > 0,
+    account_row_kept: keepAccountRow,
     campaigns
   };
 }

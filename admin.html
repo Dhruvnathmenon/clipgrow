@@ -250,6 +250,16 @@
           <tbody id="clippers-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
+      <div class="panel">
+        <h2 class="panel-title" style="cursor:pointer" onclick="toggleDeletedClippers()">Deleted Clippers <span id="deleted-count" class="muted" style="font-weight:400;font-size:.8rem"></span> <span id="deleted-chev" style="font-size:.75rem">▾</span></h2>
+        <div id="deleted-clippers-wrap" style="display:none">
+          <p class="note">Deleting a clipper archives them — every video and payment stays intact, and the total still counts toward your records. They just drop out of the active roster and can no longer log in. Restore brings them back exactly as they were.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Campaigns</th><th>Lifetime Earnings</th><th>Paid</th><th>Actions</th></tr></thead>
+            <tbody id="deleted-clippers-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
     </div>
 
     <!-- PAYOUTS -->
@@ -1023,7 +1033,7 @@
     }
 
     async function loadOverview(){
-      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[]}=await api('/api/admin/overview');
+      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],stalled_jobs:stalledJobs=[]}=await api('/api/admin/overview');
       document.getElementById('overview').innerHTML=`
         <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
         <div class="stat"><div class="stat-val w">${num(o.active_campaigns)}</div><div class="stat-lbl">Active Campaigns</div></div>
@@ -1057,6 +1067,15 @@
       // Import failures already appear by name in problem_accounts above; only
       // fall back to the bare count if that list could not be built.
       if(!problems.length && o.accounts_import_failing>0) urgent.push(`${o.accounts_import_failing} account(s) failed to import new videos — new uploads may not be appearing`);
+      // A refresh job stuck in 'running' blocks EVERY later sync via the
+      // unique index, and the 6-hourly cron just logs "skipped" forever. The
+      // cron now reaps these automatically; this is the visible signal that it
+      // happened, or that one is wedged right now between cron runs.
+      stalledJobs.forEach(j=>{
+        const mins=Math.floor((Date.now()-j.updated_at)/60000);
+        const who=j.kind==='global'?'Global refresh':`Refresh for clipper #${j.clipper_id}`;
+        urgent.push(`<div class="trouble"><strong>${who} (job #${j.id})</strong> — no progress for ${mins} min, started by ${esc(j.triggered_by||'?')}. It is blocking new syncs until it is retried or auto-released.</div>`);
+      });
       const soft=[];
       const passing=o.submissions_with_errors-o.submissions_stuck;
       if(passing>0) soft.push(`${passing} video(s) hit a transient sync error, expected to clear on the next sync`);
@@ -1124,6 +1143,11 @@
       const p={};
       TEXT_FIELDS.forEach(k=>p[k]=document.getElementById('f-'+k).value.trim());
       NUM_FIELDS.forEach(k=>{const v=document.getElementById('f-'+k).value; p[k]=v===''?null:Number(v);});
+      // Blank means "no minimum", not "leave it alone". Sent as null it was
+      // indistinguishable from an absent field, so the server kept the old
+      // value and still reported "Campaign updated" -- the field looked
+      // uneditable. 0 states the intent explicitly.
+      if(p.min_views==null) p.min_views=0;
       const lines=id=>document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
       p.approval_steps=lines('f-approval_steps'); p.terms=lines('f-terms');
       p.allowed_platforms=[...document.querySelectorAll('.camp-plat:checked')].map(x=>x.value);
@@ -1265,7 +1289,7 @@
         <tr class="row-click" onclick="toggleClipper(${c.id})">
           <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
           <td>${num(c.campaigns)}</td>
-          <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}</td>
+          <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}${c.accounts_mismatched>0?` <span class="badge needs_reauth" title="Connected account doesn't match what was approved">⚠ mismatch</span>`:''}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td>${money(c.money.paid)}</td>
           <td class="gold">${money(c.money.owed)}</td>
@@ -1295,7 +1319,7 @@
           ${d.accounts.length?`<div class="table-wrap"><table>
             <thead><tr><th>Handle</th><th>Platform</th><th>Type</th><th>Status</th><th>Tracking</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
             <tbody>${d.accounts.map(a=>`<tr>
-              <td class="handle">${a.platform==='youtube'?'':'@'}${esc(a.username)}</td>
+              <td class="handle">${a.platform==='youtube'?'':'@'}${esc(a.username)}${a.mismatch_approved_as?`<div class="badge needs_reauth" style="margin-top:.25rem;font-size:.65rem" title="canConnect() doesn't check which account connects, only that one was approved">⚠ approved as ${esc(a.mismatch_approved_as)}</div>`:''}</td>
               <td><span class="badge ${a.platform==='youtube'?'budget_full':'neutral'}">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
               <td class="muted">${esc(a.account_type||'—')}</td>
               <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
@@ -1303,7 +1327,10 @@
                 <div><button class="btn btn-ghost btn-sm" style="margin-top:.3rem" onclick="toggleAutoImport(${a.id},${a.auto_import?'false':'true'},'${esc(a.username).replace(/'/g,'')}')">${a.auto_import?'Switch to paste-only':'Switch to automatic'}</button></div></td>
               <td class="muted">${when(a.connected_at)}</td>
               <td class="muted">${when(a.expires_at)}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}')">Disconnect</button></td>
+              <td class="actions">
+                <button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}',false,${a.unpaid_clips||0},${a.unpaid_value||0})">Disconnect</button>
+                <button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}',true,${a.unpaid_clips||0},${a.unpaid_value||0})">Reset for New Account</button>
+              </td>
             </tr>`).join('')}</tbody></table></div>
             <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
 
@@ -1328,7 +1355,7 @@
               <td>${when(p.paid_at)}</td><td>${esc(p.campaign_name||'General')}</td>
               <td class="muted">${esc(p.method||'—')}</td><td class="muted">${esc(p.reference||'—')}</td>
               <td class="money">${money(p.amount)}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id})">Delete</button></td>
+              <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id},${p.clip_count||0})">Delete</button></td>
             </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No payments recorded.</p>'}`;
       }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
     };
@@ -1344,9 +1371,54 @@
       catch(e){ toast(e.message,true); }
     };
     window.deleteClipper=async function(id){
-      if(!confirm('Delete this clipper permanently?')) return;
-      try{ await api('/api/admin/clippers/'+id,{method:'DELETE'}); toast('Clipper deleted'); loadAll(); }
-      catch(e){ toast(e.message,true); }
+      if(!confirm('Archive this clipper?\n\nEvery video, earning and payment stays on record — nothing is deleted. They drop out of the active roster, lose login access, and their social accounts are disconnected (tokens revoked), so nothing new syncs in.\n\nRestore them from Deleted Clippers below; they will need to reconnect their account to resume syncing.')) return;
+      try{
+        await api('/api/admin/clippers/'+id,{method:'DELETE'});
+        toast('Clipper archived — videos and earnings kept');
+        loadClippers();
+        loadDeletedClippers();
+      }catch(e){ toast(e.message,true); }
+    };
+
+    /* ---------- deleted clippers ---------- */
+    let deletedClippersLoaded=false;
+    window.toggleDeletedClippers=function(){
+      const wrap=document.getElementById('deleted-clippers-wrap');
+      const chev=document.getElementById('deleted-chev');
+      const opening=wrap.style.display==='none';
+      wrap.style.display=opening?'':'none';
+      chev.textContent=opening?'▴':'▾';
+      if(opening&&!deletedClippersLoaded) loadDeletedClippers();
+    };
+    async function loadDeletedClippers(){
+      deletedClippersLoaded=true;
+      const {clippers}=await api('/api/admin/clippers?status=deleted');
+      const countEl=document.getElementById('deleted-count');
+      if(countEl) countEl.textContent=clippers.length?`(${clippers.length})`:'';
+      const tb=document.getElementById('deleted-clippers-body');
+      if(!tb) return;
+      if(!clippers.length){ tb.innerHTML='<tr><td colspan="5" class="empty">No deleted clippers.</td></tr>'; return; }
+      tb.innerHTML=clippers.map(c=>`
+        <tr>
+          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
+          <td>${num(c.campaigns)}</td>
+          <td class="money">${money(c.money.earned)}</td>
+          <td>${money(c.money.paid)}</td>
+          <td class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="toggleClipper(${c.id})">View History</button>
+            <button class="btn btn-sm" onclick="restoreClipper(${c.id})">Restore</button>
+          </td>
+        </tr>
+        <tr class="expand" id="ux-${c.id}"><td colspan="5"><div id="uxb-${c.id}">Loading…</div></td></tr>`).join('');
+    }
+    window.restoreClipper=async function(id){
+      if(!confirm('Restore this clipper to the active roster? They will be able to log in again.')) return;
+      try{
+        await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({status:'active'})});
+        toast('Clipper restored');
+        loadClippers();
+        loadDeletedClippers();
+      }catch(e){ toast(e.message,true); }
     };
     window.toggleAutoImport=async function(id,turnOn,handle){
       const msg=turnOn
@@ -1360,14 +1432,25 @@
       }catch(e){ toast(e.message,true); }
     };
 
-    window.revokeAccount=async function(id,platform,handle){
+    window.revokeAccount=async function(id,platform,handle,resetAccess,unpaidClips,unpaidValue){
       const what=`${platform||'this'} account${handle?' '+handle:''}`;
-      if(!confirm(`Disconnect ${what}?\n\nPending (unpaid) videos from this account are DELETED and their budget goes back to the campaign.\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThe clipper can then connect a different account.`)) return;
+      // Spell out exactly what is destroyed, with the count and the rupee
+      // value, before the admin confirms. This action is irreversible and the
+      // old dialog described it only in the abstract.
+      const n=Number(unpaidClips||0), v=Number(unpaidValue||0);
+      const loss=n>0
+        ? `This PERMANENTLY DELETES ${n} unpaid video(s) worth ${money(v)}. That earning disappears and the budget returns to the campaign. This cannot be undone.`
+        : `There are no unpaid videos on this account, so nothing will be deleted.`;
+      const msg=resetAccess
+        ? `Disconnect ${what} and reset for a new account?\n\n${loss}\n\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThis also reopens their access request, so the clipper's dashboard shows Step 1 (enter a new handle) instead of Connect. You'll still need to add the new account as a Meta Tester before Connect will work for them.\n\nTo remove someone WITHOUT losing their unpaid work, archive the clipper instead.`
+        : `Disconnect ${what}?\n\n${loss}\n\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThis does NOT reopen their access request — if they need to submit a different account, use "Reset for New Account" instead.\n\nTo remove someone WITHOUT losing their unpaid work, archive the clipper instead.`;
+      if(!confirm(msg)) return;
       try{
-        const r=await api('/api/admin/accounts/'+id,{method:'DELETE'});
+        const r=await api('/api/admin/accounts/'+id,{method:'DELETE',body:JSON.stringify({resetAccess:!!resetAccess})});
         const bits=[];
         if(r.deleted_pending) bits.push(`${r.deleted_pending} pending video(s) removed`);
         if(r.kept_settled) bits.push(`${r.kept_settled} settled video(s) kept`);
+        if(r.reset_requests) bits.push(`access reopened for ${r.reset_requests} campaign(s)`);
         toast(`Disconnected${bits.length?' — '+bits.join(', '):''}`);
         loadAll();
       }catch(e){ toast(e.message,true); }

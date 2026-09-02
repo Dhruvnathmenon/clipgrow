@@ -6,7 +6,7 @@ import {
   disconnectSocialAccount
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
-import { createRefreshJob, advanceJob, getJob, publicJob, retryJob } from '../refresh-jobs.js';
+import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { parseBlueprintDocx } from '../blueprint.js';
 import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from '../payouts.js';
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
@@ -148,10 +148,21 @@ export async function handleAdmin(request, env, url) {
        ORDER BY clips DESC`
     ).bind(Date.now() - STUCK_AFTER_MS).all();
 
+    // A wedged refresh job is otherwise invisible: publicJob only computes
+    // `stalled` when someone polls that specific job id, and there is no job
+    // list. Meanwhile it blocks every subsequent sync.
+    const { results: stalledJobs } = await env.DB.prepare(
+      `SELECT id, kind, clipper_id, triggered_by, updated_at
+         FROM refresh_jobs
+        WHERE status IN ('queued','running') AND updated_at < ?
+        ORDER BY updated_at ASC`
+    ).bind(Date.now() - STALL_AFTER_MS).all();
+
     return json({
       overview: { ...s, outstanding: Math.max(0, (s.total_earned || 0) - (s.total_paid_against_earnings || 0)) },
       problem_accounts: problemAccounts || [],
-      stuck_accounts: stuckAccounts || []
+      stuck_accounts: stuckAccounts || [],
+      stalled_jobs: stalledJobs || []
     });
   }
 
@@ -177,16 +188,31 @@ export async function handleAdmin(request, env, url) {
 
   // -------------------------------------------------------------- clippers
   if (pathname === '/api/admin/clippers' && method === 'GET') {
-    const { results } = await env.DB.prepare('SELECT * FROM clippers ORDER BY created_at DESC').all();
+    // Deleted clippers are archived, not gone (see the DELETE handler below),
+    // so they stay out of the main roster by default and only show up when
+    // explicitly asked for -- the admin UI's separate "Deleted" section.
+    const wantDeleted = url.searchParams.get('status') === 'deleted';
+    const { results } = await env.DB.prepare(
+      wantDeleted
+        ? "SELECT * FROM clippers WHERE status = 'deleted' ORDER BY created_at DESC"
+        : "SELECT * FROM clippers WHERE status != 'deleted' ORDER BY created_at DESC"
+    ).all();
     const out = [];
     for (const c of results || []) {
       const money = await clipperFinancials(env.DB, c.id);
       const acc = await env.DB.prepare(
-        `SELECT COUNT(*) AS n, SUM(CASE WHEN status!='connected' THEN 1 ELSE 0 END) AS bad
-         FROM social_accounts WHERE clipper_id = ?`).bind(c.id).first();
+        `SELECT COUNT(*) AS n, SUM(CASE WHEN status!='connected' THEN 1 ELSE 0 END) AS bad,
+                SUM(CASE WHEN EXISTS (
+                  SELECT 1 FROM tester_requests tr
+                    JOIN participation_accounts pa ON pa.account_id = a.id
+                    JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
+                    WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
+                      AND COALESCE(tr.identifier, tr.ig_username) != a.username
+                ) THEN 1 ELSE 0 END) AS mismatched
+         FROM social_accounts a WHERE clipper_id = ?`).bind(c.id).first();
       const parts = await env.DB.prepare(
         "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'").bind(c.id).first();
-      out.push({ ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0, campaigns: parts.n });
+      out.push({ ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0, accounts_mismatched: acc.mismatched || 0, campaigns: parts.n });
     }
     return json({ clippers: out });
   }
@@ -211,7 +237,28 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'GET') {
     const clipper = await env.DB.prepare('SELECT * FROM clippers WHERE id = ?').bind(params.id).first();
     if (!clipper) return err('Not found', 404);
-    const { results: accounts } = await env.DB.prepare('SELECT * FROM social_accounts WHERE clipper_id = ?').bind(params.id).all();
+    // mismatch_approved_as: the identifier that was actually approved for a
+    // campaign this account is linked to, when it differs from the account
+    // that's actually connected. canConnect() never checks this at OAuth time
+    // (any confirmed account passes), so it can silently drift -- this is the
+    // only place that surfaces it after the fact.
+    const { results: accounts } = await env.DB.prepare(
+      `SELECT a.*,
+         -- What disconnecting this account would actually destroy. The dialog
+         -- states these numbers before the admin confirms, rather than a vague
+         -- "pending videos are deleted".
+         (SELECT COUNT(*) FROM submissions s
+            WHERE s.account_id = a.id AND s.locked_at IS NULL) AS unpaid_clips,
+         (SELECT COALESCE(SUM(s.earning),0) FROM submissions s
+            WHERE s.account_id = a.id AND s.locked_at IS NULL AND s.status = 'active') AS unpaid_value,
+         (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
+            JOIN participation_accounts pa ON pa.account_id = a.id
+            JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
+            WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
+              AND COALESCE(tr.identifier, tr.ig_username) != a.username
+            LIMIT 1) AS mismatch_approved_as
+       FROM social_accounts a WHERE a.clipper_id = ?`
+    ).bind(params.id).all();
     const { results: parts } = await env.DB.prepare(
       // participations.account_id is the legacy single-account column and is
       // only ever maintained for Instagram, so joining through it shows the
@@ -235,7 +282,9 @@ export async function handleAdmin(request, env, url) {
     return json({
       clipper: publicClipper(clipper),
       money: await clipperFinancials(env.DB, params.id),
-      accounts: (accounts || []).map(publicAccount),
+      // mismatch_approved_as is deliberately not part of publicAccount (shared
+      // with the clipper's own dashboard) -- it's admin-only oversight info.
+      accounts: (accounts || []).map(a => ({ ...publicAccount(a), mismatch_approved_as: a.mismatch_approved_as || null })),
       participations: parts || [],
       submissions: subs || [],
       payments: pays || []
@@ -255,15 +304,33 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true });
   }
 
+  // "Delete" archives, it never destroys: a clipper can carry paid-out
+  // earnings history (submissions locked with a payment_id), and that must
+  // never disappear. So this unlinks every social account exactly the way
+  // the per-account Disconnect button does (disconnectSocialAccount --
+  // pending clips removed, settled ones kept, only tokens/links stripped),
+  // then marks the clipper 'deleted'. That single status flip is what moves
+  // them out of the main roster into the admin's separate "Deleted" section
+  // -- see the GET handler above and admin.html's loadDeletedClippers.
   if (params && method === 'DELETE') {
-    const subs = await env.DB.prepare('SELECT COUNT(*) AS n FROM submissions WHERE clipper_id = ?').bind(params.id).first();
-    if (subs.n > 0) return err(`This clipper has ${subs.n} submitted video(s). Disable the account instead so their earnings history is kept.`, 409);
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM participations WHERE clipper_id = ?').bind(params.id),
-      env.DB.prepare('DELETE FROM social_accounts WHERE clipper_id = ?').bind(params.id),
-      env.DB.prepare('DELETE FROM payments WHERE clipper_id = ?').bind(params.id),
-      env.DB.prepare('DELETE FROM clippers WHERE id = ?').bind(params.id)
-    ]);
+    const clipper = await env.DB.prepare('SELECT id, status FROM clippers WHERE id = ?').bind(params.id).first();
+    if (!clipper) return err('Not found', 404);
+    if (clipper.status === 'deleted') return json({ ok: true, already: true });
+
+    const { results: accounts } = await env.DB.prepare(
+      'SELECT id FROM social_accounts WHERE clipper_id = ?').bind(params.id).all();
+    const touchedCampaigns = new Set();
+    for (const a of accounts || []) {
+      // preserveClips: archiving must not destroy unpaid work. See the
+      // comment in disconnectSocialAccount -- this used to delete every
+      // unlocked clip while the confirm dialog promised the opposite.
+      const result = await disconnectSocialAccount(env.DB, a.id, { preserveClips: true });
+      for (const cid of (result ? result.campaigns : [])) touchedCampaigns.add(cid);
+    }
+    for (const cid of touchedCampaigns) await reallocateCampaign(env.DB, cid);
+
+    await env.DB.prepare(
+      "UPDATE clippers SET status = 'deleted' WHERE id = ?").bind(params.id).run();
     return json({ ok: true });
   }
 
@@ -288,7 +355,7 @@ export async function handleAdmin(request, env, url) {
     if (cpm <= 0) return err('CPM must be greater than 0');
     if (budget <= 0) return err('Budget must be greater than 0');
     // Views a clip must reach before it earns anything. Defaults to 1,000.
-    const minViews = payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : 1000;
+    const minViews = numOr(payload.min_views, 1000);
     const platforms = normalisePlatforms(payload.allowed_platforms);
     const res = await env.DB.prepare(
       `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, created_at)
@@ -360,7 +427,7 @@ export async function handleAdmin(request, env, url) {
       // from 0 up, and fall back only when the input is not a usable number.
       numOr(payload.cpm, existing.cpm),
       numOr(payload.budget, existing.budget),
-      payload.min_views != null ? Math.max(0, Number(payload.min_views) || 0) : existing.min_views,
+      numOr(payload.min_views, existing.min_views),
       payload.status || existing.status,
       payload.model != null ? payload.model : existing.model,
       JSON.stringify(merged),
@@ -557,13 +624,51 @@ export async function handleAdmin(request, env, url) {
   // Fully disconnects an account so a different one can be connected in its
   // place: unlinks it from the participation, deletes its pending clips, and
   // keeps whatever was already settled. See disconnectSocialAccount.
+  //
+  // resetAccess:true additionally reopens the tester_requests row for every
+  // campaign this account was driving, so the clipper's dashboard shows Step 1
+  // (enter a new handle) instead of skipping straight to Connect with a stale
+  // approval. Before this existed, doing that meant hand-writing SQL for each
+  // case -- this collapses it into the one action the disconnect dialog was
+  // already implying was possible.
   if (params && method === 'DELETE') {
+    const before = await env.DB.prepare('SELECT clipper_id FROM social_accounts WHERE id = ?').bind(params.id).first();
+    if (!before) return err('Account not found', 404);
+    const { resetAccess } = await readJson(request).catch(() => ({}));
+
+    // Campaigns this account is actually linked to, from participation_accounts
+    // -- not from disconnectSocialAccount's returned `campaigns`, which is
+    // derived purely from submissions.campaign_id and comes back EMPTY for an
+    // account that never posted a clip yet. That's a real, common case (a
+    // freshly-connected clipper who hasn't submitted anything), and resetAccess
+    // silently doing nothing for it would be exactly the kind of stuck state
+    // this feature exists to eliminate. Read before disconnecting -- it deletes
+    // these rows.
+    const { results: linkedParts } = resetAccess
+      ? await env.DB.prepare(
+          `SELECT DISTINCT p.campaign_id FROM participation_accounts pa
+             JOIN participations p ON p.id = pa.participation_id
+             WHERE pa.account_id = ?`
+        ).bind(params.id).all()
+      : { results: [] };
+
     const result = await disconnectSocialAccount(env.DB, Number(params.id));
-    if (!result) return err('Account not found', 404);
     // Those pending clips were holding budget; it has to be re-spread across
     // whatever is still open in each affected campaign.
     for (const cid of result.campaigns) await reallocateCampaign(env.DB, cid);
-    return json({ ok: true, ...result });
+
+    let reset_requests = 0;
+    const campaignIds = [...new Set([...(linkedParts || []).map(r => r.campaign_id), ...result.campaigns])];
+    if (resetAccess && campaignIds.length) {
+      const ph = campaignIds.map(() => '?').join(',');
+      const res = await env.DB.prepare(
+        `UPDATE tester_requests SET status = 'rejected',
+           note = 'Account disconnected -- resubmit a new handle.'
+         WHERE clipper_id = ? AND platform = ? AND campaign_id IN (${ph})`
+      ).bind(before.clipper_id, result.platform, ...campaignIds).run();
+      reset_requests = res.meta.changes || 0;
+    }
+    return json({ ok: true, ...result, reset_requests });
   }
 
   // ---------------------------------------------------------------- payouts

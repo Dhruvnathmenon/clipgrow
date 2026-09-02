@@ -402,6 +402,48 @@ export function publicJob(row) {
 
 export const STALL_AFTER_MS = 10 * 60 * 1000;
 
+// A job is only reaped well past the point it could still be alive. STALL is
+// what the UI calls "not moving"; REAP is "certainly dead".
+export const REAP_AFTER_MS = 30 * 60 * 1000;
+
+/**
+ * Fails and unlocks jobs that stopped moving.
+ *
+ * The partial unique indexes in migration 017 key on status IN
+ * ('queued','running'), so a job whose invocation died mid-run stays 'running'
+ * forever and blocks EVERY later global refresh -- the cron just logs
+ * "skipped" every six hours while views quietly stop updating platform-wide.
+ * Nothing wrote 'failed' anywhere, so nothing ever cleared it.
+ *
+ * Also releases the accounts the dead job still holds: claimAccount only
+ * steals a lock from a job that is not active, so leaving the row 'running'
+ * keeps its accounts locked too.
+ */
+export async function reapStalledJobs(db, { now = Date.now() } = {}) {
+  const cutoff = now - REAP_AFTER_MS;
+  const { results } = await db.prepare(
+    `SELECT id FROM refresh_jobs WHERE status IN ('queued','running') AND updated_at < ?`
+  ).bind(cutoff).all();
+
+  const reaped = [];
+  for (const row of results || []) {
+    // Guarded on status so a job that came back to life between the SELECT and
+    // this UPDATE is left alone rather than being killed underneath itself.
+    const res = await db.prepare(
+      `UPDATE refresh_jobs SET status = 'failed', error = ?, finished_at = ?, updated_at = ?
+       WHERE id = ? AND status IN ('queued','running') AND updated_at < ?`
+    ).bind(
+      'Abandoned: no progress for over 30 minutes. Released automatically so later refreshes can run.',
+      now, now, row.id, cutoff
+    ).run();
+    if ((res.meta && res.meta.changes) > 0) {
+      await releaseAccounts(db, row.id);
+      reaped.push(row.id);
+    }
+  }
+  return reaped;
+}
+
 /** Puts a stalled or failed job back on the queue, resuming from pending_json. */
 export async function retryJob(db, env, jobId) {
   const job = await getJob(db, jobId);

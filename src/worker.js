@@ -9,17 +9,18 @@ import { handleCampaignPage } from './routes/campaigns.js';
 import { handleSitemap } from './routes/sitemap.js';
 import { handleGuide } from './routes/guides.js';
 import { reallocateAll } from './earnings.js';
-import { createRefreshJob, advanceJob } from './refresh-jobs.js';
+import { createRefreshJob, advanceJob, reapStalledJobs } from './refresh-jobs.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
 const handlers = [handleInstagramAuth, handleYoutubeAuth, handleAdmin, handleClipper, handleClient, handlePublic, handleMedia];
 
-// The clipper area is unlisted: it lives at /clipper and nothing on the public
-// site links to it.
+// One "Log In" link on the homepage points at /clipper -- both this and
+// /client serve the same unified login page (login.html), which has a
+// Clipper/Client toggle. The path you land on just decides which tab starts
+// selected. admin.html stays unlisted -- reached only by its raw filename,
+// nothing links to it, and this file doesn't change that.
 const LOGIN_PATH = '/clipper';
-
-// The brand-facing portal, likewise unlisted.
 const CLIENT_LOGIN_PATH = '/client';
 
 // Old paths kept as redirects so previously-shared links still land somewhere.
@@ -94,7 +95,9 @@ export default {
     if (path === CLIENT_LOGIN_PATH || path === '/client.html') {
       const session = await getSession(request, env);
       if (session && session.role === 'client') return redirect('/client-dashboard');
-      return servePrivate(env, url.origin, '/client-login');
+      // Same unified login page as /clipper -- login.html reads the path to
+      // decide which tab (Clipper/Client) starts selected.
+      return servePrivate(env, url.origin, '/login');
     }
 
     const gate = GATED[path];
@@ -146,6 +149,16 @@ export default {
     // single transient error here is normal and expected, a clip still
     // failing 12+ hours later is not.
     ctx.waitUntil((async () => {
+      // Clear out any job that died mid-run BEFORE trying to create one. Its
+      // row still counts as active for the unique index, so without this a
+      // single lost invocation blocks every future sync permanently.
+      try {
+        const reaped = await reapStalledJobs(env.DB);
+        if (reaped.length) console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
+      } catch (e) {
+        console.error('[cron sync] reaper failed', e && e.message);
+      }
+
       // respectCooldown TRUE, unlike a human-triggered refresh. Without it an
       // account with 60 clips would need 240 calls/hour from routine syncing
       // alone -- past Instagram's own 200/hour ceiling before anyone even
