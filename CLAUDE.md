@@ -16,6 +16,10 @@ so an ordinary prompt doesn't pay to load context it doesn't need.
   already hit — don't preload it.
 - **`.claude/notes/changelog.md`** — condensed, dated history. Open only
   when asked "have we done X" or for historical context.
+- **`.claude/notes/seo.md`** — SEO strategy, audit findings, and the
+  phased implementation plan. Read when the work is about search
+  ranking, sitemap/robots, structured data, guides, or marketing-page
+  crawlability.
 
 ## The one rule that always applies
 
