@@ -261,6 +261,11 @@
         </table></div>
       </div>
       <div class="panel">
+        <h2 class="panel-title">Instagram &amp; YouTube Accounts</h2>
+        <p class="note" style="margin-bottom:1rem">Every connected account, across every clipper. <strong>Issues</strong> is the only section that needs your attention — Unflag once you've checked it and it's fine; it comes back on its own if something actually changes.</p>
+        <div id="accounts-panel"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="panel">
         <h2 class="panel-title" style="cursor:pointer" onclick="toggleDeletedClippers()">Deleted Clippers <span id="deleted-count" class="muted" style="font-weight:400;font-size:.8rem"></span> <span id="deleted-chev" style="font-size:.75rem">▾</span></h2>
         <div id="deleted-clippers-wrap" style="display:none">
           <p class="note">Deleting a clipper archives them — every video and payment stays intact, and the total still counts toward your records. They just drop out of the active roster and can no longer log in. Restore brings them back exactly as they were.</p>
@@ -502,7 +507,7 @@
 
   <script>
     let modalMode='create', modalId=null;
-    let CLIPPERS=[], CAMPAIGNS=[];
+    let CLIPPERS=[], CAMPAIGNS=[], ACCOUNTS_PANEL=null;
     const TEXT_FIELDS=['name','description','model','socials','objective','cta','tags','commission_rate','model_note','guidelines','footage','demo_video'];
     const NUM_FIELDS=['cpm','budget','min_views','max_payout'];
 
@@ -1424,6 +1429,53 @@
       fillPaymentSelects();
     }
 
+    /* ── Instagram/YouTube account health panel ──
+       One panel, four buckets, computed server-side (GET /api/admin/accounts)
+       so the Active/Paused/Removed/Issues precedence lives in one tested
+       place. Issues rows carry an Unflag button per reason -- see the
+       endpoint's own comment for why that's safe without a confirm dialog. */
+    const ACCT_REASON_LABEL={
+      mismatch:'Connected account doesn\'t match what was approved',
+      needs_reauth:'Needs reconnecting',
+      import_failing:'New uploads aren\'t being imported'
+    };
+    function acctReasonLine(r,row){
+      const extra=r==='mismatch'
+        ? ` — connected as <strong>${esc(row.username)}</strong>, approved as <strong>${esc(row.mismatch_approved_as)}</strong>`
+        : (row.last_error_code?` — ${esc(row.last_error_code)}`:'');
+      const type=r==='mismatch'?'mismatch':'error';
+      return `<div class="trouble">${esc(ACCT_REASON_LABEL[r]||r)}${extra}
+        <button class="btn btn-ghost btn-sm" onclick="acknowledgeAccountIssue(${row.id},'${type}')">Unflag</button></div>`;
+    }
+    function acctTable(rows,{showReasons}={}){
+      if(!rows.length) return '<p class="muted" style="margin-bottom:1rem">None.</p>';
+      return `<div class="table-wrap" style="margin-bottom:1rem"><table>
+        <thead><tr><th>Clipper</th><th>Platform</th><th>Handle</th>${showReasons?'<th>Why it\'s flagged</th>':'<th>Status</th>'}</tr></thead>
+        <tbody>${rows.map(r=>`<tr>
+          <td class="handle">${esc(r.clipper_name)}</td>
+          <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
+          <td>${esc(r.username||'—')}</td>
+          <td>${showReasons?r.reasons.map(x=>acctReasonLine(x,r)).join(''):`<span class="badge ${r.status}">${esc(r.status.replace('_',' '))}</span>`}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+    async function loadAccountsPanel(){
+      const buckets=await api('/api/admin/accounts');
+      ACCOUNTS_PANEL=buckets;
+      document.getElementById('accounts-panel').innerHTML=
+        `<div class="sub-h">Issues (${buckets.issues.length})</div>${acctTable(buckets.issues,{showReasons:true})}`+
+        `<div class="sub-h">Active (${buckets.active.length})</div>${acctTable(buckets.active)}`+
+        `<div class="sub-h">Paused (${buckets.paused.length})</div>${acctTable(buckets.paused)}`+
+        `<div class="sub-h">Removed (${buckets.removed.length})</div>${acctTable(buckets.removed)}`;
+    }
+    window.acknowledgeAccountIssue=async function(id,type){
+      try{
+        await api('/api/admin/accounts/'+id+'/acknowledge',{method:'PATCH',body:JSON.stringify({type})});
+        toast('Unflagged');
+        loadAccountsPanel();
+      }catch(e){ toast(e.message,true); }
+    };
+
     window.toggleClipper=async function(id){
       const row=document.getElementById('ux-'+id);
       const opening=!row.classList.contains('open');
@@ -1703,6 +1755,7 @@
         run('Overview',loadOverview,'health'),
         run('Campaigns',loadCampaigns,'campaigns-body'),
         run('Clippers',loadClippers,'clippers-body'),
+        run('Accounts',loadAccountsPanel,'accounts-panel'),
         run('Access requests',loadTesters,null)
       ]);
     }

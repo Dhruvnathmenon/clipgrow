@@ -192,7 +192,7 @@ export async function handleAdmin(request, env, url) {
     return json({ campaigns: await allCampaignFinancials(env.DB) });
   }
 
-  params = matchPath('/api/admin/finance/campaigns/:id', pathname);
+  let params = matchPath('/api/admin/finance/campaigns/:id', pathname);
   if (params && method === 'GET') {
     const fin = await campaignFinancials(env.DB, Number(params.id));
     if (!fin) return err('Not found', 404);
@@ -318,7 +318,7 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true, id: res.meta.last_row_id, username: clean }, 201);
   }
 
-  let params = matchPath('/api/admin/clippers/:id', pathname);
+  params = matchPath('/api/admin/clippers/:id', pathname);
   if (params && method === 'GET') {
     const clipper = await env.DB.prepare('SELECT * FROM clippers WHERE id = ?').bind(params.id).first();
     if (!clipper) return err('Not found', 404);
@@ -821,6 +821,87 @@ export async function handleAdmin(request, env, url) {
       reset_requests = res.meta.changes || 0;
     }
     return json({ ok: true, ...result, reset_requests });
+  }
+
+  // All social accounts across every clipper, bucketed into Active / Paused /
+  // Removed / Issues. Precedence matters -- checked in this order so a real
+  // open problem is never hidden behind a "tracking paused" label:
+  //   revoked (admin-disconnected)  ->  open issue  ->  tracking paused  ->  active
+  //
+  // Neither acknowledgment is a plain "dismissed forever" flag -- each stores
+  // what was true AT THE MOMENT of acknowledgment (see migration 022), so a
+  // bucket only stays suppressed while nothing has actually changed since.
+  if (pathname === '/api/admin/accounts' && method === 'GET') {
+    const { results } = await env.DB.prepare(
+      `SELECT a.*, cl.display_name AS clipper_display_name, cl.username AS clipper_username,
+         (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
+            JOIN participation_accounts pa ON pa.account_id = a.id
+            JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
+            WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
+              AND COALESCE(tr.identifier, tr.ig_username) != a.username
+            LIMIT 1) AS mismatch_approved_as
+       FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
+       WHERE cl.status != 'deleted'
+       ORDER BY cl.username, a.platform`
+    ).all();
+
+    const buckets = { active: [], paused: [], removed: [], issues: [] };
+    for (const a of results || []) {
+      // Suppressed only while the username that triggered it hasn't changed
+      // again since -- a later reconnect that changes it once more no longer
+      // matches the acknowledged value, so it re-flags with no extra logic.
+      const mismatchOpen = !!a.mismatch_approved_as && a.username !== a.mismatch_acknowledged_as;
+      const importFailing = a.status === 'connected' && /^IMPORT_/.test(a.last_error_code || '');
+      // Suppressed only while we have positive proof the current error
+      // predates the acknowledgment. Missing last_error_at fails OPEN --
+      // never silently hide a problem this can't actually rule out.
+      const errorPredatesAck = !!a.error_acknowledged_at && !!a.last_error_at && a.last_error_at <= a.error_acknowledged_at;
+      const errorOpen = (a.status === 'needs_reauth' || importFailing) && !errorPredatesAck;
+
+      const reasons = [];
+      if (mismatchOpen) reasons.push('mismatch');
+      if (errorOpen) reasons.push(a.status === 'needs_reauth' ? 'needs_reauth' : 'import_failing');
+
+      const row = {
+        id: a.id,
+        clipper_id: a.clipper_id,
+        clipper_name: a.clipper_display_name || a.clipper_username,
+        platform: a.platform,
+        username: a.username,
+        status: a.status,
+        auto_import: a.auto_import !== 0,
+        last_error_code: a.last_error_code,
+        last_error_at: a.last_error_at,
+        mismatch_approved_as: mismatchOpen ? a.mismatch_approved_as : null,
+        reasons
+      };
+
+      if (a.status === 'revoked') buckets.removed.push(row);
+      else if (reasons.length) buckets.issues.push(row);
+      else if (!row.auto_import) buckets.paused.push(row);
+      else buckets.active.push(row);
+    }
+    return json(buckets);
+  }
+
+  // Tells the dashboard "I've looked at this, it's not a problem" for one
+  // account's flagged issue. Deliberately not a confirm-gated destructive
+  // action -- see migration 022's comment for why this is safe to reverse
+  // itself automatically rather than needing an "undo".
+  params = matchPath('/api/admin/accounts/:id/acknowledge', pathname);
+  if (params && method === 'PATCH') {
+    const { type } = await readJson(request);
+    if (type !== 'mismatch' && type !== 'error') return err("type must be 'mismatch' or 'error'");
+    const account = await env.DB.prepare('SELECT id FROM social_accounts WHERE id = ?').bind(params.id).first();
+    if (!account) return err('Account not found', 404);
+    if (type === 'mismatch') {
+      await env.DB.prepare('UPDATE social_accounts SET mismatch_acknowledged_as = username WHERE id = ?')
+        .bind(params.id).run();
+    } else {
+      await env.DB.prepare('UPDATE social_accounts SET error_acknowledged_at = ? WHERE id = ?')
+        .bind(now(), params.id).run();
+    }
+    return json({ ok: true });
   }
 
   // ---------------------------------------------------------------- payouts
