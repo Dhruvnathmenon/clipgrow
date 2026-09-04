@@ -21,6 +21,8 @@ node_modules/
 .mcp.json
 .claude/
 docs/
+premium-mock/
+.backup/
 *.md
 .git/
 .gitignore
