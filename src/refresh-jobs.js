@@ -23,7 +23,7 @@ import { getAdapter, campaignPlatforms } from './platforms.js';
 import { withAccount, markAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
-import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError } from './refresh-events.js';
+import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, pruneOldEvents } from './refresh-events.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -129,6 +129,12 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
  * race between the check and the insert.
  */
 export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy, respectCooldown = true }) {
+  // Opportunistic, same idea as ig_api_calls' own pruning in rate-budget.js
+  // -- every refresh kick-off is a fine place to sweep events old enough
+  // that nobody is looking at their job's panel any more. Never allowed to
+  // block or fail the actual job it's riding along with.
+  await pruneOldEvents(db);
+
   const accounts = await jobAccounts(db, { clipperId });
 
   // Every account is listed up front with its full video count, so the panel

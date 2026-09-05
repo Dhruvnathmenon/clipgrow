@@ -57,6 +57,25 @@ async function safeRun(db, sql, args, what) {
   }
 }
 
+// Every read of this table (jobEvents, jobFailureSummary) is scoped to one
+// specific job_id -- nothing ever queries "the last N days across every
+// job" -- so once a job is old enough that nobody is looking at its panel
+// any more, its events are pure dead weight. Unlike ig_api_calls (its
+// sibling rolling ledger, pruned per-account by src/rate-budget.js), this
+// table had no cleanup at all: ~1,200 rows/day with nothing ever removing
+// one, forever.
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Opportunistic cleanup so this table never grows unbounded. Safe to call often. */
+export async function pruneOldEvents(db) {
+  try {
+    await db.prepare('DELETE FROM refresh_events WHERE created_at < ?')
+      .bind(Date.now() - RETENTION_MS).run();
+  } catch (e) {
+    console.error('[refresh-events] could not prune old events:', e && e.message);
+  }
+}
+
 /**
  * One clip's outcome.
  *

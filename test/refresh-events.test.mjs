@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { makeSqliteD1 } from './helpers/sqlite-d1.mjs';
 import {
   recordClipEvent, recordClipEvents, recordAccountEvent,
-  classifyError, jobEvents, jobFailureSummary
+  classifyError, jobEvents, jobFailureSummary, pruneOldEvents
 } from '../src/refresh-events.js';
 
 const NOW = Date.now();
@@ -172,4 +172,27 @@ test('recording never throws, whatever it is handed', async () => {
   await recordClipEvent(db, { jobId: null, submissionId: 101, outcome: 'failed' });
   await recordClipEvents(db, null, { jobId: 5, outcome: 'failed' });
   await recordAccountEvent(db, { jobId: 5, account: null, outcome: 'failed' });
+});
+
+/* ─────────── retention: this table used to have none at all ─────────── */
+
+test('pruneOldEvents removes only what has aged out, leaving recent rows alone', async () => {
+  const db = seed();
+  const DAY = 24 * 60 * 60 * 1000;
+  await db.prepare(
+    `INSERT INTO refresh_events (job_id, submission_id, outcome, created_at) VALUES (?, ?, ?, ?)`
+  ).bind(1, 101, 'ok', Date.now() - 40 * DAY).run(); // older than the 30-day retention
+  await db.prepare(
+    `INSERT INTO refresh_events (job_id, submission_id, outcome, created_at) VALUES (?, ?, ?, ?)`
+  ).bind(2, 101, 'ok', Date.now() - 2 * DAY).run(); // well within it
+
+  await pruneOldEvents(db);
+
+  const { results } = await db.prepare('SELECT job_id FROM refresh_events ORDER BY job_id').all();
+  assert.deepEqual(results.map(r => r.job_id), [2], 'only the 40-day-old row should be gone');
+});
+
+test('pruneOldEvents never throws, even against a database that cannot run it', async () => {
+  const brokenDb = { prepare() { throw new Error('no such table: refresh_events'); } };
+  await pruneOldEvents(brokenDb); // must swallow, not propagate -- see safeRun's own reasoning
 });
