@@ -120,21 +120,31 @@ export async function recordClientPayment(db, {
   const common = { client_id: clientId || null, campaign_id: campaignId || null,
                    method, reference, occurred_at: at, created_by: createdBy };
 
-  const a = await addEntry(db, {
-    ...common, direction: 'in', amount: poolShare, wallet_id: agency.id,
-    category: 'client_payment',
-    note: note ? `${note} — clipper share` : 'Client payment — clipper share'
-  });
-  if (a.error) return a;
+  // One payment splitting into two entries used to mean two separate writes
+  // -- a crash between them left a payment half-recorded (the clipper share
+  // landed, the fee share never did, permanently). Built and run together
+  // in one batch now, so either both land or neither does.
+  const built = [
+    buildEntryStatement(db, {
+      ...common, direction: 'in', amount: poolShare, wallet_id: agency.id,
+      category: 'client_payment',
+      note: note ? `${note} — clipper share` : 'Client payment — clipper share'
+    })
+  ];
+  if (fee > 0) {
+    built.push(buildEntryStatement(db, {
+      ...common, direction: 'in', amount: fee, wallet_id: clipgrow.id,
+      category: 'management_fee',
+      note: note ? `${note} — ${feePercent}% fee` : `Management fee (${feePercent}%)`
+    }));
+  }
+  const failed = built.find(b => b.error);
+  if (failed) return failed;
 
-  const b = fee > 0 ? await addEntry(db, {
-    ...common, direction: 'in', amount: fee, wallet_id: clipgrow.id,
-    category: 'management_fee',
-    note: note ? `${note} — ${feePercent}% fee` : `Management fee (${feePercent}%)`
-  }) : { ok: true };
-  if (b.error) return b;
+  const results = await db.batch(built.map(b => b.statement));
+  const [poolEntryId, feeEntryId] = results.map(r => r.meta.last_row_id);
 
-  return { ok: true, total, pool_share: poolShare, fee, pool_entry: a.id, fee_entry: b.id || null };
+  return { ok: true, total, pool_share: poolShare, fee, pool_entry: poolEntryId, fee_entry: feeEntryId || null };
 }
 
 /**
@@ -173,21 +183,28 @@ export async function poolHeld(db, { campaignId = null } = {}) {
 
 /** Sum of active ledger entries matching a filter. Internal helper. */
 async function sumEntries(db, { direction = null, categories = null, campaignId = null,
-                                clientId = null, from = null, to = null } = {}) {
-  const where = ["status = 'active'"];
+                                clientId = null, from = null, to = null, walletKind = null } = {}) {
+  const where = ["le.status = 'active'"];
   const args = [];
-  if (direction) { where.push('direction = ?'); args.push(direction); }
+  if (direction) { where.push('le.direction = ?'); args.push(direction); }
   if (categories && categories.length) {
-    where.push(`category IN (${categories.map(() => '?').join(',')})`);
+    where.push(`le.category IN (${categories.map(() => '?').join(',')})`);
     args.push(...categories);
   }
-  if (campaignId != null) { where.push('campaign_id = ?'); args.push(campaignId); }
-  if (clientId != null) { where.push('client_id = ?'); args.push(clientId); }
-  if (from != null) { where.push('occurred_at >= ?'); args.push(from); }
-  if (to != null) { where.push('occurred_at <= ?'); args.push(to); }
+  if (campaignId != null) { where.push('le.campaign_id = ?'); args.push(campaignId); }
+  if (clientId != null) { where.push('le.client_id = ?'); args.push(clientId); }
+  if (from != null) { where.push('le.occurred_at >= ?'); args.push(from); }
+  if (to != null) { where.push('le.occurred_at <= ?'); args.push(to); }
+  // Which pot the money actually left from -- lets a refund be told apart as
+  // "against the clipper budget pool" vs "against the fee we'd already
+  // taken", the same way client_payment/management_fee are already told
+  // apart by which wallet receives them.
+  if (walletKind) { where.push('w.kind = ?'); args.push(walletKind); }
 
   const row = await db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) AS total FROM ledger_entries WHERE ${where.join(' AND ')}`
+    `SELECT COALESCE(SUM(le.amount), 0) AS total FROM ledger_entries le
+       JOIN wallets w ON w.id = le.wallet_id
+      WHERE ${where.join(' AND ')}`
   ).bind(...args).first();
   return (row && row.total) || 0;
 }
@@ -240,19 +257,42 @@ export async function campaignFinancials(db, campaignId) {
   const feeTaken = internal ? 0 : await sumEntries(db, {
     direction: 'in', categories: ['management_fee'], campaignId
   });
-  const refunded = internal ? 0 : await sumEntries(db, {
-    direction: 'out', categories: ['refund'], campaignId
+  // Split by which wallet the refund actually left from -- a refund against
+  // the leftover budget pool and a refund against fee already taken are two
+  // different physical movements, told apart the same way client_payment
+  // and management_fee are already told apart by which wallet receives them.
+  // Without this split, a real refund never reduced what the campaign
+  // showed as still owed: the campaign would say "owes ₹4,000" forever,
+  // even the day after that exact ₹4,000 was actually refunded.
+  const refundedFromBudget = internal ? 0 : await sumEntries(db, {
+    direction: 'out', categories: ['refund'], campaignId, walletKind: 'agency'
   });
+  const refundedFromFee = internal ? 0 : await sumEntries(db, {
+    direction: 'out', categories: ['refund'], campaignId, walletKind: 'clipgrow'
+  });
+  const refunded = refundedFromBudget + refundedFromFee;
 
   const clientPaid = poolReceived + feeTaken - refunded;
 
   // The refund, decomposed the way the money physically has to move:
-  //   whatever is left of the clipper pool for this campaign,
-  //   PLUS fee we took on receipt but never earned by delivering.
-  // The second half is why taking the fee up front has a cost -- it has to come
-  // back out of the agency wallet, not the pool.
-  const unspentPool = Math.max(0, poolReceived - delivered);
-  const unearnedFee = Math.max(0, feeTaken - feeEarned);
+  //   whatever is left of the clipper pool for this campaign, minus any of
+  //   it already sent back,
+  //   PLUS fee we took on receipt but never earned by delivering, minus any
+  //   of THAT already sent back.
+  // The second half is why taking the fee up front has a cost -- it has to
+  // come back out of the agency wallet, not the pool.
+  // Signed, unfloored versions of the same two numbers -- positive means a
+  // refund is owed to the client, negative means the client still owes for
+  // work already delivered. This is the one place that math happens; admin.html's
+  // Per Campaign table reads these two fields directly instead of
+  // recomputing them from pool_received/delivered/fee_taken/fee_earned, so
+  // there is exactly one definition of this balance, not two that can drift
+  // (see accountIssues() in db.js for the exact same lesson learned once
+  // already this project).
+  const budgetBalance = internal ? 0 : poolReceived - delivered - refundedFromBudget;
+  const feeBalance = internal ? 0 : feeTaken - feeEarned - refundedFromFee;
+  const unspentPool = Math.max(0, budgetBalance);
+  const unearnedFee = Math.max(0, feeBalance);
   const refundDue = internal ? 0 : unspentPool + unearnedFee;
 
   // The fee side's own two headline numbers, mirroring budget/delivered:
@@ -283,6 +323,8 @@ export async function campaignFinancials(db, campaignId) {
     fee_uncollected: feeUncollected,
     pool_received: poolReceived,
     unspent_pool: unspentPool,
+    budget_balance: budgetBalance,
+    fee_balance: feeBalance,
     // An internal campaign is ClipGrow's own marketing: nobody bills for it, so
     // the money paid to clippers is a straight cost rather than pass-through.
     cost: internal ? delivered : 0,
@@ -451,12 +493,21 @@ export function validateEntry(e) {
   return null;
 }
 
-export async function addEntry(db, e) {
+/**
+ * Validates and PREPARES (but does not run) the INSERT for one ledger
+ * entry. Exists so a caller that needs this write to be genuinely atomic
+ * with other writes -- settlePayment() recording a payout alongside the
+ * submission locks it settles -- can push the returned statement into
+ * their own db.batch() instead of it running on its own, separately,
+ * un-coordinated with the rest of that operation. addEntry() below is just
+ * this plus .run() for every caller that doesn't need that.
+ */
+export function buildEntryStatement(db, e) {
   const problem = validateEntry(e);
   if (problem) return { error: problem, status: 400 };
 
   const now = Date.now();
-  const res = await db.prepare(
+  const statement = db.prepare(
     `INSERT INTO ledger_entries
        (direction, amount, wallet_id, transfer_wallet_id, category, campaign_id, client_id,
         clipper_id, invoice_id, payment_id, method, reference, note, status, occurred_at,
@@ -467,8 +518,14 @@ export async function addEntry(db, e) {
     e.category, e.campaign_id || null, e.client_id || null, e.clipper_id || null,
     e.invoice_id || null, e.payment_id || null, e.method || null, e.reference || null,
     e.note || null, e.occurred_at || now, now, e.created_by || 'admin'
-  ).run();
+  );
+  return { statement };
+}
 
+export async function addEntry(db, e) {
+  const built = buildEntryStatement(db, e);
+  if (built.error) return built;
+  const res = await built.statement.run();
   return { ok: true, id: res.meta.last_row_id };
 }
 

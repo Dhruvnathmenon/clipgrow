@@ -84,6 +84,49 @@ test('settling without a wallet still pays, it just records no source', async ()
   assert.equal((await listEntries(db, {})).filter(r2 => r2.category === 'clipper_payout').length, 0);
 });
 
+test('a clip locked mid-flight rolls back the ledger entry too, not just the payment', async () => {
+  // Guards the fix to the "best-effort" ledger write: it used to be its own
+  // separate step, un-coordinated with the submission locks -- a race here
+  // left the ledger entry sitting there, recording money for a payout the
+  // conflict check had just refused. It's now in the same batch, and its
+  // own undo path when that batch's row-count doesn't add up.
+  const db = seed();
+  const agency = (await walletOfKind(db, 'agency')).id;
+  await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
+                       category: 'client_payment', campaign_id: 7 });
+
+  // A real concurrent payment row, so the racing UPDATE's payment_id
+  // satisfies the same foreign key a genuine one would.
+  const otherPaymentId = (await db.prepare(
+    `INSERT INTO payments (clipper_id, campaign_id, amount, paid_at, created_at, kind)
+     VALUES (1, 7, 8000, ?, ?, 'settlement')`
+  ).bind(Date.now(), Date.now()).run()).meta.last_row_id;
+
+  // Simulate a concurrent settle winning the race: the row reads as
+  // unlocked during validation, then gets locked before our own UPDATE lands.
+  const realPrepare = db.prepare.bind(db);
+  let armed = true;
+  db.prepare = (sql) => {
+    if (armed && /^UPDATE submissions SET locked_at = \?, locked_earning = \?/.test(sql)) {
+      armed = false;
+      realPrepare(
+        `UPDATE submissions SET locked_at = ?, locked_earning = ?, lock_reason = 'paid', payment_id = ? WHERE id = ?`
+      ).bind(Date.now(), 8000, otherPaymentId, 101).run();
+    }
+    return realPrepare(sql);
+  };
+
+  const r = await settlePayment(db, {
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+  });
+
+  assert.equal(r.status, 409, 'must report the conflict rather than returning ok');
+  assert.equal((await listEntries(db, {})).filter(e => e.category === 'clipper_payout').length, 0,
+    'the ledger entry from the rolled-back attempt must not survive either');
+  const ws = await walletBalances(db);
+  assert.equal(ws.find(w => w.kind === 'agency').balance, 40000, 'nothing left the wallet for a payout that never actually happened');
+});
+
 test('the payout does not become an agency cost', async () => {
   // The client's money passes through to clippers. Counting it as our cost
   // would make every delivered campaign look like a loss.

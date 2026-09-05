@@ -2114,8 +2114,9 @@
     function renderFinCampaigns(campaigns){
       const tb=document.getElementById('fin-campaigns-body');
       tb.innerHTML=campaigns.length?campaigns.map(c=>{
-        const budgetBalance=c.pool_received-c.delivered;
-        const feeBalance=c.fee_taken-c.fee_earned;
+        // Read straight from the API (finance.js's campaignFinancials) rather
+        // than recomputed here -- these already subtract any refund already
+        // recorded, which a local pool_received-delivered subtraction would not.
         return `<tr>
           <td class="handle">${esc(c.name)}</td>
           <td>${c.is_internal?'<span class="muted">internal</span>':money(c.budget)}</td>
@@ -2124,8 +2125,8 @@
           <td>${money(c.delivered)}</td>
           <td class="money">${money(c.settled)}</td>
           <td>${c.pending>0?`<span class="gold">${money(c.pending)}</span>`:money(0)}</td>
-          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(budgetBalance)}</td>
-          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(feeBalance)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(c.budget_balance)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(c.fee_balance)}</td>
           <td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td>
         </tr>`;
       }).join(''):'<tr><td colspan="10" class="empty">No campaigns yet.</td></tr>';

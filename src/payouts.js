@@ -1,6 +1,6 @@
 import { now, maxPayoutPerVideo } from './db.js';
 import { cpmEarning, explainEarning, explainEarningText } from './earning-math.js';
-import { addEntry, voidEntry, agencyAvailable } from './finance.js';
+import { voidEntry, agencyAvailable, buildEntryStatement } from './finance.js';
 import { clipState, clipStateMessage, daysSince } from './clipstate.js';
 import { platformLabel } from './platforms.js';
 import { reallocateCampaign } from './earnings.js';
@@ -300,28 +300,36 @@ export async function settlePayment(db, {
     ).bind(clipperId, campaignId || null, amt, method || 'UPI', reference || '', note || '',
            ts, now(), payIds.length, clipsTotal).run();
     paymentId = res.meta.last_row_id;
-
-    // The same payout, recorded once in `payments` (what the clipper is owed
-    // and locked against) and once in the ledger (where the cash came from).
-    // Linked by payment_id so nothing double-counts, and best-effort so a
-    // bookkeeping failure can never block a payout that has already happened.
-    if (walletId) {
-      try {
-        await addEntry(db, {
-          direction: 'out', amount: amt, wallet_id: walletId,
-          category: 'clipper_payout', campaign_id: campaignId || null,
-          clipper_id: clipperId, payment_id: paymentId,
-          method: method || 'UPI', reference: reference || null,
-          note: note || `Settled ${payIds.length} clip(s)`,
-          occurred_at: ts, created_by: 'settle'
-        });
-      } catch (e) {
-        console.error('[finance] could not record payout in the ledger:', e && e.message);
-      }
-    }
   }
 
+  // The same payout, recorded once in `payments` (what the clipper is owed
+  // and locked against) and once in the ledger (where the cash came from),
+  // linked by payment_id so nothing double-counts. This USED to be
+  // best-effort -- a ledger write that failed was only console.error'd,
+  // leaving the payout "successful" with the money it moved permanently
+  // missing from the books, with nothing to ever notice that had happened.
+  // It's now pushed into the SAME batch as the submission locks below, so
+  // either both land or neither does.
+  let ledgerStmtIndex = -1;
   const stmts = [];
+  if (payIds.length && walletId) {
+    const built = buildEntryStatement(db, {
+      direction: 'out', amount: amt, wallet_id: walletId,
+      category: 'clipper_payout', campaign_id: campaignId || null,
+      clipper_id: clipperId, payment_id: paymentId,
+      method: method || 'UPI', reference: reference || null,
+      note: note || `Settled ${payIds.length} clip(s)`,
+      occurred_at: ts, created_by: 'settle'
+    });
+    if (built.error) {
+      // Fail before any lock is touched -- and before leaving the payment
+      // row we just created orphaned with nothing settled against it.
+      if (paymentId != null) await db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId).run();
+      return { error: `Could not record this payout in the ledger: ${built.error}. Nothing was charged.`, status: 500 };
+    }
+    ledgerStmtIndex = stmts.length;
+    stmts.push(built.statement);
+  }
   for (const id of payIds) {
     const row = found.get(id);
     stmts.push(db.prepare(
@@ -342,7 +350,17 @@ export async function settlePayment(db, {
   // that was only transferred once. The same gap turns a mid-batch failure into
   // a payment with nothing locked, whose clips then settle again later.
   if (stmts.length) {
-    const results = await db.batch(stmts);
+    let results;
+    try {
+      results = await db.batch(stmts);
+    } catch (e) {
+      // The ledger insert and the locks are one batch, so a genuine failure
+      // here means D1 rolled all of it back -- but the payment row above was
+      // created outside this batch (its id has to exist before the ledger
+      // entry can reference it), so it's now orphaned and needs its own cleanup.
+      if (paymentId != null) await db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId).run();
+      return { error: `Could not record this payout: ${e.message || e}. Nothing was charged.`, status: 500 };
+    }
     const changed = (results || []).reduce(
       (n, r) => n + (r && r.meta && typeof r.meta.changes === 'number' ? r.meta.changes : 1), 0);
     if (changed !== stmts.length) {
@@ -358,6 +376,13 @@ export async function settlePayment(db, {
            WHERE locked_at = ? AND id IN (${allIds.map(() => '?').join(',')})`
         ).bind(ts, ...allIds)
       ];
+      // The ledger entry landed as part of the same batch that's now being
+      // reverted -- it has to go too, or the books show a payout that was
+      // just undone.
+      if (ledgerStmtIndex !== -1 && results[ledgerStmtIndex] && results[ledgerStmtIndex].meta) {
+        const ledgerId = results[ledgerStmtIndex].meta.last_row_id;
+        if (ledgerId) undo.push(db.prepare('DELETE FROM ledger_entries WHERE id = ?').bind(ledgerId));
+      }
       if (paymentId != null) undo.push(db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId));
       // One batch, so the unlock and the delete cannot half-apply.
       await db.batch(undo);

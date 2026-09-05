@@ -183,6 +183,66 @@ test('stopping early: the refund is unspent clipper money plus unearned fee', as
   assert.equal(fin.refund_due, 48000 - 30000 - 6000);
 });
 
+test('a refund actually recorded reduces what the campaign still shows as owed', async () => {
+  const db = seed({ clips: [{ earning: 30000 }] });
+  const W = await ids(db);
+
+  await recordClientPayment(db, { clientId: 1, campaignId: 7, amount: 48000, feePercent: 20 });
+  await addEntry(db, { direction: 'out', amount: 30000, wallet_id: W.agency,
+                       category: 'clipper_payout', campaign_id: 7, clipper_id: 1 });
+
+  const before = await campaignFinancials(db, 7);
+  assert.equal(before.unspent_pool, 10000);
+  assert.equal(before.unearned_fee, 2000);
+  assert.equal(before.refund_due, 12000);
+
+  // Refund the whole unspent pool -- recorded against the agency wallet,
+  // same as the money it's returning actually sat in.
+  await addEntry(db, { direction: 'out', amount: 10000, wallet_id: W.agency,
+                       category: 'refund', campaign_id: 7 });
+
+  const after = await campaignFinancials(db, 7);
+  assert.equal(after.unspent_pool, 0, 'already refunded -- must not still show as owed');
+  assert.equal(after.budget_balance, 0);
+  assert.equal(after.unearned_fee, 2000, 'the fee side is untouched by a budget-side refund');
+  assert.equal(after.refund_due, 2000, 'only the fee refund is left to give back');
+});
+
+test('a fee refund and a budget refund are tracked independently, by wallet', async () => {
+  const db = seed({ clips: [{ earning: 30000 }] });
+  const W = await ids(db);
+  await recordClientPayment(db, { clientId: 1, campaignId: 7, amount: 48000, feePercent: 20 });
+  await addEntry(db, { direction: 'out', amount: 30000, wallet_id: W.agency,
+                       category: 'clipper_payout', campaign_id: 7, clipper_id: 1 });
+
+  // Refund only the unearned fee -- out of the clipgrow wallet, not the pool.
+  await addEntry(db, { direction: 'out', amount: 2000, wallet_id: W.clipgrow,
+                       category: 'refund', campaign_id: 7 });
+
+  const fin = await campaignFinancials(db, 7);
+  assert.equal(fin.unearned_fee, 0, 'the fee refund is already accounted for');
+  assert.equal(fin.fee_balance, 0);
+  assert.equal(fin.unspent_pool, 10000, 'the budget pool refund is untouched by a fee-side refund');
+  assert.equal(fin.refund_due, 10000);
+});
+
+test('budget_balance and fee_balance go negative once a refund overshoots into a real shortfall', async () => {
+  const db = seed({ clips: [{ earning: 30000 }] });
+  const W = await ids(db);
+  await recordClientPayment(db, { clientId: 1, campaignId: 7, amount: 48000, feePercent: 20 });
+  await addEntry(db, { direction: 'out', amount: 30000, wallet_id: W.agency,
+                       category: 'clipper_payout', campaign_id: 7, clipper_id: 1 });
+
+  // Refund more of the pool than is actually unspent (e.g. a goodwill
+  // refund) -- the client now genuinely owes for delivered work.
+  await addEntry(db, { direction: 'out', amount: 15000, wallet_id: W.agency,
+                       category: 'refund', campaign_id: 7 });
+
+  const fin = await campaignFinancials(db, 7);
+  assert.equal(fin.budget_balance, -5000, 'signed: negative means the client now owes this much');
+  assert.equal(fin.unspent_pool, 0, 'the floored, refund-owed-only version never goes negative');
+});
+
 test('a client behind on payment leaves a shortfall, not a refund', async () => {
   const db = seed({ clips: [{ earning: 30000 }] });
   await recordClientPayment(db, { clientId: 1, campaignId: 7, amount: 20000, feePercent: 20 });
