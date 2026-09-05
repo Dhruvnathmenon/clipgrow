@@ -417,18 +417,18 @@
 
     <!-- FINANCE -->
     <div class="view" id="v-finance">
-      <div class="panel">
-        <h2 class="panel-title">Overview — All Campaigns</h2>
-        <div class="stats" id="fin-stats"></div>
-      </div>
-
       <div id="fin-alerts"></div>
 
       <div class="panel">
         <h2 class="panel-title">Per Campaign</h2>
+        <p class="note" style="margin-bottom:1rem">Every number, per campaign, budget side and agency-fee side both — nothing rolled up, nothing hidden.</p>
         <div class="table-wrap"><table>
-          <thead><tr><th>Campaign</th><th>Budget</th><th>Of Which Client Has Cleared</th><th>Utilization</th><th>Of Which Paid</th><th>Left To Settle</th><th>Refund If Stopped Today</th><th>Status</th></tr></thead>
-          <tbody id="fin-campaigns-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+          <thead><tr>
+            <th>Campaign</th><th>Budget</th><th>Client Paid — Budget</th><th>Client Paid — Fee</th>
+            <th>Delivered (Owed to Editors)</th><th>Paid to Editors</th><th>Left to Pay Editors</th>
+            <th>If Stopped Today — Budget</th><th>If Stopped Today — Fee</th><th>Status</th>
+          </tr></thead>
+          <tbody id="fin-campaigns-body"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
 
@@ -2080,39 +2080,15 @@
         ]);
         if(!CLIENTS.length) CLIENTS=clients;
         FIN_CAMPAIGNS=campaigns; FIN_WALLETS=overview.wallets;
-        renderFinStats(overview.totals);
         renderFinAlerts(overview.funding_alerts);
         renderFinCampaigns(campaigns);
         renderFinAgencyFee(campaigns);
         fillFinanceSelects(overview.categories);
       }catch(e){
-        document.getElementById('fin-stats').innerHTML=`<div class="alert bad"><strong>Finance failed to load</strong> — ${esc(e.message)}</div>`;
+        document.getElementById('fin-alerts').innerHTML=`<div class="alert bad"><strong>Finance failed to load</strong> — ${esc(e.message)}</div>`;
         toast(`Finance failed to load: ${e.message}`,true);
       }
       loadLedger();
-    }
-
-    // Every stat here carries a plain-English label plus a `title` tooltip
-    // with the fuller explanation -- the labels alone read as accountant
-    // jargon ("Cash Position", "Unfunded Delivery"), which is exactly the
-    // confusion a founder flagged on this tab.
-    function statCard(value,cls,label,tip){
-      return `<div class="stat" title="${esc(tip)}"><div class="stat-val ${cls}">${value}</div><div class="stat-lbl">${esc(label)}</div></div>`;
-    }
-
-    // Three numbers. Inflow vs Outflow side by side is the solvency read on
-    // its own (Outflow > Inflow = clippers are being paid out of pocket,
-    // not from collected client money) -- no separate card for that.
-    // Profit is deliberately NOT Inflow - Outflow: that mixes fee cash with
-    // clipper cash flow. Profit is what has actually been EARNED by
-    // delivering results -- fees_earned, the sum of each campaign's 20% of
-    // Utilization. Fee cash already collected but not yet earned by
-    // delivered work isn't profit yet.
-    function renderFinStats(t){
-      document.getElementById('fin-stats').innerHTML=
-        statCard(money(t.client_payments_received+t.fees_collected),'w','Inflow','All cash actually received from clients so far.')+
-        statCard(money(t.clipper_payouts_paid),'r','Outflow','All cash actually paid to clippers so far. Bigger than Inflow means clippers are being paid out of pocket, not from collected client money.')+
-        statCard(money(t.fees_earned),'g','Profit','The agency fee actually earned by delivered results (20% of Utilization, campaign by campaign). Fee money already collected but not yet earned by real results isn’t profit yet.');
     }
 
     function renderFinAlerts(alerts){
@@ -2124,18 +2100,35 @@
       ).join('')}</div>`;
     }
 
+    // If this campaign stopped today, who owes whom -- one signed number per
+    // side (budget pool vs agency fee), since the two settle independently:
+    // the pool can be in refund while the fee is still owed, or the other
+    // way round. Positive balance = we owe the client a refund; negative =
+    // the client still owes us for work already delivered.
+    function balanceCell(balance){
+      return balance>=0
+        ? `Refund ${money(balance)}`
+        : `<span class="gold">Owes ${money(-balance)}</span>`;
+    }
+
     function renderFinCampaigns(campaigns){
       const tb=document.getElementById('fin-campaigns-body');
-      tb.innerHTML=campaigns.length?campaigns.map(c=>`<tr>
+      tb.innerHTML=campaigns.length?campaigns.map(c=>{
+        const budgetBalance=c.pool_received-c.delivered;
+        const feeBalance=c.fee_taken-c.fee_earned;
+        return `<tr>
           <td class="handle">${esc(c.name)}</td>
           <td>${c.is_internal?'<span class="muted">internal</span>':money(c.budget)}</td>
           <td>${c.is_internal?'<span class="muted">—</span>':money(c.pool_received)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':money(c.fee_taken)}</td>
           <td>${money(c.delivered)}</td>
           <td class="money">${money(c.settled)}</td>
           <td>${c.pending>0?`<span class="gold">${money(c.pending)}</span>`:money(0)}</td>
-          <td>${c.is_internal?'<span class="muted">—</span>':money(c.refund_due)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(budgetBalance)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':balanceCell(feeBalance)}</td>
           <td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td>
-        </tr>`).join(''):'<tr><td colspan="8" class="empty">No campaigns yet.</td></tr>';
+        </tr>`;
+      }).join(''):'<tr><td colspan="10" class="empty">No campaigns yet.</td></tr>';
     }
 
     // Only fee-charging campaigns show up here at all -- an internal /
