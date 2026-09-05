@@ -2,7 +2,7 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
-  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, slugify,
+  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
@@ -19,6 +19,10 @@ import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
 import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
 import { makeCallCounter } from '../rate-budget.js';
+import { logAction, listAuditLog } from '../audit.js';
+import {
+  reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, moderatorActivity
+} from '../reviews.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -297,13 +301,17 @@ export async function handleAdmin(request, env, url) {
          FROM social_accounts a WHERE clipper_id = ?`).bind(c.id).first();
       const parts = await env.DB.prepare(
         "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'").bind(c.id).first();
-      out.push({ ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0, accounts_mismatched: acc.mismatched || 0, campaigns: parts.n });
+      out.push({
+        ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0,
+        accounts_mismatched: acc.mismatched || 0, campaigns: parts.n,
+        quality: await clipperQuality(env.DB, c.id)
+      });
     }
     return json({ clippers: out });
   }
 
   if (pathname === '/api/admin/clippers' && method === 'POST') {
-    const { username, password, display_name } = await readJson(request);
+    const { username, password } = await readJson(request);
     if (!username || !password) return err('Username and password are required');
     if (String(password).length < 6) return err('Password must be at least 6 characters');
     const clean = normalizeUsername(username);
@@ -312,10 +320,74 @@ export async function handleAdmin(request, env, url) {
       .prepare('SELECT id FROM clippers WHERE username = ? COLLATE NOCASE').bind(clean).first();
     if (existing) return err('That username is already taken', 409);
     const { hash, salt } = await hashPassword(password);
+    // Display name is always the username, capitalised -- the gold standard,
+    // not a free-text field. Rename it later through Edit if it ever needs
+    // to differ.
     const res = await env.DB.prepare(
-      'INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(clean, hash, salt, display_name || clean, 'active', now()).run();
+      `INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at, created_by_type, created_by_name)
+       VALUES (?, ?, ?, ?, ?, ?, 'admin', 'Admin')`
+    ).bind(clean, hash, salt, defaultDisplayName(clean), 'active', now()).run();
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'clipper_created',
+      targetType: 'clipper', targetId: res.meta.last_row_id, targetLabel: clean
+    });
     return json({ ok: true, id: res.meta.last_row_id, username: clean }, 201);
+  }
+
+  // ---------------------------------------------------------- moderators
+  //
+  // Individual named staff logins (migration 023) -- not a shared password
+  // like ADMIN_PASSWORD -- so each moderator can be told apart, disabled,
+  // and re-passworded independently. Only the admin ever writes here; a
+  // moderator session (src/routes/moderator.js) has no route that touches
+  // this table, so moderators can never create or manage each other.
+  if (pathname === '/api/admin/moderators' && method === 'GET') {
+    // Includes the synthetic admin row (id: null) -- the Video Review tab's
+    // per-reviewer breakdown wants admin alongside every moderator in one
+    // uniform list. The Moderators management table filters that row out
+    // client-side, since Disable/Reset Pass make no sense for it.
+    return json({ moderators: await moderatorActivity(env.DB) });
+  }
+
+  if (pathname === '/api/admin/moderators' && method === 'POST') {
+    const { username, password } = await readJson(request);
+    if (!username || !password) return err('Username and password are required');
+    if (String(password).length < 6) return err('Password must be at least 6 characters');
+    const clean = normalizeUsername(username);
+    if (!clean) return err('Username cannot be blank');
+    const existing = await env.DB
+      .prepare('SELECT id FROM moderators WHERE username = ? COLLATE NOCASE').bind(clean).first();
+    if (existing) return err('That username is already taken', 409);
+    const { hash, salt } = await hashPassword(password);
+    const res = await env.DB.prepare(
+      'INSERT INTO moderators (username, password_hash, password_salt, display_name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(clean, hash, salt, defaultDisplayName(clean), 'active', now()).run();
+    return json({ ok: true, id: res.meta.last_row_id, username: clean }, 201);
+  }
+
+  params = matchPath('/api/admin/moderators/:id', pathname);
+  if (params && method === 'PATCH') {
+    const { status, username, display_name, password } = await readJson(request);
+    if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
+    const mod = await env.DB.prepare('SELECT id FROM moderators WHERE id = ?').bind(params.id).first();
+    if (!mod) return err('Not found', 404);
+    if (username != null) {
+      const clean = normalizeUsername(username);
+      if (!clean) return err('Username cannot be blank');
+      const clash = await env.DB.prepare(
+        'SELECT id FROM moderators WHERE username = ? COLLATE NOCASE AND id != ?'
+      ).bind(clean, params.id).first();
+      if (clash) return err('That username is already taken', 409);
+      await env.DB.prepare('UPDATE moderators SET username = ? WHERE id = ?').bind(clean, params.id).run();
+    }
+    if (status) await env.DB.prepare('UPDATE moderators SET status = ? WHERE id = ?').bind(status, params.id).run();
+    if (display_name != null) await env.DB.prepare('UPDATE moderators SET display_name = ? WHERE id = ?').bind(display_name, params.id).run();
+    if (password) {
+      if (String(password).length < 6) return err('Password must be at least 6 characters');
+      const { hash, salt } = await hashPassword(password);
+      await env.DB.prepare('UPDATE moderators SET password_hash = ?, password_salt = ? WHERE id = ?').bind(hash, salt, params.id).run();
+    }
+    return json({ ok: true });
   }
 
   params = matchPath('/api/admin/clippers/:id', pathname);
@@ -341,7 +413,14 @@ export async function handleAdmin(request, env, url) {
             JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
             WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
               AND COALESCE(tr.identifier, tr.ig_username) != a.username
-            LIMIT 1) AS mismatch_approved_as
+            LIMIT 1) AS mismatch_approved_as,
+         -- Which campaign this account is actually plugged into right now, so
+         -- the admin doesn't have to cross-reference the Campaigns section
+         -- below to see what a connected account is even for.
+         (SELECT c.name FROM participation_accounts pa
+            JOIN participations p ON p.id = pa.participation_id
+            JOIN campaigns c ON c.id = p.campaign_id
+            WHERE pa.account_id = a.id LIMIT 1) AS campaign_name
        FROM social_accounts a WHERE a.clipper_id = ?`
     ).bind(params.id).all();
     const { results: parts } = await env.DB.prepare(
@@ -364,21 +443,39 @@ export async function handleAdmin(request, env, url) {
     const { results: pays } = await env.DB.prepare(
       `SELECT p.*, c.name AS campaign_name FROM payments p LEFT JOIN campaigns c ON c.id = p.campaign_id
        WHERE p.clipper_id = ? ORDER BY p.paid_at DESC`).bind(params.id).all();
+    // Staff-only notes (migration 023) -- a moderator can leave these, never
+    // the clipper. Read-only here; admin.html has no write form for them,
+    // since the founder only asked for moderators to author notes.
+    const { results: notes } = await env.DB.prepare(
+      'SELECT * FROM clipper_notes WHERE clipper_id = ? ORDER BY created_at DESC').bind(params.id).all();
     return json({
       clipper: publicClipper(clipper),
       money: await clipperFinancials(env.DB, params.id),
+      quality: await clipperQuality(env.DB, params.id),
       // mismatch_approved_as is deliberately not part of publicAccount (shared
       // with the clipper's own dashboard) -- it's admin-only oversight info.
-      accounts: (accounts || []).map(a => ({ ...publicAccount(a), mismatch_approved_as: a.mismatch_approved_as || null })),
+      accounts: (accounts || []).map(a => ({ ...publicAccount(a), mismatch_approved_as: a.mismatch_approved_as || null, campaign_name: a.campaign_name || null })),
       participations: parts || [],
       submissions: subs || [],
-      payments: pays || []
+      payments: pays || [],
+      notes: notes || []
     });
   }
 
   if (params && method === 'PATCH') {
-    const { status, display_name, password } = await readJson(request);
+    const { status, username, display_name, password } = await readJson(request);
     if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
+    // Username stays lowercase no matter what was typed -- same rule as
+    // creation, enforced here too so an edit can never drift from it.
+    if (username != null) {
+      const clean = normalizeUsername(username);
+      if (!clean) return err('Username cannot be blank');
+      const clash = await env.DB.prepare(
+        'SELECT id FROM clippers WHERE username = ? COLLATE NOCASE AND id != ?'
+      ).bind(clean, params.id).first();
+      if (clash) return err('That username is already taken', 409);
+      await env.DB.prepare('UPDATE clippers SET username = ? WHERE id = ?').bind(clean, params.id).run();
+    }
     if (status) await env.DB.prepare('UPDATE clippers SET status = ? WHERE id = ?').bind(status, params.id).run();
     if (display_name != null) await env.DB.prepare('UPDATE clippers SET display_name = ? WHERE id = ?').bind(display_name, params.id).run();
     if (password) {
@@ -442,11 +539,17 @@ export async function handleAdmin(request, env, url) {
     // Views a clip must reach before it earns anything. Defaults to 1,000.
     const minViews = numOr(payload.min_views, 1000);
     const platforms = normalisePlatforms(payload.allowed_platforms);
+    // Whether this campaign charges the 20% agency fee. Defaults to charging
+    // it (matches the column default) so anyone who doesn't touch the
+    // toggle gets today's behavior unchanged. 'internal' is for ClipGrow's
+    // own self-promo campaigns -- no client, no fee, clipper payouts are a
+    // real cost. See finance.js's header comment for the full split.
+    const campaignKind = payload.campaign_kind === 'internal' ? 'internal' : 'client';
     const res = await env.DB.prepare(
-      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, created_at)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`
+      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, campaign_kind, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
     ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '',
-           JSON.stringify(pickBlueprint(payload)), platforms, now()).run();
+           JSON.stringify(pickBlueprint(payload)), platforms, campaignKind, now()).run();
     const id = res.meta.last_row_id;
     // Slug needs the id (for uniqueness), which only exists after insert --
     // set it in a follow-up UPDATE. Never changes after this, even if the
@@ -541,7 +644,13 @@ export async function handleAdmin(request, env, url) {
        LEFT JOIN social_accounts a ON a.id = s.account_id
        WHERE s.campaign_id = ? ORDER BY s.created_at ASC`
     ).bind(params.id).all();
-    return json({ campaign: await campaignWithSpend(env.DB, campaign), submissions: submissions || [] });
+    return json({
+      // campaign_kind/fee_percent are admin-only -- spread on top rather
+      // than added to publicCampaign, which this same helper feeds to the
+      // homepage, SEO pages, and the client/clipper dashboards.
+      campaign: { ...(await campaignWithSpend(env.DB, campaign)), campaign_kind: campaign.campaign_kind, fee_percent: campaign.fee_percent },
+      submissions: submissions || []
+    });
   }
 
   if (params && method === 'PATCH') {
@@ -558,7 +667,7 @@ export async function handleAdmin(request, env, url) {
     // paying the old cap until some unrelated refresh happened to run.
     const capChanged = String(priorBlueprint.max_payout ?? '') !== String(merged.max_payout ?? '');
     await env.DB.prepare(
-      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ?, allowed_platforms = ? WHERE id = ?`
+      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ?, allowed_platforms = ?, campaign_kind = ? WHERE id = ?`
     ).bind(
       payload.name != null ? String(payload.name).trim() || existing.name : existing.name,
       payload.description != null ? payload.description : existing.description,
@@ -575,6 +684,9 @@ export async function handleAdmin(request, env, url) {
       payload.allowed_platforms != null
         ? normalisePlatforms(payload.allowed_platforms)
         : (existing.allowed_platforms || 'instagram'),
+      payload.campaign_kind != null
+        ? (payload.campaign_kind === 'internal' ? 'internal' : 'client')
+        : existing.campaign_kind,
       params.id
     ).run();
     // CPM, budget or threshold changes re-price every submission in this campaign.
@@ -631,6 +743,20 @@ export async function handleAdmin(request, env, url) {
         ).bind(part.clipper_id, part.campaign_id).run();
       }
       await reallocateCampaign(env.DB, part.campaign_id);
+
+      // Audit log: only kick and pause, per the founder's explicit list --
+      // reinstating to 'active' is deliberately left un-logged.
+      if (status === 'kicked' || status === 'paused') {
+        const who = await env.DB.prepare(
+          'SELECT cl.username AS clipper_username, c.name AS campaign_name FROM clippers cl, campaigns c WHERE cl.id = ? AND c.id = ?'
+        ).bind(part.clipper_id, part.campaign_id).first();
+        await logAction(env.DB, {
+          staffType: 'admin', staffName: 'Admin',
+          action: status === 'kicked' ? 'clipper_kicked' : 'participation_paused',
+          targetType: 'participation', targetId: Number(params.id),
+          targetLabel: who ? `${who.clipper_username} — ${who.campaign_name}` : null
+        });
+      }
     }
     return json({ ok: true });
   }
@@ -687,7 +813,10 @@ export async function handleAdmin(request, env, url) {
   params = matchPath('/api/admin/access-requests/:id', pathname);
   if (params && method === 'PATCH') {
     const { status, note } = await readJson(request);
-    const reqRow = await env.DB.prepare('SELECT * FROM tester_requests WHERE id = ?').bind(params.id).first();
+    const reqRow = await env.DB.prepare(
+      `SELECT t.*, cl.username AS clipper_username FROM tester_requests t
+       JOIN clippers cl ON cl.id = t.clipper_id WHERE t.id = ?`
+    ).bind(params.id).first();
     if (!reqRow) return err('Not found', 404);
     if (status && !TESTER_STATUSES.includes(status)) {
       return err(`'${status}' is not a valid access-request status. Accepted: ${TESTER_STATUSES.join(', ')}.`);
@@ -705,6 +834,17 @@ export async function handleAdmin(request, env, url) {
       nextStatus, now(),
       params.id
     ).run();
+    // Audit log: only an actual approval transition, not a re-save of an
+    // already-confirmed row, and not a rejection -- left room for the day
+    // approvals are ever delegated to a moderator, even though that's not
+    // wired into moderator.js yet.
+    if (nextStatus === 'confirmed' && reqRow.status !== 'confirmed') {
+      await logAction(env.DB, {
+        staffType: 'admin', staffName: 'Admin', action: 'access_request_approved',
+        targetType: 'tester_request', targetId: Number(params.id),
+        targetLabel: `${reqRow.platform}:${reqRow.identifier || reqRow.ig_username} (${reqRow.clipper_username})`
+      });
+    }
     return json({ ok: true });
   }
 
@@ -784,7 +924,10 @@ export async function handleAdmin(request, env, url) {
   // case -- this collapses it into the one action the disconnect dialog was
   // already implying was possible.
   if (params && method === 'DELETE') {
-    const before = await env.DB.prepare('SELECT clipper_id FROM social_accounts WHERE id = ?').bind(params.id).first();
+    const before = await env.DB.prepare(
+      `SELECT sa.clipper_id, cl.username AS clipper_username FROM social_accounts sa
+       JOIN clippers cl ON cl.id = sa.clipper_id WHERE sa.id = ?`
+    ).bind(params.id).first();
     if (!before) return err('Account not found', 404);
     const { resetAccess } = await readJson(request).catch(() => ({}));
 
@@ -820,6 +963,11 @@ export async function handleAdmin(request, env, url) {
       ).bind(before.clipper_id, result.platform, ...campaignIds).run();
       reset_requests = res.meta.changes || 0;
     }
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'account_removed',
+      targetType: 'social_account', targetId: Number(params.id),
+      targetLabel: `${result.platform}:${result.username} (${before.clipper_username})`
+    });
     return json({ ok: true, ...result, reset_requests });
   }
 
@@ -1162,6 +1310,10 @@ export async function handleAdmin(request, env, url) {
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
     const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
+      targetType: 'global', targetLabel: 'All clippers'
+    });
     return json({
       ok: true, job_id: created.job_id,
       job: publicJob(await getJob(env.DB, created.job_id)),
@@ -1174,7 +1326,7 @@ export async function handleAdmin(request, env, url) {
   // one for the same person at the same time.
   params = matchPath('/api/admin/refresh/clipper/:id', pathname);
   if (params && method === 'POST') {
-    const clipper = await env.DB.prepare('SELECT id FROM clippers WHERE id = ?').bind(params.id).first();
+    const clipper = await env.DB.prepare('SELECT id, username FROM clippers WHERE id = ?').bind(params.id).first();
     if (!clipper) return err('Clipper not found', 404);
 
     const created = await createRefreshJob(env.DB, {
@@ -1183,6 +1335,10 @@ export async function handleAdmin(request, env, url) {
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
     const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
+      targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
+    });
     return json({
       ok: true, job_id: created.job_id,
       job: publicJob(await getJob(env.DB, created.job_id)),
@@ -1222,6 +1378,40 @@ export async function handleAdmin(request, env, url) {
     if (r.error) return err(r.error, r.status || 400);
     const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: () => reallocateAll(env.DB) });
     return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
+  }
+
+  // ------------------------------------------------------- video review
+  //
+  // Same tables and helpers moderator.js uses (src/reviews.js) -- an admin
+  // can review videos too, not just moderators. Nothing here ever touches
+  // submissions.earning/locked_at/locked_earning/lock_reason/payment_id;
+  // see src/reviews.js's own header comment.
+  if (pathname === '/api/admin/review/queue' && method === 'GET') {
+    return json({
+      days: await reviewQueue(env.DB),
+      counts: await reviewCountsToday(env.DB, { reviewerType: 'admin' })
+    });
+  }
+
+  if (pathname === '/api/admin/review/reviewed' && method === 'GET') {
+    return json({ reviews: await reviewedList(env.DB, { limit: Number(url.searchParams.get('limit')) || 100 }) });
+  }
+
+  if (pathname === '/api/admin/review' && method === 'POST') {
+    const { submission_id, verdict, feedback } = await readJson(request);
+    const result = await submitReview(env.DB, {
+      submissionId: Number(submission_id), verdict, feedback,
+      reviewerType: 'admin', reviewerId: null, reviewerName: 'Admin'
+    });
+    if (result.error) return err(result.error, result.status || 400);
+    return json({ ok: true, id: result.id });
+  }
+
+  // ---------------------------------------------------------- audit log
+  if (pathname === '/api/admin/audit-log' && method === 'GET') {
+    const limit = Number(url.searchParams.get('limit')) || 50;
+    const beforeId = url.searchParams.get('before_id') ? Number(url.searchParams.get('before_id')) : null;
+    return json({ entries: await listAuditLog(env.DB, { limit, beforeId }) });
   }
 
   // Diagnostic: shows every Instagram insights metric Meta will answer for one

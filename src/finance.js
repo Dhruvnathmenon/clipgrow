@@ -215,6 +215,20 @@ export async function campaignFinancials(db, campaignId) {
   const delivered = await campaignSpend(db, campaignId);
   const feePercent = internal ? 0 : Number(campaign.fee_percent || 0);
 
+  // Delivered splits into money that has actually reached a clipper (locked
+  // to a payment) and money a clipper has earned but not been paid yet.
+  // Together these always equal `delivered` -- the same guarantee
+  // spendExpr/SPEND_EXPR gives, just broken into the two halves a founder
+  // actually asks for: "settled" and "left to settle".
+  const settleRow = await db.prepare(
+    `SELECT
+       COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) ELSE 0 END), 0) AS settled,
+       COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN earning ELSE 0 END), 0) AS pending
+     FROM submissions WHERE campaign_id = ?`
+  ).bind(campaignId).first();
+  const settled = (settleRow && settleRow.settled) || 0;
+  const pending = (settleRow && settleRow.pending) || 0;
+
   // What we have EARNED by delivering work.
   const feeEarned = Math.round((delivered * feePercent) / 100);
   const obligation = internal ? 0 : delivered + feeEarned;
@@ -241,6 +255,14 @@ export async function campaignFinancials(db, campaignId) {
   const unearnedFee = Math.max(0, feeTaken - feeEarned);
   const refundDue = internal ? 0 : unspentPool + unearnedFee;
 
+  // The fee side's own two headline numbers, mirroring budget/delivered:
+  //   agencyFeeBudget  the fee ceiling if the whole budget gets delivered.
+  //   feeUncollected   fee already earned by real results that the client
+  //                     has not paid yet -- the mirror image of unearnedFee
+  //                     (fee paid but not yet earned).
+  const agencyFeeBudget = internal ? 0 : Math.round((campaign.budget || 0) * feePercent / 100);
+  const feeUncollected = internal ? 0 : Math.max(0, feeEarned - feeTaken);
+
   // Owed to us: delivered work the client has not covered.
   const shortfall = internal ? 0 : Math.max(0, obligation - clientPaid);
 
@@ -251,10 +273,14 @@ export async function campaignFinancials(db, campaignId) {
     is_internal: internal,
     budget: campaign.budget || 0,
     delivered,
+    settled,
+    pending,
     fee_percent: feePercent,
     fee_earned: feeEarned,
     fee_taken: feeTaken,
     unearned_fee: unearnedFee,
+    agency_fee_budget: agencyFeeBudget,
+    fee_uncollected: feeUncollected,
     pool_received: poolReceived,
     unspent_pool: unspentPool,
     // An internal campaign is ClipGrow's own marketing: nobody bills for it, so
@@ -304,6 +330,11 @@ export async function agencyPnL(db, { from = null, to = null } = {}) {
 
   const feesCollected = await sumEntries(db, { direction: 'in', categories: ['management_fee'], from, to });
   const directCosts = await sumEntries(db, { direction: 'out', categories: COST_CATEGORIES, from, to });
+  // The specific pair "what did clients actually send us" vs "what actually
+  // reached a clipper" -- narrower than money_in/money_out below, which also
+  // include fees, tools, ads, refunds and capital movements.
+  const clientPaymentsReceived = await sumEntries(db, { direction: 'in', categories: ['client_payment'], from, to });
+  const clipperPayoutsPaid = await sumEntries(db, { direction: 'out', categories: ['clipper_payout'], from, to });
 
   const wallets = await walletBalances(db);
   const agencyBalance = wallets.filter(w => w.kind === 'agency').reduce((n, w) => n + w.balance, 0);
@@ -336,6 +367,10 @@ export async function agencyPnL(db, { from = null, to = null } = {}) {
     money_in: moneyIn,
     money_out: moneyOut,
     net_flow: moneyIn - moneyOut,
+    // The clipper-pool half of what clients paid, vs what clippers were
+    // actually sent -- the two numbers a founder means by "cash in vs out".
+    client_payments_received: clientPaymentsReceived,
+    clipper_payouts_paid: clipperPayoutsPaid,
 
     // Delivered work the client has not paid for yet.
     receivable: Math.max(0, clientObligation - clientPaid)

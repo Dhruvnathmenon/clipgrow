@@ -38,6 +38,7 @@
     .stat-val { font-size:1.3rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
     .stat-val.w { color:var(--white); } .stat-val.g { color:var(--gold); } .stat-val.r { color:var(--red); }
     .stat-lbl { font-size:.62rem; color:var(--muted); text-transform:uppercase; margin-top:.3rem; letter-spacing:.5px; }
+    .stat-today { font-size:.68rem; color:var(--muted-l); margin-top:.15rem; }
 
     .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.4rem; overflow-x:auto; }
     .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.84rem; cursor:pointer; white-space:nowrap; }
@@ -118,6 +119,10 @@
     .badge.disabled, .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.budget_full, .badge.paused, .badge.needs_reauth { background:rgba(255,215,0,.12); color:var(--gold); }
     .badge.model, .badge.neutral { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
+    .badge.tick { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.cross { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.skip { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
+    .qcard { background:var(--bg-mid); border:1px solid var(--border-s); border-radius:10px; padding:.85rem; display:flex; flex-direction:column; gap:.5rem; }
 
     /* Payouts: a settled row is history, so it reads as visually inert. */
     tr.is-locked { opacity:.55; }
@@ -161,8 +166,8 @@
     #auth-overlay { position:fixed; inset:0; background:rgba(8,13,8,.96); display:flex; align-items:center; justify-content:center; z-index:9999; }
     .auth-box { background:var(--card); border:1px solid var(--border); padding:2.8rem; border-radius:12px; text-align:center; width:100%; max-width:390px; }
 
-    #modal-back { position:fixed; inset:0; background:rgba(4,8,4,.85); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9000; padding:2rem 1rem; overflow-y:auto; }
-    #modal-back.open { display:flex; }
+    #modal-back, #edit-modal-back { position:fixed; inset:0; background:rgba(4,8,4,.85); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9000; padding:2rem 1rem; overflow-y:auto; }
+    #modal-back.open, #edit-modal-back.open { display:flex; }
     .modal { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:800px; box-shadow:0 20px 70px rgba(0,0,0,.7); }
     .modal-head { padding:1.3rem 1.6rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:1rem; position:sticky; top:0; background:var(--card); border-radius:14px 14px 0 0; z-index:2; }
     .modal-body { padding:1.4rem 1.6rem; }
@@ -212,8 +217,12 @@
       <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
       <button class="tab" data-v="payouts" onclick="showView('payouts',this)">Payouts</button>
       <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
+      <button class="tab" data-v="finance" onclick="showView('finance',this)">Finance</button>
       <button class="tab" data-v="clients" onclick="showView('clients',this)">Clients</button>
       <button class="tab" data-v="testers" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
+      <button class="tab" data-v="moderators" onclick="showView('moderators',this)">Moderators</button>
+      <button class="tab" data-v="review" onclick="showView('review',this)">Video Review</button>
+      <button class="tab" data-v="auditlog" onclick="showView('auditlog',this)" style="margin-left:auto">Audit Log</button>
     </div>
 
     <!-- CAMPAIGNS -->
@@ -246,7 +255,6 @@
         <form id="clipper-form" class="form-grid">
           <div><label>Username</label><input type="text" id="cl-username" class="form-control" required autocomplete="off" /></div>
           <div><label>Password</label><input type="text" id="cl-password" class="form-control" required autocomplete="off" /></div>
-          <div><label>Display Name</label><input type="text" id="cl-display" class="form-control" /></div>
           <button type="submit" class="btn">Create Clipper</button>
         </form>
         <p class="note" id="uname-hint">Usernames are saved in lowercase with spaces removed — the clipper must log in with exactly that.</p>
@@ -256,8 +264,8 @@
         <h2 class="panel-title">All Clippers</h2>
         <div id="clippers-total" class="note" style="margin-bottom:.6rem"></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Earned</th><th>Settled</th><th>Pending</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="clippers-body"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Quality</th><th>Earned</th><th>Settled</th><th>Pending</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="clippers-body"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
       <div class="panel">
@@ -407,6 +415,84 @@
       </div>
     </div>
 
+    <!-- FINANCE -->
+    <div class="view" id="v-finance">
+      <div class="panel">
+        <h2 class="panel-title">Overview — All Campaigns</h2>
+        <div class="stats" id="fin-stats"></div>
+      </div>
+
+      <div id="fin-alerts"></div>
+
+      <div class="panel">
+        <h2 class="panel-title">Per Campaign</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Campaign</th><th>Budget</th><th>Of Which Client Has Cleared</th><th>Utilization</th><th>Of Which Paid</th><th>Left To Settle</th><th>Refund If Stopped Today</th><th>Status</th></tr></thead>
+          <tbody id="fin-campaigns-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Agency Fee</h2>
+        <p class="note" style="margin-bottom:1rem">Only campaigns charging the 20% agency fee show up here — a self-promo campaign with the fee toggle off never appears.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Campaign</th><th>Agency Fee</th><th>Client Has Paid</th><th>Utilization</th><th>Left To Pay</th></tr></thead>
+          <tbody id="fin-agency-fee-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Record Budget Payment</h2>
+        <p class="note" style="margin-bottom:1rem">Money the client sent toward the campaign budget — the pool that pays clippers. Log it here the moment it actually arrives; this is what keeps "Of Which Client Has Cleared" true.</p>
+        <form id="bp-form" class="form-grid">
+          <div><label>Client</label><select id="bp-client" class="form-control"><option value="">— none / general —</option></select></div>
+          <div><label>Campaign <span class="req">*</span></label><select id="bp-campaign" class="form-control" required><option value="" disabled selected>Choose…</option></select></div>
+          <div><label>Amount received ₹ <span class="req">*</span></label><input type="number" id="bp-amount" class="form-control" min="1" required /></div>
+          <div><label>Method</label><input type="text" id="bp-method" class="form-control" value="Bank transfer" /></div>
+          <div><label>Reference</label><input type="text" id="bp-reference" class="form-control" placeholder="Txn ID / invoice #" /></div>
+          <div><label>Date</label><input type="date" id="bp-date" class="form-control" /></div>
+          <button type="submit" class="btn">Record Budget Payment</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel-title">Record Fee Payment</h2>
+        <p class="note" style="margin-bottom:1rem">Money the client sent specifically as the agency fee — separate from the budget above. Log it here the moment it arrives; this is what keeps "Client Has Paid" true in the Agency Fee section.</p>
+        <form id="fp-form" class="form-grid">
+          <div><label>Client</label><select id="fp-client" class="form-control"><option value="">— none / general —</option></select></div>
+          <div><label>Campaign <span class="req">*</span></label><select id="fp-campaign" class="form-control" required><option value="" disabled selected>Choose…</option></select></div>
+          <div><label>Amount received ₹ <span class="req">*</span></label><input type="number" id="fp-amount" class="form-control" min="1" required /></div>
+          <div><label>Method</label><input type="text" id="fp-method" class="form-control" value="Bank transfer" /></div>
+          <div><label>Reference</label><input type="text" id="fp-reference" class="form-control" placeholder="Txn ID / invoice #" /></div>
+          <div><label>Date</label><input type="date" id="fp-date" class="form-control" /></div>
+          <button type="submit" class="btn">Record Fee Payment</button>
+        </form>
+      </div>
+
+      <details class="panel">
+        <summary style="cursor:pointer" class="panel-title">Advanced: Full Ledger</summary>
+        <p class="note" style="margin:.8rem 0 1rem">Every rupee in or out, with a reason — the detail behind the numbers above. Client payments and clipper payouts post here automatically; use the form below only for costs, refunds, or corrections.</p>
+        <form id="fin-entry-form" class="form-grid" style="margin-bottom:1.3rem">
+          <div><label>Direction <span class="req">*</span></label>
+            <select id="fe-direction" class="form-control" required>
+              <option value="out">Money out</option>
+              <option value="in">Money in</option>
+            </select></div>
+          <div><label>Category <span class="req">*</span></label><select id="fe-category" class="form-control" required></select></div>
+          <div><label>Wallet <span class="req">*</span></label><select id="fe-wallet" class="form-control" required></select></div>
+          <div><label>Amount ₹ <span class="req">*</span></label><input type="number" id="fe-amount" class="form-control" min="1" required /></div>
+          <div><label>Campaign</label><select id="fe-campaign" class="form-control"><option value="">— none —</option></select></div>
+          <div><label>Date</label><input type="date" id="fe-date" class="form-control" /></div>
+          <div style="grid-column:1/-1"><label>Note</label><input type="text" id="fe-note" class="form-control" placeholder="Why this entry exists" /></div>
+          <button type="submit" class="btn btn-ghost">Add Entry</button>
+        </form>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Date</th><th>Direction</th><th>Category</th><th>Wallet</th><th>Amount</th><th>Campaign / Client</th><th>Note</th><th></th></tr></thead>
+          <tbody id="fin-ledger-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </details>
+    </div>
+
     <!-- AUTHENTICATION -->
     <div class="view" id="v-testers">
       <div class="panel">
@@ -430,6 +516,51 @@
       </div>
     </div>
 
+    <!-- MODERATORS -->
+    <div class="view" id="v-moderators">
+      <div class="panel">
+        <h2 class="panel-title">Create Moderator Login</h2>
+        <p class="note" style="margin-bottom:1rem">A moderator can create clipper logins, trigger a resync, leave private notes, and review videos. They cannot kick, pause, approve access, disconnect an account, or touch anything financial.</p>
+        <div class="form-grid">
+          <div><label>Username</label><input class="form-control" id="nm-username" placeholder="jane" /></div>
+          <div><label>Password</label><input class="form-control" id="nm-password" type="password" placeholder="At least 6 characters" /></div>
+          <div><button class="btn" style="width:100%" onclick="createModerator()">Create</button></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Moderator Activity</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Moderator</th><th>Status</th><th>Today</th><th>Lifetime Tick</th><th>Lifetime Cross</th><th>Lifetime Skip</th><th>Actions</th></tr></thead>
+          <tbody id="moderators-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- VIDEO REVIEW -->
+    <div class="view" id="v-review">
+      <div class="stats" id="review-counters"></div>
+      <div class="panel">
+        <h2 class="panel-title">Awaiting review</h2>
+        <div id="admin-queue-days">Loading…</div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Reviewed</h2>
+        <div id="admin-reviewed-list">Loading…</div>
+      </div>
+    </div>
+
+    <!-- AUDIT LOG -->
+    <div class="view" id="v-auditlog">
+      <div class="panel">
+        <h2 class="panel-title">Staff Activity</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>When</th><th>Staff</th><th>Action</th><th>Target</th></tr></thead>
+          <tbody id="auditlog-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.9rem" onclick="loadMoreAuditLog()">Load more</button>
+      </div>
+    </div>
+
   </div>
 
   <!-- Campaign modal -->
@@ -449,6 +580,10 @@
             <div class="fld"><label>Total Budget ₹ <span class="req">*</span></label><input type="number" class="form-control" id="f-budget" min="1" /></div>
             <div class="fld"><label>Minimum views to earn</label><input type="number" class="form-control" id="f-min_views" min="0" value="1000" placeholder="1000" /></div>
             <div class="fld"><label>Model</label><input class="form-control" id="f-model" placeholder="cpm / affiliate" /></div>
+          </div>
+          <div class="fld">
+            <label class="chip-pick" style="width:fit-content"><input type="checkbox" id="f-charges-fee" checked /> Charge agency fee (20%) — uncheck for a self-promo / internal campaign</label>
+            <p class="note" style="margin-top:.3rem">Unchecked means no client, no fee, and clipper payouts are a straight cost to the agency. Use this for ClipGrow's own promo campaigns.</p>
           </div>
           <div class="fld"><label>Short Description</label><input class="form-control" id="f-description" /></div>
           <div class="fld"><label>Platforms this campaign accepts</label>
@@ -499,6 +634,28 @@
       <div class="modal-foot">
         <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" id="modal-save" onclick="saveModal()">Confirm &amp; Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit login (clipper or moderator): one place to force-reset a
+       password, or change a username/display name -- rather than a
+       separate action per field. -->
+  <div id="edit-modal-back">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-head">
+        <div><h3 id="edit-modal-title">Edit Login</h3></div>
+        <button class="close-x" onclick="closeEditModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="fld"><label>Username</label><input class="form-control" id="edit-username" /></div>
+        <p class="note" style="margin:-.6rem 0 .9rem">Always saved in lowercase with spaces removed.</p>
+        <div class="fld"><label>Display Name</label><input class="form-control" id="edit-display" /></div>
+        <div class="fld"><label>New Password</label><input class="form-control" id="edit-password" type="password" placeholder="Leave blank to keep the current password" /></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+        <button class="btn" onclick="saveEditModal()">Save</button>
       </div>
     </div>
   </div>
@@ -582,8 +739,12 @@
       document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
       if(name==='payments') loadPayments();
       if(name==='payouts') initPayouts();
+      if(name==='finance') loadFinance();
       if(name==='clients') loadClients();
       if(name==='testers') loadTesters();
+      if(name==='moderators') loadModerators();
+      if(name==='review') loadReviewQueue();
+      if(name==='auditlog') loadAuditLog();
     };
 
 
@@ -1206,6 +1367,7 @@
       const d={approval_steps:[],terms:[],extra_fields:[]};
       TEXT_FIELDS.forEach(k=>d[k]=''); NUM_FIELDS.forEach(k=>d[k]=null);
       d.min_views=1000;   // house default; admin can override per campaign
+      d.campaign_kind='client';   // new campaigns charge the fee unless told otherwise
       return d;
     };
 
@@ -1219,6 +1381,7 @@
       // campaign already behaves.
       const allowed=new Set(draft.allowed_platforms||['instagram']);
       document.querySelectorAll('.camp-plat').forEach(x=>{ x.checked=allowed.has(x.value); });
+      document.getElementById('f-charges-fee').checked=draft.campaign_kind!=='internal';
       const missing=[];
       ['name','cpm','budget'].forEach(k=>{
         const el=document.getElementById('f-'+k); const empty=!el.value;
@@ -1250,6 +1413,7 @@
       const lines=id=>document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
       p.approval_steps=lines('f-approval_steps'); p.terms=lines('f-terms');
       p.allowed_platforms=[...document.querySelectorAll('.camp-plat:checked')].map(x=>x.value);
+      p.campaign_kind=document.getElementById('f-charges-fee').checked?'client':'internal';
       if(!p.name) return toast('Campaign name is required',true);
       if(!p.cpm||p.cpm<=0) return toast('CPM must be greater than 0',true);
       if(!p.budget||p.budget<=0) return toast('Budget must be greater than 0',true);
@@ -1377,7 +1541,7 @@
     window.editCampaign=async function(id){
       try{
         const {campaign}=await api('/api/admin/campaigns/'+id);
-        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model,allowed_platforms:campaign.allowed_platforms},'edit',id);
+        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model,allowed_platforms:campaign.allowed_platforms,campaign_kind:campaign.campaign_kind},'edit',id);
       }catch(e){ toast(e.message,true); }
     };
     window.setCampaignStatus=async function(id,status){
@@ -1406,12 +1570,13 @@
         (sumAdv?` &nbsp;·&nbsp; ${money(sumAdv)} advanced and not yet recovered`:'')+
         `<div style="margin-top:.25rem;opacity:.75">* Paid includes bonuses, which are given on top of earnings and are not deducted from Left to Pay.</div>`;
       const tb=document.getElementById('clippers-body');
-      if(!clippers.length){ tb.innerHTML='<tr><td colspan="10" class="empty">No clippers yet.</td></tr>'; return; }
+      if(!clippers.length){ tb.innerHTML='<tr><td colspan="11" class="empty">No clippers yet.</td></tr>'; return; }
       tb.innerHTML=clippers.map(c=>`
         <tr class="row-click" onclick="toggleClipper(${c.id})">
           <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
           <td>${num(c.campaigns)}</td>
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}${c.accounts_mismatched>0?` <span class="badge needs_reauth" title="Connected account doesn't match what was approved">⚠ mismatch</span>`:''}</td>
+          <td title="${c.quality.tick} tick, ${c.quality.cross} cross, ${c.quality.skip} skip">${c.quality.quality_pct==null?'—':c.quality.quality_pct+'%'}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td class="muted">${money(c.money.settled)}</td>
           <td>${money(c.money.pending)}</td>
@@ -1420,7 +1585,7 @@
           <td><span class="badge ${c.status}">${c.status}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
-            <button class="btn btn-ghost btn-sm" onclick="resetPassword(${c.id})">Reset Pass</button>
+            <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id},'${esc(c.username).replace(/'/g,"\\'")}','${esc(c.display_name).replace(/'/g,"\\'")}')">Edit</button>
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
           </div></td>
@@ -1476,6 +1641,169 @@
       }catch(e){ toast(e.message,true); }
     };
 
+    /* ── Moderators ── */
+    window.createModerator=async function(){
+      const username=document.getElementById('nm-username').value.trim();
+      const password=document.getElementById('nm-password').value;
+      if(!username||!password){ toast('Username and password are required',true); return; }
+      try{
+        await api('/api/admin/moderators',{method:'POST',body:JSON.stringify({username,password})});
+        toast('Moderator created');
+        document.getElementById('nm-username').value='';
+        document.getElementById('nm-password').value='';
+        loadModerators();
+      }catch(e){ toast(e.message,true); }
+    };
+    async function loadModerators(){
+      const {moderators:all}=await api('/api/admin/moderators');
+      const moderators=all.filter(m=>m.id!=null); // drop the synthetic admin row -- Disable/Reset Pass don't apply to it
+      document.getElementById('moderators-body').innerHTML=moderators.length?moderators.map(m=>`
+        <tr>
+          <td><span class="handle">${esc(m.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(m.username)}</div></td>
+          <td><span class="badge ${m.status}">${esc(m.status)}</span></td>
+          <td>${num(m.today)}</td>
+          <td>${num(m.tick)}</td>
+          <td>${num(m.cross)}</td>
+          <td>${num(m.skip)}</td>
+          <td><div class="actions">
+            <button class="btn ${m.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setModerator(${m.id},'${m.status==='active'?'disabled':'active'}')">${m.status==='active'?'Disable':'Enable'}</button>
+            <button class="btn btn-ghost btn-sm" onclick="openEditModal('moderator',${m.id},'${esc(m.username).replace(/'/g,"\\'")}','${esc(m.display_name).replace(/'/g,"\\'")}')">Edit</button>
+          </div></td>
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">No moderators yet.</td></tr>';
+    }
+    window.setModerator=async function(id,status){
+      try{ await api('/api/admin/moderators/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Updated'); loadModerators(); }
+      catch(e){ toast(e.message,true); }
+    };
+    /* ── Edit Login modal: shared by clippers and moderators. One place to
+       force-reset a password, or change a username/display name. ── */
+    let EDIT_TARGET=null;
+    window.openEditModal=function(type,id,username,display_name){
+      EDIT_TARGET={type,id};
+      document.getElementById('edit-modal-title').textContent=type==='clipper'?'Edit Clipper Login':'Edit Moderator Login';
+      document.getElementById('edit-username').value=username;
+      document.getElementById('edit-display').value=display_name;
+      document.getElementById('edit-password').value='';
+      document.getElementById('edit-modal-back').classList.add('open');
+    };
+    window.closeEditModal=function(){ document.getElementById('edit-modal-back').classList.remove('open'); };
+    window.saveEditModal=async function(){
+      const {type,id}=EDIT_TARGET;
+      const username=document.getElementById('edit-username').value.trim();
+      const display_name=document.getElementById('edit-display').value.trim();
+      const password=document.getElementById('edit-password').value;
+      if(!username){ toast('Username cannot be blank',true); return; }
+      const body={username,display_name};
+      if(password) body.password=password;
+      try{
+        await api(`/api/admin/${type==='clipper'?'clippers':'moderators'}/${id}`,{method:'PATCH',body:JSON.stringify(body)});
+        toast('Saved');
+        closeEditModal();
+        type==='clipper'?loadClippers():loadModerators();
+      }catch(e){ toast(e.message,true); }
+    };
+
+    /* ── Video Review (admin side of the shared moderator queue) ── */
+    function dayLabel(d){
+      const today=new Date().toISOString().slice(0,10);
+      const y=new Date(Date.now()-86400000).toISOString().slice(0,10);
+      if(d===today) return 'Today';
+      if(d===y) return 'Yesterday';
+      return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    }
+    // Reviewing here is a quality + channel check, done by opening the video
+    // itself -- a thumbnail, view count and platform badge were just noise
+    // for that job. Just the clipper, the video, and feedback.
+    function reviewCard(v){
+      return `<div class="qcard">
+        <div style="font-size:.82rem"><strong>${esc(v.clipper_display_name)}</strong><br>
+          <a href="${esc(v.permalink)}" target="_blank" rel="noopener">Open video ↗</a></div>
+        <textarea class="form-control" id="afb-${v.id}" placeholder="Feedback (required)" style="min-height:44px"></textarea>
+        <div style="display:flex;gap:.35rem">
+          <button class="btn btn-sm" style="flex:1" onclick="adminReview(${v.id},'tick')">✓ Tick</button>
+          <button class="btn btn-danger btn-sm" style="flex:1" onclick="adminReview(${v.id},'cross')">✗ Cross</button>
+          <button class="btn btn-ghost btn-sm" style="flex:1" onclick="adminReview(${v.id},'skip')" title="Already verified on the other platform">Skip</button>
+        </div>
+      </div>`;
+    }
+    async function loadReviewQueue(){
+      const d=await api('/api/admin/review/queue');
+      const {moderators}=await api('/api/admin/moderators');
+      // One tile per reviewer (every moderator, plus admin) -- the total
+      // reviewed so far is the headline number, today's count sits under it
+      // as the small line, so you can see who's actually doing the work.
+      const reviewerTiles=moderators.map(m=>`<div class="stat">
+        <div class="stat-val">${num(m.tick+m.cross+m.skip)}</div>
+        <div class="stat-lbl">${esc(m.display_name)}</div>
+        <div class="stat-today">${num(m.today)} reviewed today</div>
+      </div>`).join('');
+      document.getElementById('review-counters').innerHTML=
+        `<div class="stat"><div class="stat-val">${d.counts.total_today}</div><div class="stat-lbl">Everyone</div><div class="stat-today">reviewed today</div></div>${reviewerTiles}`;
+      document.getElementById('admin-queue-days').innerHTML=d.days.length
+        ? d.days.map(day=>`<div style="margin-bottom:1.1rem">
+            <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem"><strong>${dayLabel(day.date)}</strong><span class="muted">${day.items.length} awaiting</span></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.9rem">${day.items.map(reviewCard).join('')}</div>
+          </div>`).join('')
+        : '<p class="empty">Nothing waiting.</p>';
+      const rv=await api('/api/admin/review/reviewed?limit=50');
+      document.getElementById('admin-reviewed-list').innerHTML=rv.reviews.length
+        ? rv.reviews.map(r=>`<div style="display:flex;gap:.7rem;padding:.7rem 0;border-bottom:1px solid var(--border)">
+            ${r.has_thumb?`<img src="${r.thumb}" loading="lazy" style="width:48px;height:85px;object-fit:cover;border-radius:5px;background:var(--card-h);flex-shrink:0" />`:''}
+            <div style="font-size:.82rem;flex:1"><span class="badge ${r.verdict}">${r.verdict}</span>
+              <strong>${esc(r.clipper_username)}</strong> · ${esc(r.campaign_name)}<br>
+              <span class="muted">Reviewed by ${esc(r.reviewer_name)} · ${when(r.reviewed_at)}</span>
+              ${r.feedback?`<div class="muted" style="font-style:italic;margin-top:.2rem">"${esc(r.feedback)}"</div>`:''}
+            </div></div>`).join('')
+        : '<p class="empty">Nothing reviewed yet.</p>';
+    }
+    window.adminReview=async function(id,verdict){
+      const fb=document.getElementById('afb-'+id);
+      const feedback=fb?fb.value.trim():'';
+      if(!feedback){ toast('Write feedback first — required for tick, cross and skip',true); return; }
+      try{
+        await api('/api/admin/review',{method:'POST',body:JSON.stringify({submission_id:id,verdict,feedback})});
+        toast('Reviewed');
+        loadReviewQueue();
+      }catch(e){ toast(e.message,true); }
+    };
+
+    /* ── Audit Log ── */
+    let AUDIT_CURSOR=null;
+    const AUDIT_ACTION_LABEL={
+      clipper_created:'Created a clipper login', clipper_kicked:'Kicked from a campaign',
+      participation_paused:'Paused a participation', account_removed:'Disconnected an account',
+      refresh_triggered:'Triggered a refresh', access_request_approved:'Approved an access request'
+    };
+    function auditRow(e){
+      return `<tr>
+        <td class="muted">${new Date(e.created_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${esc(e.staff_name)} <span class="muted" style="font-size:.7rem">(${esc(e.staff_type)})</span></td>
+        <td>${esc(AUDIT_ACTION_LABEL[e.action]||e.action)}</td>
+        <td class="muted">${esc(e.target_label||e.target_type||'—')}</td>
+      </tr>`;
+    }
+    async function loadAuditLog(){
+      AUDIT_CURSOR=null;
+      const {entries}=await api('/api/admin/audit-log?limit=50');
+      document.getElementById('auditlog-body').innerHTML=entries.length
+        ? entries.map(auditRow).join('') : '<tr><td colspan="4" class="empty">Nothing logged yet.</td></tr>';
+      AUDIT_CURSOR=entries.length?entries[entries.length-1].id:null;
+    }
+    window.loadMoreAuditLog=async function(){
+      if(!AUDIT_CURSOR) return;
+      const {entries}=await api('/api/admin/audit-log?limit=50&before_id='+AUDIT_CURSOR);
+      if(!entries.length){ toast('No more entries'); return; }
+      document.getElementById('auditlog-body').insertAdjacentHTML('beforeend', entries.map(auditRow).join(''));
+      AUDIT_CURSOR=entries[entries.length-1].id;
+    };
+
+    // YouTube usernames are stored with their leading "@" already (e.g.
+    // "@maryprenureship"); Instagram usernames are stored bare.
+    function acctProfileUrl(a){
+      return a.platform==='youtube'
+        ? `https://youtube.com/${encodeURIComponent(a.username||'').replace('%40','@')}`
+        : `https://instagram.com/${encodeURIComponent(a.username||'')}`;
+    }
     window.toggleClipper=async function(id){
       const row=document.getElementById('ux-'+id);
       const opening=!row.classList.contains('open');
@@ -1488,9 +1816,10 @@
         box.innerHTML=`
           <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
           ${d.accounts.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Handle</th><th>Platform</th><th>Type</th><th>Status</th><th>Tracking</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
+            <thead><tr><th>Handle</th><th>Campaign</th><th>Platform</th><th>Type</th><th>Status</th><th>Tracking</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
             <tbody>${d.accounts.map(a=>`<tr>
-              <td class="handle">${a.platform==='youtube'?'':'@'}${esc(a.username)}${a.mismatch_approved_as?`<div class="badge needs_reauth" style="margin-top:.25rem;font-size:.65rem" title="canConnect() doesn't check which account connects, only that one was approved">⚠ approved as ${esc(a.mismatch_approved_as)}</div>`:''}</td>
+              <td class="handle"><a href="${acctProfileUrl(a)}" target="_blank" rel="noopener">${a.platform==='youtube'?'':'@'}${esc(a.username)}</a>${a.mismatch_approved_as?`<div class="badge needs_reauth" style="margin-top:.25rem;font-size:.65rem" title="canConnect() doesn't check which account connects, only that one was approved">⚠ approved as ${esc(a.mismatch_approved_as)}</div>`:''}</td>
+              <td class="muted">${esc(a.campaign_name||'—')}</td>
               <td><span class="badge ${a.platform==='youtube'?'budget_full':'neutral'}">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
               <td class="muted">${esc(a.account_type||'—')}</td>
               <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
@@ -1527,18 +1856,15 @@
               <td class="muted">${esc(p.method||'—')}</td><td class="muted">${esc(p.reference||'—')}</td>
               <td class="money">${money(p.amount)}</td>
               <td><button class="btn btn-danger btn-sm" onclick="delPayment(${p.id},${p.clip_count||0})">Delete</button></td>
-            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No payments recorded.</p>'}`;
+            </tr>`).join('')}</tbody></table></div>`:'<p class="muted">No payments recorded.</p>'}
+
+          <div class="sub-h">Staff Notes (${d.notes.length}) — private, never shown to the clipper</div>
+          ${(d.notes||[]).map(n=>`<div style="font-size:.8rem;margin-bottom:.5rem"><span class="muted">${esc(n.author_name)} (${esc(n.author_type)}) · ${when(n.created_at)}</span><br>${esc(n.note)}</div>`).join('')||'<p class="muted">No notes yet — moderators can leave one from their own dashboard.</p>'}`;
       }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
     };
 
     window.setClipper=async function(id,status){
       try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Clipper updated'); loadAll(); }
-      catch(e){ toast(e.message,true); }
-    };
-    window.resetPassword=async function(id){
-      const pw=prompt('New password for this clipper (min 6 characters) — copy it before closing:');
-      if(!pw) return;
-      try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({password:pw})}); toast('Password changed — share it with the clipper'); }
       catch(e){ toast(e.message,true); }
     };
     window.deleteClipper=async function(id){
@@ -1643,8 +1969,7 @@
       try{
         const r=await api('/api/admin/clippers',{method:'POST',body:JSON.stringify({
           username:document.getElementById('cl-username').value,
-          password:pw,
-          display_name:document.getElementById('cl-display').value.trim()
+          password:pw
         })});
         const box=document.getElementById('cred-box');
         box.style.display='block';
@@ -1739,6 +2064,206 @@
         loadAll(); loadPayments();
       }catch(e2){ toast(e2.message,true); }
     });
+
+    /* ══════════════ finance tab ══════════════
+       Loaded lazily on tab-open, same as Payments/Clients -- this data is
+       admin-only bookkeeping, not something the top-level overview needs on
+       every page load. */
+    let FIN_CAMPAIGNS=[], FIN_WALLETS=[];
+
+    async function loadFinance(){
+      try{
+        const [overview,{campaigns},{clients}]=await Promise.all([
+          api('/api/admin/finance/overview'),
+          api('/api/admin/finance/campaigns'),
+          CLIENTS.length?Promise.resolve({clients:CLIENTS}):api('/api/admin/clients')
+        ]);
+        if(!CLIENTS.length) CLIENTS=clients;
+        FIN_CAMPAIGNS=campaigns; FIN_WALLETS=overview.wallets;
+        renderFinStats(overview.totals);
+        renderFinAlerts(overview.funding_alerts);
+        renderFinCampaigns(campaigns);
+        renderFinAgencyFee(campaigns);
+        fillFinanceSelects(overview.categories);
+      }catch(e){
+        document.getElementById('fin-stats').innerHTML=`<div class="alert bad"><strong>Finance failed to load</strong> — ${esc(e.message)}</div>`;
+        toast(`Finance failed to load: ${e.message}`,true);
+      }
+      loadLedger();
+    }
+
+    // Every stat here carries a plain-English label plus a `title` tooltip
+    // with the fuller explanation -- the labels alone read as accountant
+    // jargon ("Cash Position", "Unfunded Delivery"), which is exactly the
+    // confusion a founder flagged on this tab.
+    function statCard(value,cls,label,tip){
+      return `<div class="stat" title="${esc(tip)}"><div class="stat-val ${cls}">${value}</div><div class="stat-lbl">${esc(label)}</div></div>`;
+    }
+
+    // Three numbers. Inflow vs Outflow side by side is the solvency read on
+    // its own (Outflow > Inflow = clippers are being paid out of pocket,
+    // not from collected client money) -- no separate card for that.
+    // Profit is deliberately NOT Inflow - Outflow: that mixes fee cash with
+    // clipper cash flow. Profit is what has actually been EARNED by
+    // delivering results -- fees_earned, the sum of each campaign's 20% of
+    // Utilization. Fee cash already collected but not yet earned by
+    // delivered work isn't profit yet.
+    function renderFinStats(t){
+      document.getElementById('fin-stats').innerHTML=
+        statCard(money(t.client_payments_received+t.fees_collected),'w','Inflow','All cash actually received from clients so far.')+
+        statCard(money(t.clipper_payouts_paid),'r','Outflow','All cash actually paid to clippers so far. Bigger than Inflow means clippers are being paid out of pocket, not from collected client money.')+
+        statCard(money(t.fees_earned),'g','Profit','The agency fee actually earned by delivered results (20% of Utilization, campaign by campaign). Fee money already collected but not yet earned by real results isn’t profit yet.');
+    }
+
+    function renderFinAlerts(alerts){
+      const el=document.getElementById('fin-alerts');
+      if(!alerts||!alerts.length){ el.innerHTML=''; return; }
+      el.innerHTML=`<div class="alert ${alerts.some(a=>a.critical)?'bad':'warn'}"><strong>Needs invoicing</strong><br>${alerts.map(a=>
+        `<div class="trouble">${esc(a.name)} — clippers have earned ${money(a.delivered)}, but only ${money(a.collected)} has been collected from the client`+
+        (a.critical?` <strong>(${money(-a.headroom)} not yet covered — send the next invoice)</strong>`:' — send the next invoice soon')+`</div>`
+      ).join('')}</div>`;
+    }
+
+    function renderFinCampaigns(campaigns){
+      const tb=document.getElementById('fin-campaigns-body');
+      tb.innerHTML=campaigns.length?campaigns.map(c=>`<tr>
+          <td class="handle">${esc(c.name)}</td>
+          <td>${c.is_internal?'<span class="muted">internal</span>':money(c.budget)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':money(c.pool_received)}</td>
+          <td>${money(c.delivered)}</td>
+          <td class="money">${money(c.settled)}</td>
+          <td>${c.pending>0?`<span class="gold">${money(c.pending)}</span>`:money(0)}</td>
+          <td>${c.is_internal?'<span class="muted">—</span>':money(c.refund_due)}</td>
+          <td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td>
+        </tr>`).join(''):'<tr><td colspan="8" class="empty">No campaigns yet.</td></tr>';
+    }
+
+    // Only fee-charging campaigns show up here at all -- an internal /
+    // self-promo campaign (fee toggle off) has nothing to earn a fee on.
+    function renderFinAgencyFee(campaigns){
+      const tb=document.getElementById('fin-agency-fee-body');
+      const feeCampaigns=campaigns.filter(c=>!c.is_internal);
+      tb.innerHTML=feeCampaigns.length?feeCampaigns.map(c=>`<tr>
+          <td class="handle">${esc(c.name)}</td>
+          <td>${money(c.agency_fee_budget)}</td>
+          <td>${money(c.fee_taken)}</td>
+          <td class="money">${money(c.fee_earned)}</td>
+          <td title="Fee the client still owes for work already delivered -- not money the agency owes anyone.">${c.fee_uncollected>0?`<span class="gold">${money(c.fee_uncollected)}</span>`:money(0)}</td>
+        </tr>`).join(''):'<tr><td colspan="5" class="empty">No fee-charging campaigns.</td></tr>';
+    }
+
+    function fillFinanceSelects(categories){
+      // Budget-payment and fee-payment forms share the same two option lists
+      // -- only fee-charging campaigns can take either kind of payment, since
+      // an internal campaign has no client to pay anything.
+      const nonInternal=FIN_CAMPAIGNS.filter(c=>!c.is_internal);
+      const clientOpts='<option value="">— none / general —</option>'+CLIENTS.map(c=>`<option value="${c.id}">${esc(c.company_name||c.username)}</option>`).join('');
+      const campOpts='<option value="" disabled selected>Choose…</option>'+nonInternal.map(c=>`<option value="${c.campaign_id}">${esc(c.name)}</option>`).join('');
+      for(const id of ['bp-client','fp-client']) document.getElementById(id).innerHTML=clientOpts;
+      for(const id of ['bp-campaign','fp-campaign']) document.getElementById(id).innerHTML=campOpts;
+
+      const feCampSel=document.getElementById('fe-campaign');
+      feCampSel.innerHTML='<option value="">— none —</option>'+FIN_CAMPAIGNS.map(c=>`<option value="${c.campaign_id}">${esc(c.name)}</option>`).join('');
+
+      const catSel=document.getElementById('fe-category');
+      if(categories) catSel.innerHTML=categories.map(c=>`<option value="${c}">${c.replace(/_/g,' ')}</option>`).join('');
+
+      const walletSel=document.getElementById('fe-wallet');
+      walletSel.innerHTML=FIN_WALLETS.map(w=>`<option value="${w.id}">${esc(w.name)} (${money(w.balance)})</option>`).join('');
+    }
+
+    // Budget and fee payments are recorded as two independent ledger entries
+    // now, not one amount auto-split by percentage -- a client's budget
+    // transfer and their fee transfer are often separate transactions, on
+    // separate days, and this records each one exactly as it actually
+    // happened rather than assuming they always arrive together at a fixed
+    // ratio. Both post straight to the same generic ledger endpoint the
+    // Advanced Ledger form uses, just pre-aimed at the right category and
+    // wallet so nobody has to think about wallet plumbing to log a payment.
+    function walletIdFor(kind){
+      const w=FIN_WALLETS.find(x=>x.kind===kind);
+      if(!w) throw new Error(`No ${kind} wallet found -- check the Advanced Ledger for wallet setup.`);
+      return w.id;
+    }
+
+    async function submitPayment({prefix, category, walletKind, successLabel}){
+      const dateVal=document.getElementById(prefix+'-date').value;
+      await api('/api/admin/finance/entries',{method:'POST',body:JSON.stringify({
+        direction:'in',
+        category,
+        wallet_id:walletIdFor(walletKind),
+        client_id:document.getElementById(prefix+'-client').value?Number(document.getElementById(prefix+'-client').value):null,
+        campaign_id:Number(document.getElementById(prefix+'-campaign').value),
+        amount:Number(document.getElementById(prefix+'-amount').value),
+        method:document.getElementById(prefix+'-method').value.trim(),
+        reference:document.getElementById(prefix+'-reference').value.trim(),
+        occurred_at:dateVal?new Date(dateVal).getTime():undefined
+      })});
+      toast(successLabel);
+      document.getElementById(prefix+'-amount').value='';
+      document.getElementById(prefix+'-reference').value='';
+      loadFinance();
+    }
+
+    document.getElementById('bp-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      try{ await submitPayment({prefix:'bp', category:'client_payment', walletKind:'agency', successLabel:'Budget payment recorded'}); }
+      catch(e2){ toast(e2.message,true); }
+    });
+
+    document.getElementById('fp-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      try{ await submitPayment({prefix:'fp', category:'management_fee', walletKind:'clipgrow', successLabel:'Fee payment recorded'}); }
+      catch(e2){ toast(e2.message,true); }
+    });
+
+    document.getElementById('fin-entry-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const dateVal=document.getElementById('fe-date').value;
+      try{
+        await api('/api/admin/finance/entries',{method:'POST',body:JSON.stringify({
+          direction:document.getElementById('fe-direction').value,
+          category:document.getElementById('fe-category').value,
+          wallet_id:Number(document.getElementById('fe-wallet').value),
+          amount:Number(document.getElementById('fe-amount').value),
+          campaign_id:document.getElementById('fe-campaign').value?Number(document.getElementById('fe-campaign').value):null,
+          note:document.getElementById('fe-note').value.trim(),
+          occurred_at:dateVal?new Date(dateVal).getTime():undefined
+        })});
+        toast('Entry added');
+        document.getElementById('fe-amount').value=''; document.getElementById('fe-note').value='';
+        loadFinance();
+      }catch(e2){ toast(e2.message,true); }
+    });
+
+    async function loadLedger(){
+      const tb=document.getElementById('fin-ledger-body');
+      try{
+        const {entries}=await api('/api/admin/finance/entries?limit=300');
+        tb.innerHTML=entries.length?entries.map(le=>{
+          const who=le.campaign_name||le.client_name||le.clipper_name||'<span class="muted">—</span>';
+          return `<tr>
+            <td>${when(le.occurred_at)}</td>
+            <td><span class="badge ${le.direction==='in'?'active':'disabled'}">${le.direction}</span></td>
+            <td class="muted">${esc(le.category.replace(/_/g,' '))}</td>
+            <td class="muted">${esc(le.wallet_name)}</td>
+            <td class="money">${money(le.amount)}</td>
+            <td class="muted">${esc(who)}</td>
+            <td class="muted">${esc(le.note||'—')}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="voidLedgerEntry(${le.id})">Void</button></td>
+          </tr>`;
+        }).join(''):'<tr><td colspan="8" class="empty">No entries yet.</td></tr>';
+      }catch(e){ tb.innerHTML=`<tr><td colspan="8" class="empty">${esc(e.message)}</td></tr>`; }
+    }
+    window.voidLedgerEntry=async function(id){
+      const reason=prompt('Reason for voiding this entry?');
+      if(reason==null) return;
+      try{
+        await api('/api/admin/finance/entries/'+id+'/void',{method:'POST',body:JSON.stringify({reason})});
+        toast('Entry voided');
+        loadFinance();
+      }catch(e){ toast(e.message,true); }
+    };
 
     // loadTesters runs on every refresh, not just when its tab is opened, so
     // the pending-approval badge is accurate from the moment you sign in.
