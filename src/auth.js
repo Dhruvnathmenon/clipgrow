@@ -126,3 +126,9 @@ export async function requireClient(request, env) {
   if (!session || session.role !== 'client') return null;
   return session;
 }
+
+export async function requireModerator(request, env) {
+  const session = await getSession(request, env);
+  if (!session || session.role !== 'moderator') return null;
+  return session;
+}

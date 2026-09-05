@@ -133,6 +133,9 @@
     .badge.ineligible { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
     .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.joined, .badge.locked { background:transparent; border:1px solid var(--border-s); color:var(--muted); }
+    .badge.tick { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.cross { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.skip { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
 
     .bar { height:5px; background:var(--bg-mid); border-radius:4px; overflow:hidden; border:1px solid var(--border-s); margin:.75rem 0 .35rem; }
     .bar-fill { height:100%; background:var(--neon); box-shadow:0 0 8px var(--glow-s); transition:width .5s; }
@@ -361,6 +364,8 @@
         <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Payments</button>
       <button class="sb-item" data-v="clippers" onclick="go('clippers',this)">
         <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>All Clippers</button>
+      <button class="sb-item" data-v="reviews" onclick="go('reviews',this)">
+        <svg class="sb-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Reviews</button>
     </nav>
     <div class="sb-foot">
       <div class="wm">
@@ -430,6 +435,12 @@
     <section class="view" id="v-clippers">
       <div class="page-head"><h1>All Clippers</h1><p>Views and earnings are shared openly — payment details stay private</p></div>
       <div id="dir-body"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- REVIEWS -->
+    <section class="view" id="v-reviews">
+      <div class="page-head"><h1>Reviews</h1><p>Feedback a moderator or ClipGrow left on your videos</p></div>
+      <div id="review-grid"><div class="empty">Loading…</div></div>
     </section>
   </main>
 
@@ -547,7 +558,7 @@
     const platIcon=id=>{const p=PLATFORMS.find(x=>x.id===id)||PLATFORMS[0];
       return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${p.svg}</svg>`;};
 
-    let ME=null, CAMPAIGNS=[], CLIPS=[], platFilter='all';
+    let ME=null, CAMPAIGNS=[], CLIPS=[], REVIEWS=[], platFilter='all';
 
     function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',5200);}
 
@@ -587,6 +598,7 @@
       if(name==='campaigns') loadAccounts();
       if(name==='payments') loadPayments();
       if(name==='clippers') loadDirectory();
+      if(name==='reviews') loadReviews();
     };
 
     function alertBox(kind,title,msg,fix,action){
@@ -1102,6 +1114,35 @@
         ? `<div class="clips">${list.map(clipCard).join('')}</div>`
         : '<div class="empty">No clips yet. Join a campaign and connect the account you post from &mdash; new posts then show up here on their own.</div>';
     }
+
+    // A verdict a moderator or admin left on one of your videos. Cosmetic
+    // only -- nothing here is ever about money, only quality.
+    const VERDICT_LABEL={tick:'Good',cross:'Needs improvement',skip:'Skipped'};
+    function reviewCard(r){
+      const thumb=r.has_thumb
+        ? `<img src="${r.thumb}" alt="" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHTML()">`
+        : placeholderHTML();
+      return `<div class="clip">
+        <div class="clip-media">${thumb}
+          <span class="clip-state"><span class="badge ${r.verdict}">${VERDICT_LABEL[r.verdict]||r.verdict}</span></span>
+          <span class="clip-plat">${platIcon(r.platform)}</span>
+        </div>
+        <div class="clip-body">
+          <div class="clip-camp">${esc(r.campaign_name)}</div>
+          ${r.feedback?`<div class="clip-note">"${esc(r.feedback)}"</div>`:''}
+          <div class="clip-why">Reviewed by ${esc(r.reviewer_name)} on ${when(r.reviewed_at)}</div>
+          <div class="clip-actions">
+            <a class="clip-link" href="${esc(r.permalink)}" target="_blank" rel="noopener">Open on ${esc(r.platform_label||'Instagram')} ↗</a>
+          </div>
+        </div></div>`;
+    }
+
+    function renderReviews(){
+      document.getElementById('review-grid').innerHTML=REVIEWS.length
+        ? `<div class="clips">${REVIEWS.map(reviewCard).join('')}</div>`
+        : '<div class="empty">No reviews yet. A moderator or ClipGrow will leave feedback here after checking your videos.</div>';
+    }
+    async function loadReviews(){ const {reviews}=await api('/api/clipper/reviews'); REVIEWS=reviews; renderReviews(); }
 
     /* ── accounts ── */
 

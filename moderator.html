@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ClipGrow — Moderator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg:#080D08; --bg-mid:#0B120B; --card:#0F170F; --card-h:#141E14;
+      --border:#1A2C1A; --border-s:#223322; --neon:#3DFF7A; --glow-s:rgba(61,255,122,.22);
+      --white:#F0F5F0; --text:#C4D4C4; --muted:#566056; --muted-l:#849484;
+      --red:#FF4D4D; --gold:#FFD700; --blue:#4DA6FF;
+    }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; padding:1.5rem 1.2rem 4rem; }
+    h1,h2,h3,h4 { font-family:'Space Grotesk',sans-serif; color:var(--white); }
+    .container { max-width:1180px; margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; padding-bottom:1rem; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:1rem; }
+    .logo { font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.4rem; color:var(--white); }
+    .logo span { color:var(--neon); }
+
+    .btn { background:var(--neon); color:#060E06; padding:.6rem 1.2rem; border-radius:6px; font-weight:800; font-family:'Space Grotesk',sans-serif; border:none; cursor:pointer; font-size:.82rem; transition:all .2s; }
+    .btn:hover { background:var(--white); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-ghost { background:transparent; color:var(--muted-l); border:1px solid var(--border-s); }
+    .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
+    .btn-danger { background:transparent; color:var(--red); border:1px solid var(--red); }
+    .btn-danger:hover { background:var(--red); color:#fff; }
+    .btn-good { background:transparent; color:var(--neon); border:1px solid var(--neon); }
+    .btn-good:hover { background:var(--neon); color:#060E06; }
+    .btn-warn { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+    .btn-warn:hover { background:var(--gold); color:#0A0A00; }
+    .btn-sm { padding:.32rem .68rem; font-size:.73rem; }
+
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.9rem; margin-bottom:1.5rem; }
+    .stat { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.05rem; text-align:center; }
+    .stat-val { font-size:1.3rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
+    .stat-val.g { color:var(--gold); } .stat-val.r { color:var(--red); }
+    .stat-lbl { font-size:.62rem; color:var(--muted); text-transform:uppercase; margin-top:.3rem; letter-spacing:.5px; }
+
+    .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.4rem; overflow-x:auto; }
+    .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.84rem; cursor:pointer; white-space:nowrap; }
+    .tab:hover { color:var(--white); }
+    .tab.on { color:var(--neon); border-bottom-color:var(--neon); }
+    .view { display:none; } .view.on { display:block; }
+
+    .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:1.3rem; }
+    .panel-title { font-size:1rem; margin-bottom:1.1rem; color:var(--neon); font-family:'Space Grotesk',sans-serif; }
+    label { display:block; font-size:.74rem; font-weight:600; color:var(--muted-l); margin-bottom:.35rem; }
+    .form-control { width:100%; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:6px; padding:.62rem .85rem; color:var(--white); font-family:'Inter',sans-serif; outline:none; font-size:.87rem; }
+    .form-control:focus { border-color:var(--neon); }
+    textarea.form-control { min-height:60px; resize:vertical; font-size:.83rem; }
+    .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.9rem; align-items:end; }
+
+    table { width:100%; border-collapse:collapse; }
+    th { text-align:left; padding:.7rem .6rem; border-bottom:1px solid var(--border-s); color:var(--muted-l); font-size:.68rem; font-weight:600; text-transform:uppercase; white-space:nowrap; }
+    td { padding:.7rem .6rem; border-bottom:1px solid var(--border); font-size:.84rem; vertical-align:middle; }
+    .table-wrap { overflow-x:auto; }
+    .handle { font-weight:700; color:var(--white); }
+    .muted { color:var(--muted); }
+    .empty { text-align:center; color:var(--muted-l); padding:2.2rem; font-style:italic; }
+    .actions { display:flex; gap:.35rem; flex-wrap:wrap; }
+
+    .badge { font-size:.62rem; font-weight:700; padding:.2rem .5rem; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; display:inline-block; }
+    .badge.active, .badge.connected, .badge.tick { background:rgba(61,255,122,.12); color:var(--neon); }
+    .badge.disabled, .badge.kicked, .badge.revoked, .badge.cross { background:rgba(255,77,77,.12); color:var(--red); }
+    .badge.paused, .badge.needs_reauth { background:rgba(255,215,0,.12); color:var(--gold); }
+    .badge.neutral, .badge.skip { background:transparent; border:1px solid var(--border-s); color:var(--muted-l); }
+
+    .expand { display:none; background:var(--bg-mid); }
+    .expand.open { display:table-row; }
+    .expand td { padding:1.1rem; }
+    .sub-h { font-size:.66rem; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:var(--neon); margin:1rem 0 .5rem; }
+    .sub-h:first-child { margin-top:0; }
+    .row-click { cursor:pointer; }
+    .row-click:hover { background:rgba(61,255,122,.03); }
+
+    #auth-overlay { position:fixed; inset:0; background:rgba(8,13,8,.96); display:flex; align-items:center; justify-content:center; z-index:9999; }
+    .auth-box { background:var(--card); border:1px solid var(--border); padding:2.8rem; border-radius:12px; text-align:center; width:100%; max-width:390px; }
+
+    .toast { position:fixed; bottom:1.5rem; right:1.5rem; background:var(--card); border:1px solid var(--neon); color:var(--white); padding:.9rem 1.2rem; border-radius:8px; font-size:.84rem; z-index:10000; box-shadow:0 8px 32px rgba(0,0,0,.5); display:none; max-width:360px; }
+    .toast.err { border-color:var(--red); }
+
+    /* Daily verification queue */
+    .day-panel { margin-bottom:1.1rem; }
+    .day-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.6rem; }
+    .day-head b { font-family:'Space Grotesk',sans-serif; color:var(--white); font-size:.9rem; }
+    .queue-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.9rem; }
+    .qcard { background:var(--bg-mid); border:1px solid var(--border-s); border-radius:10px; padding:.85rem; display:flex; flex-direction:column; gap:.5rem; }
+    .qcard img { width:100%; aspect-ratio:9/16; object-fit:cover; border-radius:6px; background:var(--card-h); max-height:220px; }
+    .qcard-meta { font-size:.74rem; color:var(--text); }
+    .qcard-meta b { color:var(--white); }
+    .qcard textarea { min-height:44px; }
+    .qcard-btns { display:flex; gap:.35rem; }
+    .qcard-btns .btn { flex:1; padding:.4rem .3rem; font-size:.72rem; }
+    .rcard { display:flex; gap:.7rem; padding:.7rem 0; border-bottom:1px solid var(--border); align-items:flex-start; }
+    .rcard img { width:56px; height:99px; object-fit:cover; border-radius:5px; background:var(--card-h); flex-shrink:0; }
+    .rcard-body { font-size:.8rem; flex:1; }
+    .rcard-fb { font-size:.76rem; color:var(--text); margin-top:.3rem; font-style:italic; }
+    .counters { display:flex; gap:1.5rem; margin-bottom:1.2rem; flex-wrap:wrap; }
+    .counter { text-align:center; }
+    .counter b { display:block; font-family:'Space Grotesk',sans-serif; font-size:1.4rem; color:var(--neon); }
+    .counter span { font-size:.66rem; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+
+    @media (max-width:700px){ body{padding:1rem .8rem 3rem} .panel{padding:1.2rem} }
+  </style>
+</head>
+<body>
+
+  <div id="auth-overlay">
+    <div class="auth-box">
+      <h2 style="margin-bottom:1.4rem">Moderator Login</h2>
+      <input type="text" id="mod-user" class="form-control" placeholder="Username" autocomplete="username" style="margin-bottom:.8rem" />
+      <input type="password" id="mod-pass" class="form-control" placeholder="Password" autocomplete="current-password" style="margin-bottom:1rem" onkeydown="if(event.key==='Enter')login()" />
+      <button class="btn" style="width:100%" onclick="login()">Login</button>
+      <p id="auth-error" style="color:var(--red); margin-top:1rem; display:none; font-size:.83rem"></p>
+    </div>
+  </div>
+
+  <div class="container">
+    <header>
+      <div class="logo">Clip<span>Grow</span> Moderator</div>
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab on" data-v="queue" onclick="showView('queue',this)">Daily Queue</button>
+      <button class="tab" data-v="create" onclick="showView('create',this)">Create Clipper</button>
+      <button class="tab" data-v="roster" onclick="showView('roster',this)">Roster</button>
+      <button class="tab" data-v="me" onclick="showView('me',this)">My Profile</button>
+    </div>
+
+    <!-- DAILY QUEUE -->
+    <div class="view on" id="v-queue">
+      <div class="counters">
+        <div class="counter"><b id="cnt-total">—</b><span>Reviewed today (everyone)</span></div>
+        <div class="counter"><b id="cnt-mine">—</b><span>Reviewed by you today</span></div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Awaiting review</h2>
+        <div id="queue-days">Loading…</div>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Reviewed</h2>
+        <div id="reviewed-list">Loading…</div>
+      </div>
+    </div>
+
+    <!-- CREATE CLIPPER -->
+    <div class="view" id="v-create">
+      <div class="panel">
+        <h2 class="panel-title">Create Clipper Login</h2>
+        <div class="form-grid">
+          <div><label>Username</label><input class="form-control" id="nc-username" placeholder="yourclipper" /></div>
+          <div><label>Password</label><input class="form-control" id="nc-password" type="password" placeholder="At least 6 characters" /></div>
+          <div><button class="btn" style="width:100%" onclick="createClipper()">Create</button></div>
+        </div>
+        <p class="note" id="nc-note" style="margin-top:.8rem; font-size:.78rem; color:var(--muted)"></p>
+      </div>
+    </div>
+
+    <!-- ROSTER -->
+    <div class="view" id="v-roster">
+      <div class="panel">
+        <h2 class="panel-title">Clippers</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Quality</th></tr></thead>
+          <tbody id="roster-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- MY PROFILE -->
+    <div class="view" id="v-me">
+      <div class="stats" id="me-stats"></div>
+      <div class="panel">
+        <h2 class="panel-title">Change Password</h2>
+        <div class="form-grid">
+          <div><label>Current Password</label><input class="form-control" id="pw-current" type="password" /></div>
+          <div><label>New Password</label><input class="form-control" id="pw-new" type="password" /></div>
+          <div><button class="btn" style="width:100%" onclick="changePassword()">Update Password</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const when=ts=>ts?new Date(Number(ts)).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
+    const dayLabel=d=>{
+      const today=new Date().toISOString().slice(0,10);
+      const y=new Date(Date.now()-86400000).toISOString().slice(0,10);
+      if(d===today) return 'Today';
+      if(d===y) return 'Yesterday';
+      return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    };
+    function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',4500);}
+    function apiError(body){
+      const e=new Error((body&&body.error)||'Request failed');
+      for(const k of Object.keys(body||{})){ if(k==='message'||k==='name'||k==='stack'||k==='error') continue; e[k]=body[k]; }
+      return e;
+    }
+    // Force-redirects on 401, same as dashboard.html's helper -- a moderator's
+    // session can expire mid-session the way a clipper's can, unlike admin.html's
+    // always-re-prompt overlay.
+    async function api(path,opts={}){
+      const res=await fetch(path,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});
+      if(res.status===401){ showLogin(); throw new Error('Session expired'); }
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok) throw apiError(body);
+      return body;
+    }
+
+    function showLogin(){ document.getElementById('auth-overlay').style.display='flex'; }
+
+    window.login=async function(){
+      try{
+        await api('/api/moderator/login',{method:'POST',body:JSON.stringify({
+          username:document.getElementById('mod-user').value,
+          password:document.getElementById('mod-pass').value
+        })});
+        document.getElementById('auth-overlay').style.display='none';
+        loadAll();
+      }catch(e){
+        const el=document.getElementById('auth-error');
+        el.textContent=e.message||'Invalid username or password';
+        el.style.display='block';
+      }
+    };
+    window.logout=async function(){ await api('/api/moderator/logout',{method:'POST'}).catch(()=>{}); location.reload(); };
+
+    window.showView=function(name,btn){
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+      document.getElementById('v-'+name).classList.add('on'); btn.classList.add('on');
+      if(name==='roster') loadRoster();
+      if(name==='me') loadMe();
+      if(name==='queue') loadQueue();
+    };
+
+    // ---------------------------------------------------------- daily queue
+    // Uses /api/media/thumb/:id directly -- that endpoint is unauthenticated
+    // by design (the leaderboard shows the same thumbnails), so no extra
+    // wiring is needed here.
+    // Reviewing is a quality + channel check done by opening the video
+    // itself -- no thumbnail, views or platform badge needed for that.
+    function qcard(v){
+      return `<div class="qcard">
+        <div class="qcard-meta"><b>${esc(v.clipper_display_name)}</b><br>
+          <a href="${esc(v.permalink)}" target="_blank" rel="noopener">Open video ↗</a></div>
+        <textarea class="form-control" id="fb-${v.id}" placeholder="Feedback (required)"></textarea>
+        <div class="qcard-btns">
+          <button class="btn btn-good" onclick="review(${v.id},'tick')">✓ Tick</button>
+          <button class="btn btn-danger" onclick="review(${v.id},'cross')">✗ Cross</button>
+          <button class="btn btn-ghost" onclick="review(${v.id},'skip')" title="Already verified on the other platform">Skip</button>
+        </div>
+      </div>`;
+    }
+
+    async function loadQueue(){
+      try{
+        const d=await api('/api/moderator/queue');
+        document.getElementById('cnt-total').textContent=d.counts.total_today;
+        document.getElementById('cnt-mine').textContent=d.counts.mine_today;
+        document.getElementById('queue-days').innerHTML=d.days.length
+          ? d.days.map(day=>`<div class="day-panel">
+              <div class="day-head"><b>${dayLabel(day.date)}</b><span class="muted">${day.items.length} awaiting</span></div>
+              <div class="queue-grid">${day.items.map(qcard).join('')}</div>
+            </div>`).join('')
+          : '<p class="empty">Nothing waiting — you\'re all caught up.</p>';
+
+        const rv=await api('/api/moderator/reviewed?limit=50');
+        document.getElementById('reviewed-list').innerHTML=rv.reviews.length
+          ? rv.reviews.map(r=>`<div class="rcard">
+              ${r.has_thumb?`<img src="${r.thumb}" loading="lazy" />`:''}
+              <div class="rcard-body">
+                <span class="badge ${r.verdict}">${r.verdict}</span>
+                <b>${esc(r.clipper_username)}</b> · ${esc(r.campaign_name)}<br>
+                <span class="muted">Reviewed by ${esc(r.reviewer_name)} · ${when(r.reviewed_at)}</span>
+                ${r.feedback?`<div class="rcard-fb">"${esc(r.feedback)}"</div>`:''}
+              </div>
+            </div>`).join('')
+          : '<p class="empty">Nothing reviewed yet.</p>';
+      }catch(e){ toast(e.message,true); }
+    }
+
+    window.review=async function(id,verdict){
+      const fb=document.getElementById('fb-'+id);
+      const feedback=fb?fb.value.trim():'';
+      if(!feedback){ toast('Write feedback first — required for tick, cross and skip',true); return; }
+      try{
+        await api('/api/moderator/reviews',{method:'POST',body:JSON.stringify({submission_id:id,verdict,feedback})});
+        toast(verdict==='tick'?'Marked good':verdict==='cross'?'Marked needs improvement':'Marked skip');
+        loadQueue();
+      }catch(e){ toast(e.message,true); }
+    };
+
+    // -------------------------------------------------------- create clipper
+    window.createClipper=async function(){
+      const username=document.getElementById('nc-username').value.trim();
+      const password=document.getElementById('nc-password').value;
+      if(!username||!password){ toast('Username and password are required',true); return; }
+      try{
+        const r=await api('/api/moderator/clippers',{method:'POST',body:JSON.stringify({username,password})});
+        document.getElementById('nc-note').textContent=`Created — the clipper can log in as "${r.username}" now.`;
+        document.getElementById('nc-username').value='';
+        document.getElementById('nc-password').value='';
+        toast('Clipper created');
+      }catch(e){ toast(e.message,true); }
+    };
+
+    // ---------------------------------------------------------------- roster
+    function acctProfileUrl(a){
+      return a.platform==='youtube'
+        ? `https://youtube.com/${encodeURIComponent(a.username||'').replace('%40','@')}`
+        : `https://instagram.com/${encodeURIComponent(a.username||'')}`;
+    }
+
+    async function loadRoster(){
+      try{
+        const d=await api('/api/moderator/clippers');
+        document.getElementById('roster-body').innerHTML=d.clippers.length?d.clippers.map(c=>`
+          <tr class="row-click" onclick="toggleClipper(${c.id})">
+            <td class="handle">${esc(c.display_name||c.username)}</td>
+            <td>${c.campaigns}</td>
+            <td>${c.accounts}</td>
+            <td>${c.quality.quality_pct==null?'—':c.quality.quality_pct+'%'}</td>
+          </tr>
+          <tr class="expand" id="rx-${c.id}"><td colspan="4"><div id="rxb-${c.id}">Loading…</div></td></tr>
+        `).join(''):'<tr><td colspan="4" class="empty">No clippers yet.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    }
+
+    window.toggleClipper=async function(id){
+      const row=document.getElementById('rx-'+id);
+      const opening=!row.classList.contains('open');
+      document.querySelectorAll('.expand.open').forEach(e=>e.classList.remove('open'));
+      if(!opening) return;
+      row.classList.add('open');
+      const box=document.getElementById('rxb-'+id);
+      try{
+        const d=await api('/api/moderator/clippers/'+id);
+        box.innerHTML=`
+          <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
+          ${d.accounts.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Handle</th><th>Campaign</th><th>Platform</th><th>Status</th></tr></thead>
+            <tbody>${d.accounts.map(a=>`<tr>
+              <td class="handle"><a href="${acctProfileUrl(a)}" target="_blank" rel="noopener">${a.platform==='youtube'?'':'@'}${esc(a.username)}</a></td>
+              <td class="muted">${esc(a.campaign_name||'—')}</td>
+              <td><span class="badge neutral">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
+              <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span></td>
+            </tr>`).join('')}</tbody>
+          </table></div>`:'<p class="empty">No connected accounts.</p>'}
+          <div class="sub-h" style="margin-top:1.2rem">Actions</div>
+          <div class="actions" style="margin-bottom:1rem">
+            <button class="btn btn-ghost btn-sm" onclick="resyncClipper(${id})">Resync now</button>
+          </div>
+          <div class="sub-h">Staff Notes (${d.notes.length})</div>
+          ${d.notes.map(n=>`<div style="font-size:.8rem;margin-bottom:.5rem"><span class="muted">${esc(n.author_name)} · ${when(n.created_at)}</span><br>${esc(n.note)}</div>`).join('')||'<p class="muted" style="font-size:.8rem">No notes yet.</p>'}
+          <textarea class="form-control" id="note-${id}" placeholder="Add a private note (staff only)" style="margin-top:.6rem"></textarea>
+          <button class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addNote(${id})">Add Note</button>
+        `;
+      }catch(e){ box.innerHTML='<p class="empty">Could not load.</p>'; toast(e.message,true); }
+    };
+
+    window.resyncClipper=async function(id){
+      try{
+        await api('/api/moderator/clippers/'+id+'/refresh',{method:'POST'});
+        toast('Resync started');
+      }catch(e){ toast(e.message,true); }
+    };
+
+    window.addNote=async function(id){
+      const el=document.getElementById('note-'+id);
+      const note=el.value.trim();
+      if(!note){ toast('Write a note first',true); return; }
+      try{
+        await api('/api/moderator/clippers/'+id+'/notes',{method:'POST',body:JSON.stringify({note})});
+        toast('Note added');
+        toggleClipper(id); toggleClipper(id); // collapse+reopen to refresh the list
+      }catch(e){ toast(e.message,true); }
+    };
+
+    // ------------------------------------------------------------- profile
+    async function loadMe(){
+      try{
+        const d=await api('/api/moderator/me');
+        document.getElementById('me-stats').innerHTML=`
+          <div class="stat"><div class="stat-val">${d.lifetime.tick}</div><div class="stat-lbl">Lifetime ticks</div></div>
+          <div class="stat"><div class="stat-val r">${d.lifetime.cross}</div><div class="stat-lbl">Lifetime crosses</div></div>
+          <div class="stat"><div class="stat-val">${d.lifetime.skip}</div><div class="stat-lbl">Lifetime skips</div></div>
+        `;
+      }catch(e){ toast(e.message,true); }
+    }
+
+    window.changePassword=async function(){
+      const currentPassword=document.getElementById('pw-current').value;
+      const newPassword=document.getElementById('pw-new').value;
+      if(!currentPassword||!newPassword){ toast('Enter your current and new password',true); return; }
+      try{
+        await api('/api/moderator/me/password',{method:'PATCH',body:JSON.stringify({currentPassword,newPassword})});
+        toast('Password updated');
+        document.getElementById('pw-current').value='';
+        document.getElementById('pw-new').value='';
+      }catch(e){ toast(e.message,true); }
+    };
+
+    function loadAll(){ loadQueue(); }
+
+    // A logged-in session already has a valid cg_session cookie -- probe with
+    // a cheap GET rather than always showing the login form first.
+    api('/api/moderator/me').then(()=>{ document.getElementById('auth-overlay').style.display='none'; loadAll(); }).catch(()=>{});
+  </script>
+</body>
+</html>

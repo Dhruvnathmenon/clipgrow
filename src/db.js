@@ -11,6 +11,20 @@ export function normalizeUsername(input) {
   return String(input == null ? '' : input).trim().toLowerCase().replace(/\s+/g, '');
 }
 
+/**
+ * The one standard display name: the (already-normalised, all-lowercase)
+ * username with its first letter capitalised. Applied automatically at
+ * creation for both clippers and moderators -- there is no free-text
+ * display-name field anywhere in the create forms any more, precisely so
+ * this is never ambiguous. A person can still be renamed later through the
+ * admin edit action; this is only ever the default a new account starts
+ * with.
+ */
+export function defaultDisplayName(username) {
+  const clean = normalizeUsername(username);
+  return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
 export function getClipperByUsername(db, username) {
   // COLLATE NOCASE guards any row stored before normalisation existed.
   return db
@@ -21,6 +35,26 @@ export function getClipperByUsername(db, username) {
 
 export function getClipperById(db, id) {
   return db.prepare('SELECT * FROM clippers WHERE id = ?').bind(id).first();
+}
+
+export function getModeratorByUsername(db, username) {
+  return db.prepare('SELECT * FROM moderators WHERE username = ? COLLATE NOCASE')
+    .bind(normalizeUsername(username)).first();
+}
+
+export function getModeratorById(db, id) {
+  return db.prepare('SELECT * FROM moderators WHERE id = ?').bind(id).first();
+}
+
+export function publicModerator(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    display_name: row.display_name || row.username,
+    status: row.status,
+    created_at: row.created_at
+  };
 }
 
 export function getCampaignById(db, id) {

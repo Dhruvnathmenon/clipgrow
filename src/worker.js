@@ -1,5 +1,6 @@
 import { handleAdmin } from './routes/admin.js';
 import { handleClipper } from './routes/clipper.js';
+import { handleModerator } from './routes/moderator.js';
 import { handleClient } from './routes/client.js';
 import { handleInstagramAuth } from './routes/instagram-auth.js';
 import { handleYoutubeAuth } from './routes/youtube-auth.js';
@@ -14,13 +15,15 @@ import { createRefreshJob, advanceJob, reapStalledJobs } from './refresh-jobs.js
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
-const handlers = [handleInstagramAuth, handleYoutubeAuth, handleAdmin, handleClipper, handleClient, handlePublic, handleMedia];
+const handlers = [handleInstagramAuth, handleYoutubeAuth, handleAdmin, handleClipper, handleModerator, handleClient, handlePublic, handleMedia];
 
 // One "Log In" link on the homepage points at /clipper -- both this and
 // /client serve the same unified login page (login.html), which has a
 // Clipper/Client toggle. The path you land on just decides which tab starts
-// selected. admin.html stays unlisted -- reached only by its raw filename,
-// nothing links to it, and this file doesn't change that.
+// selected. admin.html and moderator.html both stay unlisted -- reached only
+// by their raw filename, nothing links to them, and this file doesn't change
+// that. Their security is API-level (requireAdmin / requireModerator), not
+// page-level.
 const LOGIN_PATH = '/clipper';
 const CLIENT_LOGIN_PATH = '/client';
 

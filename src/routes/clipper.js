@@ -504,6 +504,31 @@ export async function handleClipper(request, env, url) {
     });
   }
 
+  // Verdicts a moderator or the admin has left on this clipper's videos
+  // (migration 023). Selects zero financial columns -- a review can never
+  // say anything about earning or payment, only quality.
+  if (pathname === '/api/clipper/reviews' && method === 'GET') {
+    const { results } = await env.DB.prepare(
+      `SELECT sr.verdict, sr.feedback, sr.reviewer_name, sr.reviewed_at,
+              s.id, s.permalink, s.platform, s.views, s.posted_at, s.created_at,
+              s.thumbnail_key, s.thumbnail_url, c.name AS campaign_name
+       FROM submission_reviews sr
+       JOIN submissions s ON s.id = sr.submission_id
+       JOIN campaigns c ON c.id = s.campaign_id
+       WHERE s.clipper_id = ?
+       ORDER BY sr.reviewed_at DESC`
+    ).bind(clipperId).all();
+    return json({
+      reviews: (results || []).map(r => ({
+        id: r.id, campaign_name: r.campaign_name, platform: r.platform || 'instagram',
+        platform_label: platformLabel(r.platform || 'instagram'), permalink: r.permalink, views: r.views,
+        has_thumb: !!(r.thumbnail_key || r.thumbnail_url), thumb: `/api/media/thumb/${r.id}`,
+        verdict: r.verdict, feedback: r.feedback, reviewer_name: r.reviewer_name, reviewed_at: r.reviewed_at,
+        posted_at: r.posted_at, created_at: r.created_at
+      }))
+    });
+  }
+
   if (pathname === '/api/clipper/submissions' && method === 'POST') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
