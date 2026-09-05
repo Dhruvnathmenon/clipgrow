@@ -3,7 +3,7 @@ import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } fr
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
-  disconnectSocialAccount, SPEND_EXPR, totalOutstanding
+  disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
@@ -289,16 +289,26 @@ export async function handleAdmin(request, env, url) {
     const out = [];
     for (const c of results || []) {
       const money = await clipperFinancials(env.DB, c.id);
-      const acc = await env.DB.prepare(
-        `SELECT COUNT(*) AS n, SUM(CASE WHEN status!='connected' THEN 1 ELSE 0 END) AS bad,
-                SUM(CASE WHEN EXISTS (
-                  SELECT 1 FROM tester_requests tr
-                    JOIN participation_accounts pa ON pa.account_id = a.id
-                    JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
-                    WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
-                      AND COALESCE(tr.identifier, tr.ig_username) != a.username
-                ) THEN 1 ELSE 0 END) AS mismatched
-         FROM social_accounts a WHERE clipper_id = ?`).bind(c.id).first();
+      // Same open-issue definition as the bucketed Issues panel (accountIssues()
+      // in db.js) -- this used to be its own raw SQL check with no idea the
+      // acknowledgment columns existed, so unflagging something below never
+      // cleared the badge shown here.
+      const { results: accts } = await env.DB.prepare(
+        `SELECT a.status, a.username, a.last_error_code, a.last_error_at,
+                a.mismatch_acknowledged_as, a.error_acknowledged_at,
+                (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
+                   JOIN participation_accounts pa ON pa.account_id = a.id
+                   JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
+                   WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
+                     AND COALESCE(tr.identifier, tr.ig_username) != a.username
+                   LIMIT 1) AS mismatch_approved_as
+         FROM social_accounts a WHERE clipper_id = ?`).bind(c.id).all();
+      const acc = { n: (accts || []).length, bad: 0, mismatched: 0 };
+      for (const a of accts || []) {
+        const { mismatchOpen, errorOpen } = accountIssues(a);
+        if (errorOpen) acc.bad++;
+        if (mismatchOpen) acc.mismatched++;
+      }
       const parts = await env.DB.prepare(
         "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'").bind(c.id).first();
       out.push({
@@ -995,17 +1005,7 @@ export async function handleAdmin(request, env, url) {
 
     const buckets = { active: [], paused: [], removed: [], issues: [] };
     for (const a of results || []) {
-      // Suppressed only while the username that triggered it hasn't changed
-      // again since -- a later reconnect that changes it once more no longer
-      // matches the acknowledged value, so it re-flags with no extra logic.
-      const mismatchOpen = !!a.mismatch_approved_as && a.username !== a.mismatch_acknowledged_as;
-      const importFailing = a.status === 'connected' && /^IMPORT_/.test(a.last_error_code || '');
-      // Suppressed only while we have positive proof the current error
-      // predates the acknowledgment. Missing last_error_at fails OPEN --
-      // never silently hide a problem this can't actually rule out.
-      const errorPredatesAck = !!a.error_acknowledged_at && !!a.last_error_at && a.last_error_at <= a.error_acknowledged_at;
-      const errorOpen = (a.status === 'needs_reauth' || importFailing) && !errorPredatesAck;
-
+      const { mismatchOpen, errorOpen } = accountIssues(a);
       const reasons = [];
       if (mismatchOpen) reasons.push('mismatch');
       if (errorOpen) reasons.push(a.status === 'needs_reauth' ? 'needs_reauth' : 'import_failing');

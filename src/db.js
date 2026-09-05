@@ -234,6 +234,36 @@ export function findAccountClash(db, externalId, platform, campaignId) {
   ).bind(externalId, platform, campaignId).first();
 }
 
+/**
+ * Whether a connected account has a real OPEN problem right now, given raw
+ * status/error/mismatch fields plus the two acknowledgment columns
+ * (migration 023 -- see that migration's own header for why these are
+ * "what was true at the moment of acknowledgment", not a plain dismissed-
+ * forever boolean).
+ *
+ * The single source of truth for this -- GET /api/admin/accounts (the
+ * bucketed Issues/Active/Paused/Removed panel) and GET /api/admin/clippers
+ * (the roster's "⚠ mismatch" / "N issue" badges) both call this instead of
+ * each keeping their own copy. They used to disagree: the roster's copy was
+ * a raw SQL check with no idea the acknowledgment columns existed, so
+ * unflagging something in the Issues panel never cleared the badge above it.
+ *
+ * `a` needs: username, status, last_error_code, last_error_at,
+ * mismatch_approved_as (the tester_requests-derived identifier, computed by
+ * the caller's own SQL -- it needs a JOIN this function doesn't have),
+ * mismatch_acknowledged_as, error_acknowledged_at.
+ */
+export function accountIssues(a) {
+  const mismatchOpen = !!a.mismatch_approved_as && a.username !== a.mismatch_acknowledged_as;
+  const importFailing = a.status === 'connected' && /^IMPORT_/.test(a.last_error_code || '');
+  // Suppressed only while we have positive proof the current error predates
+  // the acknowledgment. Missing last_error_at fails OPEN -- never silently
+  // hide a problem this can't actually rule out.
+  const errorPredatesAck = !!a.error_acknowledged_at && !!a.last_error_at && a.last_error_at <= a.error_acknowledged_at;
+  const errorOpen = (a.status === 'needs_reauth' || importFailing) && !errorPredatesAck;
+  return { mismatchOpen, errorOpen };
+}
+
 // ---------------------------------------------------------------- shaping
 
 export function publicClipper(row) {
