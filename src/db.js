@@ -183,6 +183,14 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
 
     if (pending.length) {
       const ph = pending.map(() => '?').join(',');
+      // submission_reviews carries a real NOT NULL FK onto submissions
+      // (migration 023, added after this function was first written) --
+      // the moderator/admin video-review workflow. A reviewed pending clip
+      // would otherwise make the DELETE below fail outright, the same class
+      // of bug the ig_api_calls comment above already covers for a
+      // different table. The review verdict has no meaning once the clip
+      // it was about no longer exists, so it goes with it.
+      stmts.push(db.prepare(`DELETE FROM submission_reviews WHERE submission_id IN (${ph})`).bind(...pending.map(s => s.id)));
       stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
     }
   }

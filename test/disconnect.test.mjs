@@ -14,7 +14,8 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     submissions: submissions.map(s => ({ ...s })),
     participation_accounts: participationAccounts.map(p => ({ ...p })),
     participations: participations.map(p => ({ ...p })),
-    ig_api_calls: []
+    ig_api_calls: [],
+    submission_reviews: []
   };
 
   function first(sql, args) {
@@ -38,6 +39,11 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     }
     if (/^UPDATE participations SET account_id = NULL WHERE account_id = \?/.test(sql)) {
       for (const p of state.participations) if (p.account_id === args[0]) p.account_id = null;
+      return { meta: {} };
+    }
+    if (/^DELETE FROM submission_reviews WHERE submission_id IN/.test(sql)) {
+      const ids = args;
+      state.submission_reviews = (state.submission_reviews || []).filter(r => !ids.includes(r.submission_id));
       return { meta: {} };
     }
     if (/^DELETE FROM submissions WHERE id IN/.test(sql)) {

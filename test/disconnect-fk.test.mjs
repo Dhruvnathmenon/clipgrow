@@ -56,3 +56,23 @@ test('a settled clip and its account row survive a disconnect', async () => {
   assert.equal(acct.status, 'revoked');
   assert.equal(acct.access_token, null, 'but it can no longer call the platform');
 });
+
+// submission_reviews carries a real NOT NULL FK onto submissions (migration
+// 023, added after this function was first written for the moderator
+// video-review workflow). A reviewed-but-unpaid clip made disconnect fail
+// with the exact same FK error the two tests above already guard against
+// for a different table -- found live while forcefully disconnecting a
+// clipper's account in production.
+test('a reviewed pending clip can still be disconnected', async () => {
+  const db = seed();
+  await db.prepare(
+    `INSERT INTO submission_reviews
+       (submission_id, verdict, feedback, reviewer_type, reviewer_id, reviewer_name, reviewed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(900, 'tick', null, 'moderator', 2, 'Mandeep', NOW).run();
+
+  const r = await disconnectSocialAccount(db, 5);   // threw FOREIGN KEY before the fix
+  assert.equal(r.deleted_pending, 1);
+  assert.equal(db._rows('social_accounts').length, 0, 'the account row is removed');
+  assert.equal(db._rows('submission_reviews').length, 0, 'the review of a now-gone clip goes with it');
+});
