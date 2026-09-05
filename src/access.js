@@ -3,11 +3,14 @@ import { platformLabel } from './platforms.js';
 
 // Account onboarding gate.
 //
-// Both platforms refuse strangers until ClipGrow passes their app review:
-// Instagram needs the account added as a Meta app Tester, YouTube needs the
-// Google account on the Cloud project's Test users list. Neither can be
-// automated away, and both fail with platform errors that mean nothing to a
-// clipper.
+// Instagram refuses strangers outright until ClipGrow passes Meta's app
+// review: the account must be added as a Tester first, and that fails with a
+// platform error that means nothing to a clipper. YouTube's own Testing-mode
+// allowlist is gone now that the Google Cloud project is Published -- any
+// Google account can complete the OAuth handshake -- but ClipGrow still wants
+// a human to look at the channel before it can post to a live campaign, the
+// same as it looks at an Instagram handle. Neither step can be automated
+// away.
 //
 // So the approval is modelled as an explicit, visible step instead. A clipper
 // is only ever shown ONE next action, and that action is always one that can

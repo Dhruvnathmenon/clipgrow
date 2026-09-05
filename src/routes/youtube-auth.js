@@ -1,6 +1,7 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
+import { canConnect } from '../access.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, fetchChannel, YtError, YT_ERRORS
 } from '../youtube.js';
@@ -67,13 +68,21 @@ export async function handleYoutubeAuth(request, env, url) {
     if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
     if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
 
-    // No allowlist gate here any more. It existed because the Google Cloud
-    // project was in Testing status, where only accounts on the Test users list
-    // could sign in at all -- so offering Connect to anyone else walked them
-    // into an error they could not act on. The project is published now, so any
-    // Google account can complete this flow, and there is nothing to pre-approve.
-    // Instagram still gates (see instagram-auth.js): Meta App Review is not done,
-    // so its tester allowlist is still real.
+    // The channel must have been approved by the admin first -- reinstated
+    // after a clipper reported connecting a YouTube channel with no review
+    // at all. This used to be a real platform-side allowlist gate (the
+    // Google Cloud project was in Testing status, and only accounts on the
+    // Test users list could sign in at all); the project going Published
+    // removed THAT gate, but it was never replaced with ClipGrow's own
+    // review of whether the channel suits the campaign, the way
+    // IDENTIFIER_SPEC.youtube's own hint in access.js still promises.
+    // Enforced here and not only by hiding the button, for the same reason
+    // instagram-auth.js enforces it: this URL is a plain link a clipper
+    // could have kept from an earlier session or simply typed.
+    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'youtube');
+    if (!gate.allowed) {
+      return failure(campaignId, new YtError('NOT_APPROVED', gate.title, gate.reason));
+    }
 
     const state = await signSession(
       { sub: session.sub, campaign_id: Number(campaignId), exp: Date.now() + STATE_TTL_MS },

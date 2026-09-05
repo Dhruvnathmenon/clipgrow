@@ -695,21 +695,17 @@
       const acc=(p.access&&p.access[plat])||null;
 
       if(!a){
-        // No approval state for this platform. For YouTube that is now the
-        // normal case -- the Google app is published, so there is nothing to
-        // pre-approve and the clipper connects straight away. It also still
-        // covers the defensive case of a platform with no computed state.
+        // Defensive only -- every platform a campaign allows should have a
+        // computed access state by the time we get here. A YouTube channel
+        // used to skip straight to Connect with no admin review at all (the
+        // Google app going from Testing to Published removed GOOGLE's own
+        // allowlist, but ClipGrow still wants a human to look at the channel
+        // before it can post to a live campaign, same as Instagram). Falling
+        // through to the same request/wait/approved states below as
+        // Instagram is what closes that gap.
         if(!acc) return `<div class="alert warn">
           <div class="alert-t">Connect ${label} to start earning</div>
           <div>Sign in with the account that owns your ${isYt?'channel':'profile'} and allow every permission. We only ever read view counts &mdash; we can't post, edit or delete anything.</div>
-          ${isYt?`<div class="yt-steps">
-            <strong>Google shows a warning screen on the way. That is expected &mdash; here is what to click:</strong>
-            <ol>
-              <li>On the &ldquo;Google hasn&rsquo;t verified this app&rdquo; screen, click <strong>Advanced</strong> at the bottom.</li>
-              <li>Click <strong>Go to clipgrow.in (unsafe)</strong>. It is safe &mdash; that wording shows only because our Google review is still in progress.</li>
-              <li>Leave every permission ticked and press <strong>Continue</strong>.</li>
-            </ol>
-          </div>`:''}
           <div style="margin-top:.85rem"><a class="btn" href="${startUrl}">Connect ${label}</a></div></div>`;
 
         const idLabel=isYt?'YouTube channel':'Instagram username';
@@ -744,6 +740,14 @@
           return `<div class="alert ok">
             <div class="alert-t">✓ ${esc(acc.title)}</div>
             <div>${esc(acc.body)}</div>
+            ${isYt?`<div class="yt-steps">
+              <strong>Google shows a warning screen on the way. That is expected &mdash; here is what to click:</strong>
+              <ol>
+                <li>On the &ldquo;Google hasn&rsquo;t verified this app&rdquo; screen, click <strong>Advanced</strong> at the bottom.</li>
+                <li>Click <strong>Go to clipgrow.in (unsafe)</strong>. It is safe &mdash; that wording shows only because our Google review is still in progress.</li>
+                <li>Leave every permission ticked and press <strong>Continue</strong>.</li>
+              </ol>
+            </div>`:''}
             <div style="margin-top:.85rem">
               ${isYt
                 ? `<a class="btn" href="${startUrl}">Connect YouTube</a>`
