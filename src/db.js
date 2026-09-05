@@ -25,6 +25,30 @@ export function defaultDisplayName(username) {
   return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
 }
 
+/**
+ * A UPI ID is <handle>@<bank/PSP>, e.g. 9999999999@upi, name@oksbi. There is
+ * no fixed registry of PSP suffixes to validate against, so this only trims
+ * incidental whitespace -- the same "don't reject a real-world value over an
+ * assumption" reasoning as IDENTIFIER_SPEC.youtube in access.js.
+ */
+export function normaliseUpiId(input) {
+  return String(input == null ? '' : input).trim().replace(/\s+/g, '');
+}
+
+/**
+ * Lenient on purpose, same reasoning as validateIdentifier('youtube', ...):
+ * only the shape (handle@psp) is checked, never matched against a real PSP
+ * list, so a clipper is never blocked by a suffix ClipGrow hasn't seen yet.
+ */
+export function validateUpiId(input) {
+  const v = normaliseUpiId(input);
+  if (!v) return 'Enter a UPI ID';
+  if (!/^[\w.-]{2,256}@[A-Za-z]{2,64}$/.test(v)) {
+    return 'That does not look like a UPI ID. It should look like yourname@bank, for example 9999999999@upi.';
+  }
+  return null;
+}
+
 export function getClipperByUsername(db, username) {
   // COLLATE NOCASE guards any row stored before normalisation existed.
   return db

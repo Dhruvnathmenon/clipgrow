@@ -160,6 +160,7 @@
 
     .alert { border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem; font-size:.82rem; border:1px solid; }
     .alert.warn { background:rgba(255,215,0,.07); border-color:rgba(255,215,0,.4); color:var(--gold); }
+    .alert.ok { background:rgba(61,255,122,.07); border-color:rgba(61,255,122,.35); color:var(--neon); }
     .alert.info { background:rgba(77,166,255,.07); border-color:rgba(77,166,255,.35); color:var(--blue); }
     .alert.bad { background:rgba(255,77,77,.08); border-color:rgba(255,77,77,.4); color:var(--red); }
 
@@ -319,6 +320,7 @@
 
       <div class="panel" id="po-settle" style="display:none">
         <h2 class="panel-title">Settle &amp; Lock</h2>
+        <div id="po-upi-box" style="margin-bottom:1.1rem"></div>
         <div class="form-grid">
           <div><label>Amount actually transferred ₹ <span class="req">*</span></label><input type="number" id="po-amount" class="form-control" min="0" /></div>
           <div><label>Method</label><input type="text" id="po-method" class="form-control" value="UPI" /></div>
@@ -652,6 +654,11 @@
         <p class="note" style="margin:-.6rem 0 .9rem">Always saved in lowercase with spaces removed.</p>
         <div class="fld"><label>Display Name</label><input class="form-control" id="edit-display" /></div>
         <div class="fld"><label>New Password</label><input class="form-control" id="edit-password" type="password" placeholder="Leave blank to keep the current password" /></div>
+        <div id="edit-upi-flds">
+          <div class="fld"><label>UPI ID</label><input class="form-control" id="edit-upi-id" placeholder="yourname@bank" /></div>
+          <div class="fld"><label>Name on UPI account</label><input class="form-control" id="edit-upi-name" /></div>
+          <p class="note" style="margin-top:-.5rem">Only you and this clipper ever see this — never a moderator, never a client. The clipper can also set it themselves from their dashboard.</p>
+        </div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
@@ -1012,7 +1019,42 @@
       try{
         PAYABLE=await api(`/api/admin/clippers/${id}/payable?days=${days}${camp?'&campaign_id='+camp:''}`);
         renderPayable();
+        renderPayoutUpiBox(id);
         panel.style.display=''; settle.style.display='';
+      }catch(e){ toast(e.message,true); }
+    };
+
+    // Autofilled from what the clipper (or a prior admin edit) already has on
+    // file, so paying never means stopping to message them for their UPI ID
+    // first -- editable right here for a same-call correction, saved back
+    // through the same PATCH the Edit modal uses so it is remembered for
+    // next time too.
+    function renderPayoutUpiBox(clipperId){
+      const c=CLIPPERS.find(x=>String(x.id)===String(clipperId));
+      const box=document.getElementById('po-upi-box');
+      if(!c) return;
+      box.innerHTML=`<div class="alert ${c.upi_id?'ok':'warn'}">
+        <div class="alert-t">${c.upi_id?'Pay to':'No UPI ID on file yet'}</div>
+        <div class="form-grid" style="margin-top:.6rem">
+          <div><label>UPI ID</label><input type="text" id="po-upi-id" class="form-control" value="${esc(c.upi_id||'')}" placeholder="yourname@bank" /></div>
+          <div><label>Name on account</label><input type="text" id="po-upi-name" class="form-control" value="${esc(c.upi_account_name||'')}" /></div>
+        </div>
+        <div style="margin-top:.6rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-ghost btn-sm" onclick="savePayoutUpi(${c.id})">Save</button>
+          ${c.upi_id?`<button class="btn btn-ghost btn-sm" onclick="copyText('${esc(c.upi_id).replace(/'/g,"\\'")}')">Copy UPI ID</button>`:''}
+        </div>
+      </div>`;
+    }
+    window.savePayoutUpi=async function(clipperId){
+      const upi_id=document.getElementById('po-upi-id').value.trim();
+      const upi_account_name=document.getElementById('po-upi-name').value.trim();
+      if(!upi_id||!upi_account_name){ toast('Enter both the UPI ID and the name on the account',true); return; }
+      try{
+        await api(`/api/admin/clippers/${clipperId}`,{method:'PATCH',body:JSON.stringify({upi_id,upi_account_name})});
+        const c=CLIPPERS.find(x=>String(x.id)===String(clipperId));
+        if(c){ c.upi_id=upi_id; c.upi_account_name=upi_account_name; }
+        toast('Saved');
+        renderPayoutUpiBox(clipperId);
       }catch(e){ toast(e.message,true); }
     };
 
@@ -1582,10 +1624,10 @@
           <td>${money(c.money.pending)}</td>
           <td title="${c.money.bonuses?'Includes '+money(c.money.bonuses)+' in bonuses, which are NOT deducted from Left to Pay':'Settlements and advances'}">${money(c.money.paid)}${c.money.bonuses?' *':''}</td>
           <td class="gold">${money(c.money.owed)}${c.money.advanced?`<div class="muted" style="font-size:.68rem">after ${money(c.money.advanced)} advanced</div>`:''}</td>
-          <td><span class="badge ${c.status}">${c.status}</span></td>
+          <td><span class="badge ${c.status}">${c.status}</span>${c.upi_id?'':' <span class="badge needs_reauth" title="No UPI ID on file yet -- cannot be paid directly until they add one">no UPI</span>'}</td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
-            <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id},'${esc(c.username).replace(/'/g,"\\'")}','${esc(c.display_name).replace(/'/g,"\\'")}')">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id},'${esc(c.username).replace(/'/g,"\\'")}','${esc(c.display_name).replace(/'/g,"\\'")}','${esc(c.upi_id||'').replace(/'/g,"\\'")}','${esc(c.upi_account_name||'').replace(/'/g,"\\'")}')">Edit</button>
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
           </div></td>
@@ -1678,12 +1720,16 @@
     /* ── Edit Login modal: shared by clippers and moderators. One place to
        force-reset a password, or change a username/display name. ── */
     let EDIT_TARGET=null;
-    window.openEditModal=function(type,id,username,display_name){
+    window.openEditModal=function(type,id,username,display_name,upi_id,upi_account_name){
       EDIT_TARGET={type,id};
       document.getElementById('edit-modal-title').textContent=type==='clipper'?'Edit Clipper Login':'Edit Moderator Login';
       document.getElementById('edit-username').value=username;
       document.getElementById('edit-display').value=display_name;
       document.getElementById('edit-password').value='';
+      // Moderators are never paid through the site -- no UPI fields for them.
+      document.getElementById('edit-upi-flds').style.display=type==='clipper'?'':'none';
+      document.getElementById('edit-upi-id').value=upi_id||'';
+      document.getElementById('edit-upi-name').value=upi_account_name||'';
       document.getElementById('edit-modal-back').classList.add('open');
     };
     window.closeEditModal=function(){ document.getElementById('edit-modal-back').classList.remove('open'); };
@@ -1695,6 +1741,12 @@
       if(!username){ toast('Username cannot be blank',true); return; }
       const body={username,display_name};
       if(password) body.password=password;
+      if(type==='clipper'){
+        const upiId=document.getElementById('edit-upi-id').value.trim();
+        const upiName=document.getElementById('edit-upi-name').value.trim();
+        if(upiId) body.upi_id=upiId;
+        if(upiName) body.upi_account_name=upiName;
+      }
       try{
         await api(`/api/admin/${type==='clipper'?'clippers':'moderators'}/${id}`,{method:'PATCH',body:JSON.stringify(body)});
         toast('Saved');

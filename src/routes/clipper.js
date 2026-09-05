@@ -4,7 +4,8 @@ import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
-  unlinkParticipationAccount, SPEND_EXPR, spendExpr, maxPayoutPerVideo
+  unlinkParticipationAccount, SPEND_EXPR, spendExpr, maxPayoutPerVideo,
+  normaliseUpiId, validateUpiId
 } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
 import { explainEarning, explainEarningText } from '../earning-math.js';
@@ -91,10 +92,31 @@ export async function handleClipper(request, env, url) {
       clipper: {
         id: me.id, username: me.username,
         display_name: me.display_name || me.username,
-        status: me.status, read_only: readOnly
+        status: me.status, read_only: readOnly,
+        // Never shared with a moderator or client session -- see the
+        // migration 028 comment for why this is admin+clipper only.
+        upi_id: me.upi_id || null,
+        upi_account_name: me.upi_account_name || null
       },
       money, streak, totals
     });
+  }
+
+  // Self-service payout details, so the admin can pay a clipper directly by
+  // UPI without contacting them for it on every run. Not gated by
+  // blockIfReadOnly, same reasoning as the password change right below --
+  // a disabled clipper can still be owed money from before they were
+  // disabled and must still be able to say how to pay it to them.
+  if (pathname === '/api/clipper/me/upi' && method === 'PATCH') {
+    const { upiId, accountName } = await readJson(request);
+    const invalid = validateUpiId(upiId);
+    if (invalid) return err(invalid);
+    const name = String(accountName || '').trim();
+    if (!name) return err('Enter the name on the UPI account');
+    if (name.length > 100) return err('That name is too long');
+    await env.DB.prepare('UPDATE clippers SET upi_id = ?, upi_account_name = ? WHERE id = ?')
+      .bind(normaliseUpiId(upiId), name, clipperId).run();
+    return json({ ok: true });
   }
 
   // Self-service password change. Not gated by blockIfReadOnly -- a disabled

@@ -3,7 +3,8 @@ import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } fr
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
-  disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues
+  disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
+  normaliseUpiId, validateUpiId
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
@@ -314,7 +315,10 @@ export async function handleAdmin(request, env, url) {
       out.push({
         ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0,
         accounts_mismatched: acc.mismatched || 0, campaigns: parts.n,
-        quality: await clipperQuality(env.DB, c.id)
+        quality: await clipperQuality(env.DB, c.id),
+        // Admin-only -- deliberately not part of publicClipper() (shared with
+        // moderator.js's roster), see migration 028's comment.
+        upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null
       });
     }
     return json({ clippers: out });
@@ -459,7 +463,10 @@ export async function handleAdmin(request, env, url) {
     const { results: notes } = await env.DB.prepare(
       'SELECT * FROM clipper_notes WHERE clipper_id = ? ORDER BY created_at DESC').bind(params.id).all();
     return json({
-      clipper: publicClipper(clipper),
+      clipper: {
+        ...publicClipper(clipper),
+        upi_id: clipper.upi_id || null, upi_account_name: clipper.upi_account_name || null
+      },
       money: await clipperFinancials(env.DB, params.id),
       quality: await clipperQuality(env.DB, params.id),
       // mismatch_approved_as is deliberately not part of publicAccount (shared
@@ -473,7 +480,7 @@ export async function handleAdmin(request, env, url) {
   }
 
   if (params && method === 'PATCH') {
-    const { status, username, display_name, password } = await readJson(request);
+    const { status, username, display_name, password, upi_id, upi_account_name } = await readJson(request);
     if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
     // Username stays lowercase no matter what was typed -- same rule as
     // creation, enforced here too so an edit can never drift from it.
@@ -492,6 +499,20 @@ export async function handleAdmin(request, env, url) {
       if (String(password).length < 6) return err('Password must be at least 6 characters');
       const { hash, salt } = await hashPassword(password);
       await env.DB.prepare('UPDATE clippers SET password_hash = ?, password_salt = ? WHERE id = ?').bind(hash, salt, params.id).run();
+    }
+    // Lets the admin fix a UPI typo (or enter it on a clipper's behalf, e.g.
+    // over a call) from the same Edit action -- this is the one write path
+    // other than the clipper's own /api/clipper/me/upi, and it validates the
+    // same way.
+    if (upi_id != null) {
+      const invalid = validateUpiId(upi_id);
+      if (invalid) return err(invalid);
+      await env.DB.prepare('UPDATE clippers SET upi_id = ? WHERE id = ?').bind(normaliseUpiId(upi_id), params.id).run();
+    }
+    if (upi_account_name != null) {
+      const name = String(upi_account_name).trim();
+      if (!name) return err('Enter the name on the UPI account');
+      await env.DB.prepare('UPDATE clippers SET upi_account_name = ? WHERE id = ?').bind(name, params.id).run();
     }
     return json({ ok: true });
   }

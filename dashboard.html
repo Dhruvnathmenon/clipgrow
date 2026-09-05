@@ -307,8 +307,8 @@
     .pf-foot { padding:.9rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem; }
 
     /* Password-change modal (reuses .pf/.pf-inner/.pf-foot shell) */
-    #pw-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
-    #pw-back.open { display:flex; }
+    #pw-back, #pd-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
+    #pw-back.open, #pd-back.open { display:flex; }
     .form-group { margin-bottom:.9rem; }
     .form-group label { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.35rem; }
     .form-group input { width:100%; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.6rem .8rem; color:var(--white); font-size:.88rem; font-family:'Inter',sans-serif; }
@@ -382,6 +382,7 @@
           <span class="streak-l" id="wm-streak-l">day streak</span>
         </div>
       </div>
+      <button class="sb-out" onclick="openPayoutModal()">Payout Details</button>
       <button class="sb-out" onclick="openPasswordModal()">Change Password</button>
       <button class="sb-out" onclick="logout()">Log out</button>
     </div>
@@ -391,10 +392,12 @@
     <div class="mob-head">
       <a href="index.html" class="sb-logo" style="padding:0">Clip<span>Grow</span></a>
       <div style="display:flex;gap:.5rem">
+        <button class="btn btn-ghost btn-sm" onclick="openPayoutModal()">Payout</button>
         <button class="btn btn-ghost btn-sm" onclick="openPasswordModal()">Password</button>
         <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
       </div>
     </div>
+    <div id="upi-banner"></div>
 
     <div id="ro-banner"></div>
     <div id="global-alert"></div>
@@ -538,6 +541,24 @@
     </div>
   </div>
 
+  <div id="pd-back" onclick="if(event.target.id==='pd-back')closePayoutModal()">
+    <div class="pf">
+      <div class="pf-inner">
+        <h3 style="margin-bottom:1rem">Payout Details</h3>
+        <p class="note" style="margin-bottom:1rem">How ClipGrow pays you. Only you and the ClipGrow admin ever see this — never another clipper, and it's editable any time.</p>
+        <form id="pd-form">
+          <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" required placeholder="yourname@bank" /></div>
+          <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" required placeholder="Exactly as it appears on the account" /></div>
+          <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
+        </form>
+      </div>
+      <div class="pf-foot">
+        <button class="btn btn-ghost btn-sm" onclick="closePayoutModal()" type="button">Cancel</button>
+        <button class="btn btn-sm" id="pd-submit" onclick="submitPayoutDetails()" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -623,6 +644,16 @@
           'You can still see everything you have earned and what is outstanding, but you cannot join campaigns, connect accounts or add clips.',
           'Contact the ClipGrow admin if you think this is a mistake.');
       }
+
+      // Required before a payout can be sent your way -- see Payout Details.
+      // Not a hard block on the rest of the dashboard: joining campaigns,
+      // connecting accounts and posting clips all still work without it, so
+      // adding this never costs a day of tracked earnings while it waits.
+      document.getElementById('upi-banner').innerHTML=d.clipper.upi_id?'':alertBox('warn',
+        'Add your UPI details to get paid',
+        'ClipGrow pays clippers directly by UPI now. Add your UPI ID and the name on the account so your next payout doesn’t need us to message you for it.',
+        null,
+        '<div style="margin-top:.6rem"><button class="btn btn-sm" onclick="openPayoutModal()">Add UPI details</button></div>');
 
       const s=d.streak||{current:0,best:0};
       document.getElementById('wm-streak').textContent=s.current;
@@ -1319,6 +1350,37 @@
       }
     };
     document.getElementById('pw-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPasswordChange(); } });
+
+    window.openPayoutModal=function(){
+      document.getElementById('pd-upi').value=(ME&&ME.clipper.upi_id)||'';
+      document.getElementById('pd-name').value=(ME&&ME.clipper.upi_account_name)||'';
+      document.getElementById('pd-error').style.display='none';
+      document.getElementById('pd-back').classList.add('open');
+      document.getElementById('pd-upi').focus();
+    };
+    window.closePayoutModal=function(){ document.getElementById('pd-back').classList.remove('open'); };
+    window.submitPayoutDetails=async function(){
+      const upiId=document.getElementById('pd-upi').value.trim();
+      const accountName=document.getElementById('pd-name').value.trim();
+      const errorEl=document.getElementById('pd-error');
+      const btn=document.getElementById('pd-submit');
+      errorEl.style.display='none';
+      if(!upiId||!accountName){ errorEl.textContent='Fill in both fields.'; errorEl.style.display='block'; return; }
+      btn.disabled=true; btn.textContent='Saving…';
+      try{
+        await api('/api/clipper/me/upi',{method:'PATCH',body:JSON.stringify({upiId,accountName})});
+        ME.clipper.upi_id=upiId; ME.clipper.upi_account_name=accountName;
+        document.getElementById('upi-banner').innerHTML='';
+        closePayoutModal();
+        toast('Payout details saved');
+      }catch(e){
+        errorEl.textContent=e.message||'Could not save your payout details.';
+        errorEl.style.display='block';
+      }finally{
+        btn.disabled=false; btn.textContent='Save';
+      }
+    };
+    document.getElementById('pd-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPayoutDetails(); } });
 
     /* ── Instagram connect guide ── */
     window.openConnectGuide=function(campaignId,campaignName){
