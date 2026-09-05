@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:schema": "wrangler d1 execute clipgrow --file=schema.sql",
-    "db:schema:remote": "wrangler d1 execute clipgrow --remote --file=schema.sql",
+    "db:schema": "node scripts/bootstrap-db.mjs",
+    "db:schema:remote": "node scripts/bootstrap-db.mjs --remote",
     "test": "node --test"
   },
   "devDependencies": {
