@@ -232,6 +232,9 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
 
   const accountCache = new Map();
   const counters = new Map();
+  // Instagram's real per-account ceiling (rate-budget.js), read once per
+  // account per invocation rather than once per item.
+  const budgets = new Map();
   let calls = 0;
   let blockedThisRound = false;
   // Accounts already pushed to the back of the queue this invocation, so the
@@ -290,6 +293,46 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
     const acctKey = String(item.a);
     acctStats[acctKey] = acctStats[acctKey] || { label: account.username, platform: account.platform, total: 0, done: 0 };
     acctStats[acctKey].state = 'working';
+
+    // planInstagramSync (earnings.js) already refuses to queue more than an
+    // account's remaining 200/hour Instagram budget for the clipper-triggered
+    // sync -- this queue-based path (every admin/cron refresh) had no
+    // equivalent check, so once an account's real budget ran out it kept
+    // sending items to Instagram anyway. Each came back a genuine platform
+    // rate-limit rejection, one clip at a time, indistinguishable on the
+    // clip's own row from something actually broken -- exactly what running
+    // several manual "Refresh views first" clicks for the same clipper
+    // during a payout session runs into. Deferred here the same way a
+    // claim conflict already is: moved to the end of the queue instead of
+    // being spent against Instagram for a rejection we can already predict.
+    if (item.t === 'ig_view') {
+      if (!budgets.has(item.a)) budgets.set(item.a, await getBudget(db, item.a));
+      const remaining = budgets.get(item.a).remaining - counter.count();
+      if (remaining <= 0) {
+        if (deferredAccounts.has(String(item.a))) break;
+        deferredAccounts.add(String(item.a));
+        const deferred = [];
+        pending = pending.filter(x => (String(x.a) === String(item.a) ? (deferred.push(x), false) : true));
+        pending = pending.concat(deferred);
+        blockedThisRound = true;
+        // Not `.state` -- that gets recomputed below from queue position, and
+        // "waiting"/"working" is accurate here: the account genuinely is
+        // still queued, just deferred rather than stuck. `updateAccountBudget`
+        // (below) already attaches remaining/reset_in_ms to this account's
+        // stats every invocation; the event recorded here is what explains
+        // why to whoever opens this job's detail panel.
+        if (!acctStats[acctKey].budgetNoted) {
+          acctStats[acctKey].budgetNoted = true;
+          await recordAccountEvent(db, {
+            jobId, account: { account_id: item.a, clipper_id: account.clipper_id, campaign_id: account.campaign_id, platform: 'instagram' },
+            outcome: 'skipped', leg: 'view', kind: 'rate_limit', code: 'BUDGET_EXHAUSTED',
+            message: `Instagram's hourly limit for this account (200 calls) is used up. ${deferred.length} clip(s) will be checked automatically once it frees up.`,
+            fix: 'This clears on its own as the rolling hour advances -- no action needed.'
+          });
+        }
+        continue;
+      }
+    }
 
     try {
       if (item.t === 'import') {

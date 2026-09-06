@@ -221,6 +221,47 @@ test('runChunk: an account disconnected mid-job has its work skipped, not failed
   assert.equal(r.stats.failed, 0, 'not reported as a clip failure');
 });
 
+// planInstagramSync (earnings.js) already refuses to queue more than an
+// account's remaining 200/hour Instagram budget for the clipper-triggered
+// sync -- this queue-based path (every admin/cron refresh) had no equivalent
+// check, so once an account's real Instagram budget ran out it queued every
+// due clip anyway and Instagram's own per-clip rejection did the job. Exactly
+// what several manual "Refresh views first" clicks for the same clipper
+// during a payout run walks into.
+test('runChunk: an account whose Instagram budget is already used up gets its items deferred, not spent against a rejection', async () => {
+  const NOW = Date.now();
+  // 200 calls already made within the rolling hour -- nothing left to spend.
+  const igCalls = Array.from({ length: 200 }, (_, i) => ({ social_account_id: 1, called_at: NOW - 1000 - i }));
+  const subs = [clip({ id: 1, ig_media_id: 'm1' }), clip({ id: 2, ig_media_id: 'm2' })];
+  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+  const db = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()], igCalls });
+
+  let fetches = 0;
+  const r = await runChunk(db, {}, 1, { adapters: igAdapter({ m1: 111, m2: 222 }, () => fetches++) });
+
+  assert.equal(fetches, 0, 'the adapter is never called -- no call is spent on a rejection we can already predict');
+  assert.equal(r.done, false, 'the job is not finished -- deferred, not dropped');
+  assert.equal(JSON.parse(db._state.job.pending_json).length, 2, 'both items remain queued for a later invocation');
+  assert.equal(db._state.submissions[0].views, 0, 'views untouched, not overwritten with a failure');
+  assert.equal(db._state.submissions[0].sync_error, null, 'not marked as a per-clip failure either');
+});
+
+test('runChunk: an account with some budget left still gets exactly that much done, no more', async () => {
+  const NOW = Date.now();
+  // 198 of 200 used -- exactly 2 calls remain in the rolling window.
+  const igCalls = Array.from({ length: 198 }, (_, i) => ({ social_account_id: 1, called_at: NOW - 1000 - i }));
+  const subs = [clip({ id: 1, ig_media_id: 'm1' }), clip({ id: 2, ig_media_id: 'm2' }), clip({ id: 3, ig_media_id: 'm3' })];
+  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+  const db = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()], igCalls });
+
+  const r = await runChunk(db, {}, 1, { adapters: igAdapter({ m1: 10, m2: 20, m3: 30 }) });
+
+  assert.equal(db._state.submissions[0].views, 10);
+  assert.equal(db._state.submissions[1].views, 20);
+  assert.equal(db._state.submissions[2].views, 0, 'the third clip is deferred once the two remaining calls are spent');
+  assert.equal(JSON.parse(db._state.job.pending_json).length, 1);
+});
+
 test('claimAccount: a second job cannot take an account already held by a live job', async () => {
   const db = makeDb({ job: { id: 1, status: 'running' }, accounts: [igAccount({ active_job_id: null })] });
   assert.equal(await claimAccount(db, 1, 1), true, 'first job claims it');
