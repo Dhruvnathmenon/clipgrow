@@ -781,7 +781,7 @@
         const i=part.indexOf(':'), j=part.indexOf(':', i+1);
         const platform=part.slice(0,i), handle=part.slice(i+1,j), status=part.slice(j+1);
         const shown=platform==='youtube'?handle:'@'+handle;
-        return `<span class="acct-line">${esc(shown)}${opts.badge?` <span class="badge ${status}">${esc(status.replace('_',' '))}</span>`:''}</span>`;
+        return `<span class="acct-line">${acctLink(platform,handle,esc(shown))}${opts.badge?` <span class="badge ${status}">${esc(status.replace('_',' '))}</span>`:''}</span>`;
       }).join('<br>');
     }
 
@@ -1459,7 +1459,7 @@
       const msg=`Hi ${a.clipper}, your ${platName(a.platform)} connection on ClipGrow needs reconnecting (${why}). Please open your ClipGrow dashboard and reconnect it -- nothing is lost, it picks up right where it left off.`;
       const discordMsg=msg.replace(/'/g,"\\'");
       return `<div class="trouble"><span class="badge ${platBadge(a.platform)}">${platName(a.platform)}</span>
-        <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>
+        <strong>${acctLink(a.platform,a.username,handle)}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>
         <div class="muted" style="font-size:.72rem;margin:.1rem 0 .55rem 1.5rem">${esc(fix)}
           ${wa?`· <a href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener" style="color:var(--neon)">Message via WhatsApp</a>`
               :'· no WhatsApp number on file'}
@@ -1496,10 +1496,11 @@
       else if(o.accounts_needing_reauth>0) urgent.push(`${o.accounts_needing_reauth} account(s) need reconnecting by their clipper`);
       if(stuck.length) urgent.push(stuck.map(a=>{
         const handle=a.username?(a.platform==='youtube'?esc(a.username):'@'+esc(a.username)):'no linked account';
+        const linkedHandle=a.username?acctLink(a.platform||'instagram',a.username,handle):handle;
         const days=a.oldest?Math.floor((Date.now()-a.oldest)/86400000):null;
         const age=days==null?'':days>=1?` for ${days} day${days===1?'':'s'}`:' for 12h+';
         return `<div class="trouble"><span class="badge ${platBadge(a.platform||'instagram')}">${platName(a.platform||'instagram')}</span>
-          <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s) not syncing${age}</div>`;
+          <strong>${linkedHandle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s) not syncing${age}</div>`;
       }).join(''));
       else if(o.submissions_stuck>0) urgent.push(`${o.submissions_stuck} video(s) have not synced successfully in 12+ hours — investigate`);
       // An import failure is invisible by nature: existing clips keep syncing,
@@ -1526,8 +1527,9 @@
       const soft=[];
       if(transient.length) soft.push(transient.map(a=>{
         const handle=a.username?(a.platform==='youtube'?esc(a.username):'@'+esc(a.username)):'no linked account';
+        const linkedHandle=a.username?acctLink(a.platform||'instagram',a.username,handle):handle;
         return `<div class="trouble"><span class="badge ${platBadge(a.platform||'instagram')}">${platName(a.platform||'instagram')}</span>
-          <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s)</div>`;
+          <strong>${linkedHandle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s)</div>`;
       }).join(''));
 
       document.getElementById('health').innerHTML =
@@ -1715,7 +1717,7 @@
             <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Added</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
             <tbody>${submissions.map(s=>`<tr>
               <td class="handle">${esc(s.username)}</td>
-              <td class="muted">${s.account_username?'@'+esc(s.account_username):'—'}</td>
+              <td class="muted">${s.account_username?acctLink(s.platform,s.account_username,s.platform==='youtube'?esc(s.account_username):'@'+esc(s.account_username)):'—'}</td>
               <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
               <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
               <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
@@ -2092,11 +2094,19 @@
     };
 
     // YouTube usernames are stored with their leading "@" already (e.g.
-    // "@maryprenureship"); Instagram usernames are stored bare.
-    function acctProfileUrl(a){
-      return a.platform==='youtube'
-        ? `https://youtube.com/${encodeURIComponent(a.username||'').replace('%40','@')}`
-        : `https://instagram.com/${encodeURIComponent(a.username||'')}`;
+    // "@maryprenureship"); Instagram usernames are stored bare. Shared by
+    // every place an account handle is shown -- Connected Accounts, the
+    // campaign Participants table, a clipper's own Campaigns list, and the
+    // Overview health banners -- so the handle is always a direct, one-click
+    // link to the real profile instead of plain text you'd have to retype.
+    function platformProfileUrl(platform, username){
+      return platform==='youtube'
+        ? `https://youtube.com/${encodeURIComponent(username||'').replace('%40','@')}`
+        : `https://instagram.com/${encodeURIComponent(username||'')}`;
+    }
+    function acctProfileUrl(a){ return platformProfileUrl(a.platform, a.username); }
+    function acctLink(platform, username, shownHtml){
+      return `<a href="${platformProfileUrl(platform,username)}" target="_blank" rel="noopener" style="color:var(--neon)">${shownHtml}</a>`;
     }
     // Everything about one clipper, in its own wide panel -- replaces the old
     // cramped inline row. GET /api/admin/clippers/:id already fetched money,
@@ -2124,9 +2134,10 @@
           const kickedP=d.participations.filter(p=>p.status==='kicked');
           const inactiveP=d.participations.filter(p=>p.status!=='kicked'&&p.inactive_at);
           const activeP=d.participations.filter(p=>p.status!=='kicked'&&!p.inactive_at);
-          const linkCell=p=>p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
-              `<span class="acct-line">${a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—')} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`
-            ).join('<br>'):'<span class="muted">&mdash;</span>';
+          const linkCell=p=>p.linked_accounts_list.length?p.linked_accounts_list.map(a=>{
+              const shown=a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—');
+              return `<span class="acct-line">${a.username?acctLink(a.platform,a.username,shown):shown} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`;
+            }).join('<br>'):'<span class="muted">&mdash;</span>';
           const row=p=>{
             const inactive=p.status!=='kicked'&&p.inactive_at;
             return `<tr>
