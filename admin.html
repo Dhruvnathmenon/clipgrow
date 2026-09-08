@@ -2704,6 +2704,13 @@
               // when the identifier still contains an "@": requests made before
               // this changed hold a Google email, which would build a dead URL.
               ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://www.youtube.com/@${encodeURIComponent(r.identifier||r.ig_username)}">open channel ↗</a>`
+              : r.platform==='instagram'
+              // Same reasoning as the YouTube link above: judging an Instagram
+              // request means looking at the actual profile, so make that one
+              // click instead of a manual paste into a new tab. Strip a
+              // leading "@" in case it was typed in -- the profile URL takes
+              // the bare handle.
+              ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://instagram.com/${encodeURIComponent(String(r.identifier||r.ig_username||'').replace(/^@/,''))}">open profile ↗</a>`
               : ''}
             ${r.already_granted>0?`<div class="muted" style="font-size:.68rem;margin-top:.2rem">Already granted on another campaign — nothing to do on the platform, just approve.</div>`:''}</td>
           <td class="muted">${esc(r.campaign_name||'—')}</td>
