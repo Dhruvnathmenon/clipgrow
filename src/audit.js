@@ -2,11 +2,11 @@ import { now } from './db.js';
 
 /**
  * The staff activity log (migration 023). Deliberately not wired into every
- * mutation in admin.js -- only the handful of action classes the founder
- * actually asked to see: clipper kicked, account removed, participation
- * paused, a refresh triggered, a clipper login created, an access request
- * approved. See admin.js's own comments at each call site for why that one
- * was included.
+ * mutation in admin.js -- only the handful of action classes worth the
+ * founder seeing: clipper kicked, account removed, participation paused, a
+ * refresh triggered, a clipper login created, an access request approved,
+ * a closed-at-zero clip manually reopened. See admin.js's own comments at
+ * each call site for why that one was included.
  *
  * staffId/reviewerId-style nullability: an admin session carries the
  * literal string 'admin' (auth.js createSessionCookie('admin','admin',...)),

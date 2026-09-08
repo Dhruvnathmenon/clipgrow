@@ -1090,7 +1090,16 @@ export async function handleAdmin(request, env, url) {
       return err('This clip is locked because it has already been paid. Reverse that payment first if you need to change it.', 409);
     }
     if (method === 'DELETE') {
-      await env.DB.prepare('DELETE FROM submissions WHERE id = ?').bind(params.id).run();
+      // Re-checks the exact same "locked AND paid" condition at write time,
+      // not just on the row read a moment ago -- a payout could settle (and
+      // thus pay) this exact clip in that gap, and without this the DELETE
+      // would still fire, destroying a paid clip's row outright.
+      const del = await env.DB.prepare(
+        'DELETE FROM submissions WHERE id = ? AND NOT (locked_at IS NOT NULL AND payment_id IS NOT NULL)'
+      ).bind(params.id).run();
+      if (!del.meta.changes) {
+        return err('This clip was paid in the moment between checking and deleting it. Reverse that payment instead, so the ledger stays correct.', 409);
+      }
     } else {
       if (sub.locked_at) {
         return err('This clip is closed (settled at zero). Reopen it first if you need to change its status.', 409);
@@ -1107,7 +1116,14 @@ export async function handleAdmin(request, env, url) {
       if (!['active', 'paused', 'disqualified'].includes(status)) {
         return err(`'${status}' is not a valid video status. Accepted: active, paused, disqualified.`);
       }
-      await env.DB.prepare('UPDATE submissions SET status = ? WHERE id = ?').bind(status, params.id).run();
+      // Same re-check at write time -- the row could have been locked (by a
+      // payout, or the write-off sweep) in the gap since the read above.
+      const upd = await env.DB.prepare(
+        'UPDATE submissions SET status = ? WHERE id = ? AND locked_at IS NULL'
+      ).bind(status, params.id).run();
+      if (!upd.meta.changes) {
+        return err('This clip was locked in the moment between checking and changing it. Refresh and try again.', 409);
+      }
     }
     await reallocateCampaign(env.DB, sub.campaign_id);
     return json({ ok: true });
@@ -1360,10 +1376,26 @@ export async function handleAdmin(request, env, url) {
     if (sub.lock_reason === 'paid') {
       return err('This clip was locked by a payment. Reverse that payment instead, so the ledger stays correct.', 409);
     }
-    await env.DB.prepare(
-      'UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL WHERE id = ?'
+    // The two checks above only look at what was true when we read the row a
+    // moment ago -- a payout could settle (and thus pay) this exact clip in
+    // the gap between that read and this write. Without re-checking the same
+    // condition at write time, that race would silently null out a real
+    // payment's lock: the one thing CLAUDE.md's "one rule" exists to prevent.
+    // Guard on both here and check meta.changes, same as every other write
+    // to these fields in earnings.js/payouts.js.
+    const res = await env.DB.prepare(
+      `UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL
+       WHERE id = ? AND locked_at IS NOT NULL AND lock_reason != 'paid'`
     ).bind(params.id).run();
+    if (!res.meta.changes) {
+      return err('This clip was paid in the moment between checking and reopening it. Reverse that payment instead, so the ledger stays correct.', 409);
+    }
     await reallocateCampaign(env.DB, sub.campaign_id);
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'submission_unlocked',
+      targetType: 'submission', targetId: Number(params.id),
+      targetLabel: `was closed at zero (${sub.lock_reason || 'unknown reason'})`
+    });
     return json({ ok: true });
   }
 
