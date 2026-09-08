@@ -21,9 +21,8 @@ letting it grow into a full history (that's what changelog.md is for).
   budget exhaustion. The schema/columns and everything else from that work
   (contact profile, top-up, recap card, dead-column cleanup) stayed. See
   commit `0a6da71` and its message for the full scope. The admin Finance
-  tab's "View Margin" panel is now vestigial (will always read ₹0) since
-  nothing generates margin anymore — flagged to the founder, not yet
-  removed.
+  tab's vestigial "View Margin" panel (would always have read ₹0 since
+  nothing generates margin anymore) was removed the same day.
 
 - The clipper-triggered full refresh button was **removed entirely** on
   2026-08-27 (commit `09922fa`) after confirming the cron itself was
