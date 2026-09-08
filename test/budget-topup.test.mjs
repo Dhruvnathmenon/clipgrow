@@ -1,8 +1,8 @@
 // Two things worth pinning down with real numbers:
 // 1. payableClips must show/select exactly the amount settlePayment will
-//    accept for a clip with a real margin gap -- if these two disagree,
-//    every payout attempt fails with a staleness rejection that isn't a
-//    real race (see src/payouts.js's payableClips comment).
+//    accept -- if these two disagree, every payout attempt fails with a
+//    staleness rejection that isn't a real race (see src/payouts.js's
+//    payableClips comment).
 // 2. Budget top-ups: the ledger's recorded pool-share and the actual
 //    campaigns.budget increase must be exactly equal, even for an amount
 //    that doesn't divide cleanly by 5 -- they're the same variable by
@@ -30,16 +30,15 @@ function seed() {
   });
 }
 
-test('payableClips shows exactly what settlePayment accepts for a clip with a real margin gap', async () => {
+test('payableClips shows exactly what settlePayment accepts', async () => {
   const db = seed();
-  await allocateCampaignEarnings(db, 1); // 1,500 views @ 50 -> billed 75, clipper 50
+  await allocateCampaignEarnings(db, 1); // 1,500 views @ 50 -> billed 75, clipper 75 (no split)
 
   const { clips, totals } = await payableClips(db, 1, { days: 0 });
   const c = clips[0];
-  assert.equal(c.billed_earning, 75, 'the raw billable figure is still visible as context');
-  assert.equal(c.earning, 50, 'but the displayed/selectable figure is what the clipper actually gets');
+  assert.equal(c.earning, 75, 'the clipper is paid the full billable figure -- no fractional floor');
   assert.equal(c.selectable, true);
-  assert.equal(totals.payable_now, 50);
+  assert.equal(totals.payable_now, 75);
 
   const agency = (await walletOfKind(db, 'agency')).id;
   const r = await settlePayment(db, {

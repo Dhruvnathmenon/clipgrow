@@ -2,7 +2,6 @@ import { cpmEarning } from './earning-math.js';
 import { maxPayoutPerVideo } from './db.js';
 import { getAdapter, campaignPlatforms } from './platforms.js';
 import { makeCallCounter, getBudget, MAX_CLIPS_FOR_FULL_REFRESH, CLIP_COOLDOWN_MS } from './rate-budget.js';
-import { logAction } from './audit.js';
 
 export async function markAccount(db, accountId, { status, code }) {
   await db.prepare(
@@ -293,13 +292,15 @@ export async function allocateCampaignEarnings(db, campaignId) {
       remaining -= allocated;
     }
 
-    // The clipper is paid in complete CPM-multiples of the billable amount
-    // above -- never the billable amount itself. Applies uniformly to every
-    // branch (paused/disqualified/kicked/below-min all already produce
-    // allocated=0, which floors to clipper_earning=0 the same way). Locked
-    // clips are the one exception: their clipper_earning was fixed forever
-    // at settlement (src/payouts.js), never touched by any later pass.
-    const clipperAllocated = sub.locked_at ? null : (cpm > 0 ? Math.floor(allocated / cpm) * cpm : 0);
+    // clipper_earning tracks the billable amount exactly -- no fractional
+    // floor, no margin skimmed off. (The floor-to-CPM-multiple version was
+    // reverted 8 Sep 2026 at the founder's request; it's in git history --
+    // commit 33519db and its parents -- if this ever needs revisiting.)
+    // Kept in sync with `earning` rather than dropped, since payouts.js,
+    // db.js's clipperFinancials/totalOutstanding and the clipper dashboard
+    // all read clipper_earning -- this way none of them needed to change
+    // back, they just always see the same number as the billable figure now.
+    const clipperAllocated = sub.locked_at ? null : allocated;
 
     if (allocated !== sub.earning || clipperAllocated !== sub.clipper_earning) {
       updates.push(db.prepare(
@@ -309,35 +310,7 @@ export async function allocateCampaignEarnings(db, campaignId) {
   }
   if (updates.length) await db.batch(updates);
 
-  // Auto-completion: the campaign ends itself the instant remaining budget
-  // can't fund even one more full CPM unit for anyone, no admin click
-  // required -- confirmed explicitly by the founder. Layered ahead of the
-  // existing budget_full <-> active toggle below (which still handles every
-  // case this stricter check doesn't reach) and reversible: a top-up that
-  // brings remaining back above one CPM unit reopens it automatically. A
-  // campaign manually "Marked Over" (completed_reason = 'manual') is never
-  // touched by this -- budget math doesn't get to undo a deliberate human
-  // decision made for unrelated reasons.
-  const autoExhausted = campaign.status === 'completed' && campaign.completed_reason === 'budget_exhausted';
-  if (cpm > 0 && remaining < cpm && campaign.completed_reason !== 'manual' && !autoExhausted) {
-    await db.prepare("UPDATE campaigns SET status = 'completed', completed_reason = 'budget_exhausted' WHERE id = ?")
-      .bind(campaignId).run();
-    await logAction(db, {
-      staffType: 'system', staffName: 'Automatic (budget)', action: 'campaign_auto_completed',
-      targetType: 'campaign', targetId: campaignId, targetLabel: campaign.name,
-      detail: `Remaining budget (₹${remaining}) can no longer fund a full CPM unit (₹${cpm}) for anyone.`
-    });
-  } else if (cpm > 0 && remaining >= cpm && autoExhausted) {
-    // A top-up arrived. Reopens automatically -- this ending was never a
-    // deliberate human decision to begin with.
-    await db.prepare("UPDATE campaigns SET status = 'active', completed_reason = NULL WHERE id = ?")
-      .bind(campaignId).run();
-    await logAction(db, {
-      staffType: 'system', staffName: 'Automatic (budget)', action: 'campaign_auto_reopened',
-      targetType: 'campaign', targetId: campaignId, targetLabel: campaign.name,
-      detail: `A budget top-up brought remaining (₹${remaining}) back above one CPM unit (₹${cpm}).`
-    });
-  } else if (campaign.status === 'active' && remaining <= 0) {
+  if (campaign.status === 'active' && remaining <= 0) {
     await db.prepare("UPDATE campaigns SET status = 'budget_full' WHERE id = ?").bind(campaignId).run();
   } else if (campaign.status === 'budget_full' && remaining > 0) {
     await db.prepare("UPDATE campaigns SET status = 'active' WHERE id = ?").bind(campaignId).run();

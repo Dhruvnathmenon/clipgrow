@@ -1,8 +1,10 @@
-// A campaign completes itself automatically the instant remaining budget
-// can't fund even one more full CPM unit for anyone -- confirmed explicitly
-// by the founder, no admin click required. Reversible via a top-up (this
-// ending was never a deliberate human decision); a manual "Mark Over"
-// (completed_reason = 'manual') is never touched by budget math.
+// Automatic budget-exhaustion completion was reverted 8 Sep 2026 at the
+// founder's request, along with the rest of the fractional-margin model --
+// see git history (commit 33519db and its parents) for that mechanism.
+// completed_reason and the manual "Mark Over" -> recap-card flow it fed
+// stayed, since that plumbing is real, wanted, and independent of the
+// auto-complete mechanism itself: an admin can still mark a campaign over
+// by hand, and completed_reason still records that it was deliberate.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeSqliteD1 } from './helpers/sqlite-d1.mjs';
@@ -44,47 +46,10 @@ function seed(budget) {
   });
 }
 
-test('a campaign auto-completes once remaining budget cannot fund one more CPM unit', async () => {
-  // 3,000 views bills 150, leaving remaining = 200 - 150 = 50 -- still one
-  // full cpm(50) unit, should NOT complete yet.
-  const db = seed(200);
-  await allocateCampaignEarnings(db, 1);
-  let c = await db.prepare('SELECT status, completed_reason FROM campaigns WHERE id = 1').first();
-  assert.equal(c.status, 'active', 'remaining (50) still equals one full CPM unit');
-
-  // Shrink the budget so remaining drops below cpm.
-  await db.prepare('UPDATE campaigns SET budget = 170 WHERE id = 1').run();
-  await allocateCampaignEarnings(db, 1);
-  c = await db.prepare('SELECT status, completed_reason FROM campaigns WHERE id = 1').first();
-  assert.equal(c.status, 'completed');
-  assert.equal(c.completed_reason, 'budget_exhausted');
-});
-
-test('a top-up reopens an auto-completed campaign, but never a manually-ended one', async () => {
-  const db = seed(170);
-  await allocateCampaignEarnings(db, 1); // completes: remaining (20) < cpm (50)
-  let c = await db.prepare('SELECT status FROM campaigns WHERE id = 1').first();
-  assert.equal(c.status, 'completed');
-
-  await topUpCampaignBudget(db, { campaignId: 1, amount: 60 }); // +48 to budget net of 20% fee
-  await allocateCampaignEarnings(db, 1);
-  c = await db.prepare('SELECT status, completed_reason FROM campaigns WHERE id = 1').first();
-  assert.equal(c.status, 'active', 'reopened once remaining budget clears one CPM unit again');
-  assert.equal(c.completed_reason, null);
-
-  // A manual "Mark Over" must never be reopened by budget math.
-  await db.prepare("UPDATE campaigns SET status = 'completed', completed_reason = 'manual' WHERE id = 1").run();
-  await topUpCampaignBudget(db, { campaignId: 1, amount: 6000 });
-  await allocateCampaignEarnings(db, 1);
-  c = await db.prepare('SELECT status, completed_reason FROM campaigns WHERE id = 1').first();
-  assert.equal(c.status, 'completed', 'a deliberate manual ending is not undone by adding budget');
-  assert.equal(c.completed_reason, 'manual');
-});
-
 test('GET /api/clipper/campaigns keeps a completed campaign visible to a clipper who joined it, so the recap card can show', async () => {
   const db = seed(170);
   await db.prepare('INSERT INTO participations (clipper_id, campaign_id, status, joined_at) VALUES (1, 1, ?, ?)').bind('active', NOW).run();
-  await allocateCampaignEarnings(db, 1); // auto-completes
+  await db.prepare("UPDATE campaigns SET status = 'completed', completed_reason = 'manual' WHERE id = 1").run();
   const env = { DB: db, SESSION_SECRET };
 
   const { campaigns } = await (await clipperRequest(env, '/api/clipper/campaigns')).json();
@@ -95,7 +60,7 @@ test('GET /api/clipper/campaigns keeps a completed campaign visible to a clipper
 
 test('GET /api/clipper/campaigns hides a completed campaign from a clipper who never joined it', async () => {
   const db = seed(170);
-  await allocateCampaignEarnings(db, 1); // auto-completes, clipper 1 never joined
+  await db.prepare("UPDATE campaigns SET status = 'completed', completed_reason = 'manual' WHERE id = 1").run(); // clipper 1 never joined
   const env = { DB: db, SESSION_SECRET };
 
   const { campaigns } = await (await clipperRequest(env, '/api/clipper/campaigns')).json();
