@@ -129,24 +129,28 @@ export async function handleClipper(request, env, url) {
     if (contactInvalid) return err(contactInvalid);
     const upiInvalid = validateUpiId(upiId);
     if (upiInvalid) return err(upiInvalid);
-    // Optional, unlike the three above -- validateDiscordId only objects to
-    // a non-empty value that doesn't look like a real numeric User ID.
+    // validateDiscordId itself still treats empty as valid -- admin.js's own
+    // edit endpoint relies on that to let the admin clear/leave it blank on
+    // a clipper's behalf. Here, on the clipper's own self-service save, it's
+    // mandatory: this is the fallback contact channel used when a WhatsApp
+    // message doesn't land, so every clipper needs one on file, not just
+    // whoever happened to fill it in.
     const discordInvalid = validateDiscordId(discordId);
     if (discordInvalid) return err(discordInvalid);
+    const discord = normaliseDiscordId(discordId);
+    if (!discord) return err('Enter your Discord User ID');
     const name = String(accountName || '').trim();
     if (!name) return err('Enter the name on the UPI account');
     if (name.length > 100) return err('That name is too long');
     const legal = String(legalName || '').trim();
     if (legal.length > 100) return err('That name is too long');
-    const discord = normaliseDiscordId(discordId);
     await env.DB.prepare(
-      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?,
-         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END,
-         discord_id = CASE WHEN ? != '' THEN ? ELSE discord_id END
+      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_id = ?,
+         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
        WHERE id = ?`
     ).bind(
-      normaliseEmail(email), normaliseContactNumber(contactNumber), normaliseUpiId(upiId), name,
-      legal, legal, discord, discord, clipperId
+      normaliseEmail(email), normaliseContactNumber(contactNumber), normaliseUpiId(upiId), name, discord,
+      legal, legal, clipperId
     ).run();
     return json({ ok: true });
   }

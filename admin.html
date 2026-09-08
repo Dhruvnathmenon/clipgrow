@@ -511,24 +511,21 @@
     <!-- AUTHENTICATION -->
     <div class="view" id="v-testers">
       <div class="panel">
-        <h2 class="panel-title">Waiting for your approval</h2>
         <p class="note" style="margin-bottom:1rem">The clipper's Connect button only appears once you approve here, so they can never walk into an error. Instagram still needs a step on Meta's side first. YouTube no longer does — just check the channel is a real one that suits the campaign, then Approve.</p>
         <div class="auth-steps">
           <div class="auth-step"><span class="badge neutral">Instagram</span> Meta App Dashboard → App roles → <strong>Instagram Testers</strong> → add their handle. They then accept the invite inside Instagram.</div>
           <div class="auth-step"><span class="badge budget_full">YouTube</span> Nothing to do on Google's side — the app is published, so any account can connect. Open the channel, check it is really theirs and fits the campaign, then <strong>Approve</strong>.</div>
         </div>
-        <div class="table-wrap" style="margin-top:1.1rem"><table>
-          <thead><tr><th>Clipper</th><th>Platform</th><th>Account to check</th><th>Campaign</th><th>Requested</th><th>Tracking</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="pending-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
-        </table></div>
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:1.1rem">
+          <span class="muted" style="font-size:.78rem">Show:</span>
+          <button class="btn btn-ghost btn-sm on" id="auth-f-pending" onclick="toggleAuthFilter('pending',this)">Pending</button>
+          <button class="btn btn-ghost btn-sm on" id="auth-f-approved" onclick="toggleAuthFilter('approved',this)">Approved</button>
+          <button class="btn btn-ghost btn-sm" id="auth-f-rejected" onclick="toggleAuthFilter('rejected',this)">Rejected</button>
+          <button class="btn btn-ghost btn-sm" id="auth-f-removed" onclick="toggleAuthFilter('removed',this)">Removed</button>
+          <span class="note" style="margin-left:.3rem">Rejected and Removed stay out of the way until you ask for them.</span>
+        </div>
       </div>
-      <div class="panel">
-        <h2 class="panel-title">Already handled</h2>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Platform</th><th>Account</th><th>Campaign</th><th>Tracking</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="testers-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
-        </table></div>
-      </div>
+      <div id="testers-groups"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- MODERATORS -->
@@ -2347,10 +2344,10 @@
       catch(e){ toast(e.message,true); }
     };
     window.deleteClipper=async function(id){
-      if(!confirm('Archive this clipper?\n\nEvery video, earning and payment stays on record — nothing is deleted. They drop out of the active roster, lose login access, and their social accounts are disconnected (tokens revoked), so nothing new syncs in.\n\nRestore them from Deleted Clippers below; they will need to reconnect their account to resume syncing.')) return;
+      if(!confirm('Archive this clipper?\n\nEvery video, earning and payment stays on record — nothing is deleted. They drop out of the active roster, lose login access, and their social accounts are disconnected (tokens revoked), so nothing new syncs in. Their username is freed for a new clipper to use.\n\nRestore them from Deleted Clippers below; they will need to reconnect their account to resume syncing.')) return;
       try{
-        await api('/api/admin/clippers/'+id,{method:'DELETE'});
-        toast('Clipper archived — videos and earnings kept');
+        const res=await api('/api/admin/clippers/'+id,{method:'DELETE'});
+        toast(res.freed_username?`Clipper archived — "${res.freed_username}" is free to use again`:'Clipper archived — videos and earnings kept');
         loadClippers();
         loadDeletedClippers();
       }catch(e){ toast(e.message,true); }
@@ -2376,7 +2373,7 @@
       if(!clippers.length){ tb.innerHTML='<tr><td colspan="5" class="empty">No deleted clippers.</td></tr>'; return; }
       tb.innerHTML=clippers.map(c=>`
         <tr>
-          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
+          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem" title="Freed on delete -- the original handle is available for a new clipper">was @${esc(c.username.replace(/_deleted\d+$/,''))}</div></td>
           <td>${num(c.campaigns)}</td>
           <td class="money">${money(c.money.earned)}</td>
           <td>${money(c.money.paid)}</td>
@@ -2761,10 +2758,29 @@
         run('Errors',loadErrorLog,null)
       ]);
     }
-    /* ── Instagram tester queue ── */
+    /* ── Access requests (Authentication tab) ──
+       Grouped by campaign (one panel per campaign) instead of one flat list
+       for the whole roster, with a filter bar controlling which of the four
+       states show at all. Pending and Approved are on by default; Rejected
+       and Removed (approved, but since kicked from that campaign) stay out
+       of the way entirely until switched on -- clean by default, everything
+       still reachable. */
     const TESTER_BADGE={requested:'pending',invited:'needs_reauth',confirmed:'connected',rejected:'kicked'};
-    // Clippers are blocked until these are actioned, so the count rides on the
-    // tab itself rather than only being visible once you open it.
+    const AUTH_FILTER={pending:true,approved:true,rejected:false,removed:false};
+    let TESTERS_CACHE=[];
+    // An access request's own status never changes when its clipper is
+    // later kicked from that campaign -- it still reads 'confirmed' forever
+    // unless this also checks the live participation status (the new
+    // participation_status field admin.js's GET now joins in).
+    function authState(r){
+      if(r.status==='requested'||r.status==='invited') return 'pending';
+      if(r.status==='rejected') return 'rejected';
+      if(r.status==='confirmed') return r.participation_status==='kicked'?'removed':'approved';
+      return 'approved';
+    }
+    // Clippers are blocked until pending ones are actioned, so the count
+    // rides on the tab itself rather than only being visible once you open
+    // it -- unaffected by which filters happen to be on right now.
     function setAuthCount(n){
       const el=document.getElementById('auth-count');
       if(!el) return;
@@ -2789,59 +2805,88 @@
         ?'New posts will be picked up automatically once they connect'
         :'Only clips they paste in manually will be tracked -- for an account that also posts unrelated videos'}">${r.auto_import?'Automatic':'Paste only'}</button>`;
 
+    function authAccountCell(r){
+      return `<strong style="color:var(--white)">${esc(acctDisplay(r))}</strong>
+        <button class="btn btn-ghost btn-sm" style="margin-left:.4rem" onclick="copyText('${esc(r.identifier||r.ig_username)}')">copy</button>
+        ${r.platform==='youtube' && !String(r.identifier||'').includes('@')
+          // Approving a YouTube request now means judging the channel, so
+          // open it in one click rather than making the admin paste a
+          // handle into a new tab to see what they are approving. Skipped
+          // when the identifier still contains an "@": requests made before
+          // this changed hold a Google email, which would build a dead URL.
+          ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://www.youtube.com/@${encodeURIComponent(r.identifier||r.ig_username)}">open channel ↗</a>`
+          : r.platform==='instagram'
+          // Same reasoning as the YouTube link above: judging an Instagram
+          // request means looking at the actual profile, so make that one
+          // click instead of a manual paste into a new tab. Strip a
+          // leading "@" in case it was typed in -- the profile URL takes
+          // the bare handle.
+          ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://instagram.com/${encodeURIComponent(String(r.identifier||r.ig_username||'').replace(/^@/,''))}">open profile ↗</a>`
+          : ''}
+        ${r.already_granted>0?`<div class="muted" style="font-size:.68rem;margin-top:.2rem">Already granted on another campaign — nothing to do on the platform, just approve.</div>`:''}`;
+    }
+
+    function authRow(r){
+      const state=authState(r);
+      const statusCell=state==='pending'?'<span class="badge needs_reauth">waiting</span>'
+        :state==='removed'?'<span class="badge kicked">removed from campaign</span>'
+        :`<span class="badge ${TESTER_BADGE[r.status]||''}">${r.status==='confirmed'?'approved':esc(r.status)}</span>${r.is_connected>0?' <span class="badge connected">connected</span>':''}`;
+      const actions=state==='pending'
+        ? `<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>
+           <button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>`
+        : state==='rejected'
+        ? `<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>`
+        : state==='removed'
+        // Fixing this belongs to the Campaigns tab's own Reinstate action
+        // (participations.status), not here -- re-approving the access
+        // request wouldn't undo the kick.
+        ? '<span class="muted" style="font-size:.72rem">Reinstate from the Campaigns tab</span>'
+        : !r.is_connected
+        ? `<button class="btn btn-ghost btn-sm" onclick="rejectTester(${r.id})">Revoke</button>`
+        : '<span class="muted" style="font-size:.72rem">—</span>';
+      return `<tr>
+        <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
+        <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
+        <td>${authAccountCell(r)}</td>
+        <td class="muted">${when(r.requested_at)}</td>
+        <td>${state!=='rejected'&&state!=='removed'?trackingToggle(r):'<span class="muted">—</span>'}</td>
+        <td>${statusCell}${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
+        <td class="actions">${actions}</td>
+      </tr>`;
+    }
+
+    function renderTesters(requests){
+      const visible=requests.filter(r=>AUTH_FILTER[authState(r)]);
+      const groups=new Map();
+      for(const r of visible){
+        const key=r.campaign_name||'No campaign';
+        if(!groups.has(key)) groups.set(key,[]);
+        groups.get(key).push(r);
+      }
+      const wrap=document.getElementById('testers-groups');
+      if(!wrap) return;
+      wrap.innerHTML=groups.size?[...groups.entries()].map(([campaign,rows])=>`
+        <div class="panel">
+          <h2 class="panel-title">${esc(campaign)} <span class="muted" style="font-size:.75rem;font-weight:400">(${rows.length})</span></h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Platform</th><th>Account</th><th>Requested</th><th>Tracking</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${rows.map(authRow).join('')}</tbody>
+          </table></div>
+        </div>`).join('')
+        : '<p class="empty">Nothing matches the current filters.</p>';
+    }
+    window.toggleAuthFilter=function(key,btn){
+      AUTH_FILTER[key]=!AUTH_FILTER[key];
+      btn.classList.toggle('on',AUTH_FILTER[key]);
+      renderTesters(TESTERS_CACHE);
+    };
+
     async function loadTesters(){
       try{
         const {requests}=await api('/api/admin/access-requests');
-        const pending=requests.filter(r=>r.status==='requested'||r.status==='invited');
-        const done=requests.filter(r=>r.status==='confirmed'||r.status==='rejected');
-        setAuthCount(pending.length);
-
-        document.getElementById('pending-body').innerHTML=pending.length?pending.map(r=>`<tr>
-          <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
-          <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
-          <td><strong style="color:var(--white)">${esc(acctDisplay(r))}</strong>
-            <button class="btn btn-ghost btn-sm" style="margin-left:.4rem" onclick="copyText('${esc(r.identifier||r.ig_username)}')">copy</button>
-            ${r.platform==='youtube' && !String(r.identifier||'').includes('@')
-              // Approving a YouTube request now means judging the channel, so
-              // open it in one click rather than making the admin paste a
-              // handle into a new tab to see what they are approving. Skipped
-              // when the identifier still contains an "@": requests made before
-              // this changed hold a Google email, which would build a dead URL.
-              ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://www.youtube.com/@${encodeURIComponent(r.identifier||r.ig_username)}">open channel ↗</a>`
-              : r.platform==='instagram'
-              // Same reasoning as the YouTube link above: judging an Instagram
-              // request means looking at the actual profile, so make that one
-              // click instead of a manual paste into a new tab. Strip a
-              // leading "@" in case it was typed in -- the profile URL takes
-              // the bare handle.
-              ? `<a class="btn btn-ghost btn-sm" style="margin-left:.3rem" target="_blank" rel="noopener" href="https://instagram.com/${encodeURIComponent(String(r.identifier||r.ig_username||'').replace(/^@/,''))}">open profile ↗</a>`
-              : ''}
-            ${r.already_granted>0?`<div class="muted" style="font-size:.68rem;margin-top:.2rem">Already granted on another campaign — nothing to do on the platform, just approve.</div>`:''}</td>
-          <td class="muted">${esc(r.campaign_name||'—')}</td>
-          <td class="muted">${when(r.requested_at)}</td>
-          <td>${trackingToggle(r)}</td>
-          <td><span class="badge needs_reauth">waiting</span></td>
-          <td class="actions">
-            <button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>
-            <button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>
-          </td>
-        </tr>`).join(''):'<tr><td colspan="8" class="empty">Nothing waiting — you\'re all caught up.</td></tr>';
-
-        document.getElementById('testers-body').innerHTML=done.length?done.map(r=>`<tr>
-          <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
-          <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
-          <td class="muted">${esc(acctDisplay(r))}</td>
-          <td class="muted">${esc(r.campaign_name||'—')}</td>
-          <td>${r.status==='confirmed'?trackingToggle(r):'<span class="muted">—</span>'}</td>
-          <td><span class="badge ${TESTER_BADGE[r.status]||''}">${r.status==='confirmed'?'approved':esc(r.status)}</span>
-            ${r.is_connected>0?'<span class="badge connected" style="margin-left:.3rem">connected</span>':''}
-            ${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
-          <td class="actions">
-            ${r.status==='rejected'?`<button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>`:''}
-            ${r.status==='confirmed'&&!r.is_connected?`<button class="btn btn-ghost btn-sm" onclick="rejectTester(${r.id})">Revoke</button>`:''}
-            ${r.status==='confirmed'&&r.is_connected?'<span class="muted" style="font-size:.72rem">—</span>':''}
-          </td>
-        </tr>`).join(''):'<tr><td colspan="7" class="empty">Nothing handled yet.</td></tr>';
+        TESTERS_CACHE=requests;
+        setAuthCount(requests.filter(r=>authState(r)==='pending').length);
+        renderTesters(requests);
       }catch(e){ toast(e.message,true); }
     }
 

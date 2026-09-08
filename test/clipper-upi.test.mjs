@@ -79,7 +79,7 @@ test('normaliseUpiId trims and strips internal whitespace', () => {
 
 const fullProfile = (overrides = {}) => ({
   email: 'ravi@example.com', contactNumber: '9876543210',
-  upiId: '9999999999@upi', accountName: 'Ravi Kumar', ...overrides
+  upiId: '9999999999@upi', accountName: 'Ravi Kumar', discordId: '305421934793015296', ...overrides
 });
 
 test('a clipper with no profile details on file sees null fields, not missing ones', async () => {
@@ -129,15 +129,18 @@ test('legal name is optional and omitting it leaves an existing value untouched'
 });
 
 /* ── Discord (migration 035): a fallback contact channel for when
-   WhatsApp isn't on file or doesn't get an answer. Optional, same
-   "omitting it keeps the old value" treatment as legal name above. */
+   WhatsApp isn't on file or doesn't get an answer. Mandatory on the
+   clipper's own self-service save (every clipper needs one on file, not
+   just whoever happened to fill it in) -- but validateDiscordId ITSELF
+   still treats empty as valid, because admin.js's edit endpoint relies on
+   that to let the admin clear/leave it blank on a clipper's behalf. */
 
-test('discord id is optional -- a full save with no discordId at all still succeeds', async () => {
+test('discord id is now required -- a full save with no discordId at all is rejected', async () => {
   const env = seedEnv();
-  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile() });
-  assert.equal(res.status, 200);
+  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordId: '' }) });
+  assert.equal(res.status, 400);
   const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, null);
+  assert.equal(row.discord_id, null, 'the whole save is rejected -- nothing else silently went through either');
 });
 
 test('a clipper can save a real Discord user id alongside the rest of their profile', async () => {
@@ -160,13 +163,18 @@ test('a Discord USERNAME (not the numeric id) is rejected -- only the id can bui
   assert.equal(res.status, 400);
 });
 
-test('discord id is optional and omitting it leaves an existing value untouched', async () => {
+test('unlike legal name, discord id must be resent on every save -- it is never silently carried forward', async () => {
   const env = seedEnv();
   await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordId: '305421934793015296' }) });
-  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ contactNumber: '9123456780' }) });
+  // Re-saving without it (e.g. only fixing a phone number) must fail, not
+  // quietly keep the old Discord id the way legal_name's CASE WHEN does.
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ discordId: '', contactNumber: '9123456780' })
+  });
+  assert.equal(res.status, 400);
   const row = await env.DB.prepare('SELECT discord_id, contact_number FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, '305421934793015296', 'not cleared just because this save omitted it');
-  assert.equal(row.contact_number, '9123456780');
+  assert.equal(row.discord_id, '305421934793015296', 'unchanged -- the rejected save touched nothing');
+  assert.equal(row.contact_number, '9876543210', 'unchanged too -- rejected as one atomic save, not partially applied');
 });
 
 test('an invalid UPI id is rejected before anything reaches the database', async () => {

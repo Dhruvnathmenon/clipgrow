@@ -638,8 +638,19 @@ export async function handleAdmin(request, env, url) {
   // then marks the clipper 'deleted'. That single status flip is what moves
   // them out of the main roster into the admin's separate "Deleted" section
   // -- see the GET handler above and admin.html's loadDeletedClippers.
+  //
+  // The username is also freed at the same time: `username` is UNIQUE, and
+  // a deleted row otherwise holds that exact string forever, blocking a
+  // brand-new clipper from ever registering under it -- exactly the
+  // "let me use that username for a different guy" problem. Suffixing with
+  // the row's own id can never collide, and a deleted row can never log in
+  // regardless of what its username is (clipper.js's login route rejects
+  // status='deleted' outright), so this is purely about freeing the string,
+  // never about security. NOT undone by Restore -- restoring brings the
+  // clipper back under the suffixed name; edit it back explicitly if the
+  // original is still free.
   if (params && method === 'DELETE') {
-    const clipper = await env.DB.prepare('SELECT id, status FROM clippers WHERE id = ?').bind(params.id).first();
+    const clipper = await env.DB.prepare('SELECT id, status, username FROM clippers WHERE id = ?').bind(params.id).first();
     if (!clipper) return err('Not found', 404);
     if (clipper.status === 'deleted') return json({ ok: true, already: true });
 
@@ -656,8 +667,9 @@ export async function handleAdmin(request, env, url) {
     for (const cid of touchedCampaigns) await reallocateCampaign(env.DB, cid);
 
     await env.DB.prepare(
-      "UPDATE clippers SET status = 'deleted' WHERE id = ?").bind(params.id).run();
-    return json({ ok: true });
+      "UPDATE clippers SET status = 'deleted', username = username || '_deleted' || id WHERE id = ?"
+    ).bind(params.id).run();
+    return json({ ok: true, freed_username: clipper.username });
   }
 
   // ------------------------------------------------------------- campaigns
@@ -1002,7 +1014,13 @@ export async function handleAdmin(request, env, url) {
                 JOIN participations pp ON pp.id = pa.participation_id
                 JOIN social_accounts sa ON sa.id = pa.account_id
                 WHERE pp.clipper_id = t.clipper_id AND pp.campaign_id = t.campaign_id
-                  AND pa.platform = t.platform AND sa.status != 'revoked') AS is_connected
+                  AND pa.platform = t.platform AND sa.status != 'revoked') AS is_connected,
+              -- So the admin panel can tell an approved-and-since-kicked
+              -- request apart from one that's still genuinely active --
+              -- an access request's own status never changes on kick, so
+              -- without this every kicked clipper still reads as "approved".
+              (SELECT p.status FROM participations p
+                WHERE p.clipper_id = t.clipper_id AND p.campaign_id = t.campaign_id) AS participation_status
        FROM tester_requests t
        JOIN clippers cl ON cl.id = t.clipper_id
        LEFT JOIN campaigns c ON c.id = t.campaign_id
