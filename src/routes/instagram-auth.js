@@ -159,15 +159,15 @@ export async function handleInstagramAuth(request, env, url) {
         accountId = existing.id;
         await env.DB.prepare(
           `UPDATE social_accounts SET username = ?, account_type = ?, access_token = ?, token_expires_at = ?,
-           status = 'connected', last_error_code = NULL, last_error_at = NULL, last_checked_at = ? WHERE id = ?`
-        ).bind(profile.username, profile.account_type, longLived.access_token, expiresAt, now(), accountId).run();
+           status = 'connected', last_error_code = NULL, last_error_at = NULL WHERE id = ?`
+        ).bind(profile.username, profile.account_type, longLived.access_token, expiresAt, accountId).run();
       } else {
         const res = await env.DB.prepare(
           `INSERT INTO social_accounts (clipper_id, platform, external_id, username, account_type, access_token,
-             token_expires_at, status, connected_at, last_checked_at)
-           VALUES (?, 'instagram', ?, ?, ?, ?, ?, 'connected', ?, ?)`
+             token_expires_at, status, connected_at)
+           VALUES (?, 'instagram', ?, ?, ?, ?, ?, 'connected', ?)`
         ).bind(session.sub, profile.id, profile.username, profile.account_type,
-               longLived.access_token, expiresAt, now(), now()).run();
+               longLived.access_token, expiresAt, now()).run();
         accountId = res.meta.last_row_id;
       }
 

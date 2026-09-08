@@ -4,10 +4,11 @@ import {
   now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
-  unlinkParticipationAccount, SPEND_EXPR, spendExpr, maxPayoutPerVideo,
-  normaliseUpiId, validateUpiId
+  unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
+  normaliseUpiId, validateUpiId,
+  normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail
 } from '../db.js';
-import { clipState, clipStateMessage } from '../clipstate.js';
+import { clipState, clipStateMessage, TRACKING_WINDOW_MS } from '../clipstate.js';
 import { explainEarning, explainEarningText } from '../earning-math.js';
 import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
 import {
@@ -94,28 +95,49 @@ export async function handleClipper(request, env, url) {
         display_name: me.display_name || me.username,
         status: me.status, read_only: readOnly,
         // Never shared with a moderator or client session -- see the
-        // migration 028 comment for why this is admin+clipper only.
+        // migration 028/030 comments for why these are admin+clipper only.
         upi_id: me.upi_id || null,
-        upi_account_name: me.upi_account_name || null
+        upi_account_name: me.upi_account_name || null,
+        email: me.email || null,
+        contact_number: me.contact_number || null,
+        legal_name: me.legal_name || null
       },
       money, streak, totals
     });
   }
 
-  // Self-service payout details, so the admin can pay a clipper directly by
-  // UPI without contacting them for it on every run. Not gated by
-  // blockIfReadOnly, same reasoning as the password change right below --
-  // a disabled clipper can still be owed money from before they were
-  // disabled and must still be able to say how to pay it to them.
-  if (pathname === '/api/clipper/me/upi' && method === 'PATCH') {
-    const { upiId, accountName } = await readJson(request);
-    const invalid = validateUpiId(upiId);
-    if (invalid) return err(invalid);
+  // Self-service contact + payout profile: one consolidated save covering
+  // everything the dashboard's "Fill in your details" prompt asks for --
+  // email, contact number and UPI details are all required together here
+  // (that's the whole point of the prompt), legal name is an optional extra
+  // folded into the same save rather than nagged about separately. This
+  // replaces the old UPI-only /api/clipper/me/upi endpoint -- one write
+  // path instead of two doing overlapping things.
+  //
+  // Not gated by blockIfReadOnly, same reasoning as the password change
+  // right below: a disabled clipper can still be owed money from before
+  // they were disabled and must still be reachable and payable.
+  if (pathname === '/api/clipper/me/profile' && method === 'PATCH') {
+    const { email, contactNumber, upiId, accountName, legalName } = await readJson(request);
+    const emailInvalid = validateEmail(email);
+    if (emailInvalid) return err(emailInvalid);
+    const contactInvalid = validateContactNumber(contactNumber);
+    if (contactInvalid) return err(contactInvalid);
+    const upiInvalid = validateUpiId(upiId);
+    if (upiInvalid) return err(upiInvalid);
     const name = String(accountName || '').trim();
     if (!name) return err('Enter the name on the UPI account');
     if (name.length > 100) return err('That name is too long');
-    await env.DB.prepare('UPDATE clippers SET upi_id = ?, upi_account_name = ? WHERE id = ?')
-      .bind(normaliseUpiId(upiId), name, clipperId).run();
+    const legal = String(legalName || '').trim();
+    if (legal.length > 100) return err('That name is too long');
+    await env.DB.prepare(
+      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?,
+         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
+       WHERE id = ?`
+    ).bind(
+      normaliseEmail(email), normaliseContactNumber(contactNumber), normaliseUpiId(upiId), name,
+      legal, legal, clipperId
+    ).run();
     return json({ ok: true });
   }
 
@@ -183,8 +205,17 @@ export async function handleClipper(request, env, url) {
 
   // ------------------------------------------------------------ campaigns
   if (pathname === '/api/clipper/campaigns' && method === 'GET') {
+    // A completed campaign stays hidden from anyone who never joined it (not
+    // offered as something to browse/join), but stays visible to a clipper
+    // who DID join -- otherwise it would vanish the instant it completed,
+    // taking the "campaign ended" recap card down with it before they ever
+    // saw it.
     const { results: campaigns } = await env.DB
-      .prepare("SELECT * FROM campaigns WHERE status != 'completed' ORDER BY created_at DESC").all();
+      .prepare(`SELECT * FROM campaigns
+                 WHERE status != 'completed'
+                    OR id IN (SELECT campaign_id FROM participations WHERE clipper_id = ?)
+                ORDER BY created_at DESC`)
+      .bind(clipperId).all();
     const { results: parts } = await env.DB
       .prepare('SELECT * FROM participations WHERE clipper_id = ?').bind(clipperId).all();
     const byCampaign = new Map((parts || []).map(p => [p.campaign_id, p]));
@@ -243,10 +274,13 @@ export async function handleClipper(request, env, url) {
         }
       }
 
+      // clipper-facing "my earnings" -- SPEND_CLIPPER_EXPR, never SPEND_EXPR.
+      // This is the clipper's own money, never the billable/delivered figure
+      // (src/db.js has the full reasoning on the two expressions).
       const stats = await env.DB.prepare(
         `SELECT COUNT(CASE WHEN status = 'active' THEN 1 END) AS videos,
                 COALESCE(SUM(CASE WHEN status = 'active' THEN views ELSE 0 END),0) AS views,
-                ${SPEND_EXPR} AS earned
+                ${SPEND_CLIPPER_EXPR} AS earned
          FROM submissions WHERE clipper_id = ? AND campaign_id = ?`
       ).bind(clipperId, c.id).first();
 
@@ -254,7 +288,7 @@ export async function handleClipper(request, env, url) {
         `SELECT platform,
                 COUNT(CASE WHEN status = 'active' THEN 1 END) AS videos,
                 COALESCE(SUM(CASE WHEN status = 'active' THEN views ELSE 0 END),0) AS views,
-                ${SPEND_EXPR} AS earned
+                ${SPEND_CLIPPER_EXPR} AS earned
          FROM submissions WHERE clipper_id = ? AND campaign_id = ?
          GROUP BY platform`
       ).bind(clipperId, c.id).all();
@@ -385,10 +419,19 @@ export async function handleClipper(request, env, url) {
     const account = await getParticipationAccount(env.DB, part.id, 'instagram');
     if (!account) return json({ applicable: false });
 
+    // A completed campaign never refreshes again, regardless of any clip's
+    // own tracking window -- nothing here would ever actually be spent.
+    const campaign = await getCampaignById(env.DB, params.id);
+    if (campaign && campaign.status === 'completed') return json({ applicable: false });
+
+    // Excludes clips past their 7-day tracking window (clipstate.js's
+    // TRACKING_WINDOW_MS) -- those are never refreshed again, so counting
+    // them here would overstate what a "full refresh" actually costs.
     const { results: subs } = await env.DB.prepare(
       `SELECT id, last_ok_sync_at FROM submissions
-       WHERE clipper_id = ? AND campaign_id = ? AND account_id = ? AND status = 'active' AND locked_at IS NULL`
-    ).bind(clipperId, params.id, account.id).all();
+       WHERE clipper_id = ? AND campaign_id = ? AND account_id = ? AND status = 'active' AND locked_at IS NULL
+         AND created_at > ?`
+    ).bind(clipperId, params.id, account.id, Date.now() - TRACKING_WINDOW_MS).all();
 
     const totalClips = (subs || []).length;
     const eligibleNow = (subs || []).filter(
@@ -431,6 +474,13 @@ export async function handleClipper(request, env, url) {
     if (!sub || sub.clipper_id !== clipperId) return err('Not found', 404);
     if (sub.locked_at) return err('This clip is locked and settled -- it no longer needs refreshing.');
     if (sub.status !== 'active') return err('This clip is not currently active.');
+    if (Date.now() - (sub.created_at || 0) > TRACKING_WINDOW_MS) {
+      return err('This clip\'s 7-day tracking window has closed -- its view count is now final and no longer needs refreshing.');
+    }
+    const campaign = await getCampaignById(env.DB, sub.campaign_id);
+    if (campaign && campaign.status === 'completed') {
+      return err('This campaign has ended -- its clips are no longer being refreshed.');
+    }
 
     const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
     if (!account) return err('No connected account for this clip.', 404);
@@ -462,9 +512,9 @@ export async function handleClipper(request, env, url) {
 
   if (pathname === '/api/clipper/submissions' && method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
+      `SELECT s.id, s.permalink, s.views, s.earning, s.clipper_earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
               s.last_ok_sync_at, s.locked_at, s.locked_earning, s.lock_reason,
-              s.thumbnail_key, s.thumbnail_url, s.media_product_type, s.posted_at, s.source,
+              s.thumbnail_key, s.thumbnail_url, s.posted_at, s.source,
               s.platform, s.duration_seconds, s.is_short, s.eligible,
               c.name AS campaign_name, c.id AS campaign_id, c.cpm, c.min_views, c.blueprint_json,
               a.username AS account_username,
@@ -496,9 +546,14 @@ export async function handleClipper(request, env, url) {
           is_short: s.is_short == null ? null : !!s.is_short,
           eligible: s.eligible !== 0,
           views: s.views,
-          // A locked clip shows the amount that was actually settled, which is
-          // frozen and will not move again however many views it gains.
-          earning: s.locked_at ? (s.locked_earning || 0) : s.earning,
+          // The real amount a clipper is paid -- a locked clip shows what was
+          // actually settled (frozen, will not move again); a live clip shows
+          // clipper_earning, the CPM-multiple floor of the billable amount,
+          // never the billable amount itself (src/earnings.js's
+          // allocateCampaignEarnings). billed_earning carries that billable
+          // figure explicitly, as visible context, not a silent gap.
+          earning: s.locked_at ? (s.locked_earning || 0) : (s.clipper_earning || 0),
+          billed_earning: s.locked_at ? null : s.earning,
           cpm: s.cpm,
           min_views: s.min_views || 0,
           views_needed: Math.max(0, (s.min_views || 0) - s.views),
@@ -624,12 +679,12 @@ export async function handleClipper(request, env, url) {
 
     const res = await env.DB.prepare(
       `INSERT INTO submissions (clipper_id, campaign_id, account_id, platform, ig_media_id, permalink, views, earning,
-         status, created_at, thumbnail_key, thumbnail_url, media_product_type, posted_at,
+         status, created_at, thumbnail_key, thumbnail_url, posted_at,
          duration_seconds, is_short, eligible)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       clipperId, campaign_id, account.id, platform, media.external_id, media.permalink, now(),
-      thumbKey, thumbSource, media.media_type || null,
+      thumbKey, thumbSource,
       media.posted_at || null,
       media.duration_seconds == null ? null : media.duration_seconds,
       media.is_short == null ? null : (media.is_short ? 1 : 0),

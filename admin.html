@@ -38,6 +38,13 @@
     .stat-val { font-size:1.3rem; font-weight:900; font-family:'Space Grotesk',sans-serif; color:var(--neon); line-height:1.1; }
     .stat-val.w { color:var(--white); } .stat-val.g { color:var(--gold); } .stat-val.r { color:var(--red); }
     .stat-lbl { font-size:.62rem; color:var(--muted); text-transform:uppercase; margin-top:.3rem; letter-spacing:.5px; }
+    /* The one number bigger than everything else on the page -- whole-history
+       views across every clip, sitting above the regular stat tiles rather
+       than competing with them in the same grid. */
+    .hero-stat { background:var(--card); border:1px solid var(--border); border-radius:10px;
+      padding:1.3rem 1.05rem; text-align:center; margin-bottom:.9rem; }
+    .hero-stat .stat-val { font-size:2.6rem; color:var(--neon); }
+    .hero-stat .stat-lbl { font-size:.7rem; margin-top:.4rem; }
     .stat-today { font-size:.68rem; color:var(--muted-l); margin-top:.15rem; }
 
     .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.4rem; overflow-x:auto; }
@@ -167,9 +174,13 @@
     #auth-overlay { position:fixed; inset:0; background:rgba(8,13,8,.96); display:flex; align-items:center; justify-content:center; z-index:9999; }
     .auth-box { background:var(--card); border:1px solid var(--border); padding:2.8rem; border-radius:12px; text-align:center; width:100%; max-width:390px; }
 
-    #modal-back, #edit-modal-back { position:fixed; inset:0; background:rgba(4,8,4,.85); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9000; padding:2rem 1rem; overflow-y:auto; }
-    #modal-back.open, #edit-modal-back.open { display:flex; }
+    #modal-back, #edit-modal-back, #clipper-detail-back { position:fixed; inset:0; background:rgba(4,8,4,.85); backdrop-filter:blur(6px); display:none; align-items:flex-start; justify-content:center; z-index:9000; padding:2rem 1rem; overflow-y:auto; }
+    #modal-back.open, #edit-modal-back.open, #clipper-detail-back.open { display:flex; }
     .modal { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:800px; box-shadow:0 20px 70px rgba(0,0,0,.7); }
+    /* Wide enough for a real "everything about this clipper" view on desktop
+       (near-fullscreen) while still capped and centered on anything smaller;
+       min() means it never needs its own mobile override. */
+    .modal-wide { max-width:min(1400px,95vw); }
     .modal-head { padding:1.3rem 1.6rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:1rem; position:sticky; top:0; background:var(--card); border-radius:14px 14px 0 0; z-index:2; }
     .modal-body { padding:1.4rem 1.6rem; }
     .modal-foot { padding:1.1rem 1.6rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.7rem; position:sticky; bottom:0; background:var(--card); border-radius:0 0 14px 14px; }
@@ -210,6 +221,7 @@
       </div>
     </header>
 
+    <div id="hero-views"></div>
     <div class="stats" id="overview"></div>
     <div id="health"></div>
 
@@ -243,7 +255,7 @@
       <div class="panel">
         <h2 class="panel-title">All Campaigns</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Name</th><th>Model</th><th>CPM</th><th>Budget</th><th>Spent</th><th>Clippers</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Model</th><th>CPM</th><th>Budget</th><th>Spent</th><th>Joined</th><th>Active</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="campaigns-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
@@ -420,6 +432,12 @@
     <!-- FINANCE -->
     <div class="view" id="v-finance">
       <div id="fin-alerts"></div>
+
+      <div class="panel">
+        <h2 class="panel-title">View Margin</h2>
+        <p class="note" style="margin-bottom:1rem">The gap between what a clip is billed and the complete-CPM-block amount actually paid to the clipper, realized the moment each settlement runs. Not agency profit — held in the same wallet clipper payouts draw from, for clipper bonuses or campaign promotion spend.</p>
+        <div class="stats" id="fin-margin-stat"></div>
+      </div>
 
       <div class="panel">
         <h2 class="panel-title">Per Campaign</h2>
@@ -657,12 +675,36 @@
         <div id="edit-upi-flds">
           <div class="fld"><label>UPI ID</label><input class="form-control" id="edit-upi-id" placeholder="yourname@bank" /></div>
           <div class="fld"><label>Name on UPI account</label><input class="form-control" id="edit-upi-name" /></div>
-          <p class="note" style="margin-top:-.5rem">Only you and this clipper ever see this — never a moderator, never a client. The clipper can also set it themselves from their dashboard.</p>
+          <div class="fld"><label>Legal Full Name</label><input class="form-control" id="edit-legal-name" placeholder="As it appears on their ID" /></div>
+          <div class="fld"><label>Contact Number</label><input class="form-control" id="edit-contact" placeholder="9876543210" /></div>
+          <div class="fld"><label>Email</label><input class="form-control" id="edit-email" type="email" placeholder="name@example.com" /></div>
+          <p class="note" style="margin-top:-.5rem">Only you and this clipper ever see any of this — never a moderator, never a client. The clipper can also set it themselves from their dashboard.</p>
         </div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
         <button class="btn" onclick="saveEditModal()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clipper detail: everything about one clipper (money, accounts, campaigns,
+       videos, payments, notes) in one wide panel instead of the old cramped
+       inline row -- opening one clipper's detail is exclusive by construction
+       (there's only one of these), and it no longer shares its open/close
+       state with a campaign's own expand row. -->
+  <div id="clipper-detail-back">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div>
+          <h3 id="cd-title">Clipper</h3>
+          <div class="muted" id="cd-subtitle" style="font-size:.8rem;margin-top:.2rem"></div>
+        </div>
+        <button class="close-x" onclick="closeClipperDetail()">&times;</button>
+      </div>
+      <div class="modal-body" id="cd-body">Loading…</div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" onclick="closeClipperDetail()">Close</button>
       </div>
     </div>
   </div>
@@ -679,6 +721,41 @@
     const num=n=>Number(n||0).toLocaleString('en-IN');
     const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+
+    // Must match src/clipstate.js's TERMINAL_SYNC_ERRORS exactly -- these two
+    // pages have no shared module system, so this list is duplicated here on
+    // purpose rather than fetched, same as every other enum this page already
+    // hardcodes (CAMPAIGN_STATUSES-shaped lists, etc.).
+    const TERMINAL_SYNC_ERRORS=['MEDIA_NOT_FOUND','PRE_CONVERSION_MEDIA'];
+    const TERMINAL_SYNC_LABEL={MEDIA_NOT_FOUND:"won't sync — deleted",PRE_CONVERSION_MEDIA:"won't sync — pre-2021 account"};
+    // A permanent, explained state reads as calm information, not an open
+    // problem -- MEDIA_NOT_FOUND/PRE_CONVERSION_MEDIA never need a "Skip"
+    // action since there's nothing to decide. Anything else the admin has
+    // personally acknowledged (sync_error_acknowledged_as, migration 029)
+    // reads the same way until sync_error actually changes.
+    function syncErrorBadge(s){
+      if(!s.sync_error) return '<span class="badge active">ok</span>';
+      if(TERMINAL_SYNC_ERRORS.includes(s.sync_error)) return `<span class="badge skip" title="${esc(s.sync_error)} — permanent, nothing to do">${TERMINAL_SYNC_LABEL[s.sync_error]}</span>`;
+      if(s.sync_error_acknowledged_as===s.sync_error) return `<span class="badge skip" title="Skipped — comes back on its own if this changes">skipped</span>`;
+      return `<span class="badge needs_reauth">${esc(s.sync_error)}</span>`;
+    }
+    // "Skip this video" for a sync issue that isn't one of the terminal codes
+    // above but that the admin has personally decided isn't worth chasing
+    // (e.g. it keeps happening for a reason already understood). Reversible,
+    // and only shown once there's actually a decision to make.
+    function syncErrorAction(s){
+      if(!s.sync_error||TERMINAL_SYNC_ERRORS.includes(s.sync_error)) return '';
+      return s.sync_error_acknowledged_as===s.sync_error
+        ?`<button class="btn btn-ghost btn-sm" onclick="acknowledgeSyncError(${s.id},false)">Unflag</button>`
+        :`<button class="btn btn-ghost btn-sm" onclick="acknowledgeSyncError(${s.id},true)">Skip this video</button>`;
+    }
+    window.acknowledgeSyncError=async function(id,ack){
+      try{
+        await api('/api/admin/submissions/'+id+'/acknowledge-sync-error',{method:'PATCH',body:JSON.stringify({acknowledge:ack})});
+        toast(ack?'Skipped — stays quiet until this changes':'Unflagged');
+        loadAll();
+      }catch(e){ toast(e.message,true); }
+    };
 
     function toast(msg,isErr){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(isErr?' err':'');t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',4500);}
 
@@ -1336,8 +1413,11 @@
 
     async function loadOverview(){
       const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],stalled_jobs:stalledJobs=[]}=await api('/api/admin/overview');
+      document.getElementById('hero-views').innerHTML=
+        `<div class="hero-stat"><div class="stat-val">${num(o.total_views)}</div><div class="stat-lbl">Total Views Generated</div></div>`;
       document.getElementById('overview').innerHTML=`
-        <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div></div>
+        <div class="stat"><div class="stat-val w">${num(o.joined_clippers)}</div><div class="stat-lbl">Joined Clippers</div></div>
+        <div class="stat"><div class="stat-val w">${num(o.active_clippers)}</div><div class="stat-lbl">Active Clippers</div><div class="note" style="margin-top:.2rem">Posted in the last 7 days</div></div>
         <div class="stat"><div class="stat-val w">${num(o.active_campaigns)}</div><div class="stat-lbl">Active Campaigns</div></div>
         <div class="stat"><div class="stat-val">${money(o.total_earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
         <div class="stat"><div class="stat-val w">${money(o.total_paid)}</div><div class="stat-lbl">Total Paid</div></div>
@@ -1473,7 +1553,7 @@
       const {campaigns}=await api('/api/admin/campaigns');
       CAMPAIGNS=campaigns;
       const tb=document.getElementById('campaigns-body');
-      if(!campaigns.length){ tb.innerHTML='<tr><td colspan="8" class="empty">No campaigns yet — upload a blueprint above.</td></tr>'; return; }
+      if(!campaigns.length){ tb.innerHTML='<tr><td colspan="9" class="empty">No campaigns yet — upload a blueprint above.</td></tr>'; return; }
       tb.innerHTML=campaigns.map(c=>{
         const pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
         return `<tr class="row-click" onclick="toggleCampaign(${c.id})">
@@ -1482,16 +1562,21 @@
           <td>${money(c.cpm)}</td><td>${money(c.budget)}</td>
           <td><div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-lbl">${money(c.spent)}</div></td>
           <td>${num(c.participants)}</td>
+          <td>${num(c.active_participants)}</td>
           <td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="editCampaign(${c.id})">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="topUpCampaign(${c.id},'${esc(c.name).replace(/'/g,'')}')">Top Up Budget</button>
             ${c.status!=='completed'
               ? `<button class="btn btn-warn btn-sm" onclick="setCampaignStatus(${c.id},'completed')">Mark Over</button>`
               : `<button class="btn btn-ghost btn-sm" onclick="setCampaignStatus(${c.id},'active')">Reopen</button>`}
+            ${c.status==='completed'&&!c.recap_hidden_at
+              ? `<button class="btn btn-ghost btn-sm" onclick="hideRecap(${c.id})">Hide Recap</button>`
+              : ''}
             <button class="btn btn-danger btn-sm" onclick="deleteCampaign(${c.id})">Delete</button>
           </div></td>
         </tr>
-        <tr class="expand" id="cx-${c.id}"><td colspan="8"><div id="cxb-${c.id}">Loading…</div></td></tr>`;
+        <tr class="expand" id="cx-${c.id}"><td colspan="9"><div id="cxb-${c.id}">Loading…</div></td></tr>`;
       }).join('');
       fillPaymentSelects();
     }
@@ -1538,8 +1623,7 @@
                     :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
                     :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
                     :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
-                    :s.sync_error?`<span class="badge needs_reauth">${esc(s.sync_error)}</span>`
-                    :'<span class="badge active">ok</span>'}</td>
+                    :syncErrorBadge(s)}</td>
               <td><div class="actions">
                 ${s.lock_reason==='paid'
                   /* Settled and tied to a payment: the API refuses every one of
@@ -1556,6 +1640,7 @@
                        ${s.status!=='disqualified'
                          ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
                          :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
+                       ${syncErrorAction(s)}
                        <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`}
               </div></td></tr>`).join('')}</tbody></table></div>`
             :'<p class="muted">No videos submitted yet.</p>'}`;
@@ -1588,6 +1673,29 @@
     };
     window.setCampaignStatus=async function(id,status){
       try{ await api('/api/admin/campaigns/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Campaign updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    // Enter the amount to add to the campaign's clipper-payable budget --
+    // the same kind of round number the campaign's initial budget already
+    // is. The 20% fee is an EXTRA charge on top of that, not carved out of
+    // it: budget increases by exactly what's entered, and the client's
+    // real total payment is that plus the fee (src/finance.js's
+    // topUpCampaignBudget).
+    window.topUpCampaign=async function(id,name){
+      const amountStr=prompt(`Top up "${name}" — amount to ADD to the campaign budget (a 20% fee is charged on top of this, not out of it):`);
+      if(amountStr==null) return;
+      const amount=Number(amountStr);
+      if(!Number.isFinite(amount)||amount<=0){ toast('Enter a positive amount',true); return; }
+      const method=prompt('Payment method (optional):','')||undefined;
+      const reference=prompt('Reference / transaction id (optional):','')||undefined;
+      try{
+        const r=await api('/api/admin/campaigns/'+id+'/top-up',{method:'POST',body:JSON.stringify({amount,method,reference})});
+        toast(`Budget +${money(r.budget_increase)} · fee +${money(r.fee)} · client owes ${money(r.total)}`);
+        loadAll();
+      }catch(e){ toast(e.message,true); }
+    };
+    window.hideRecap=async function(id){
+      try{ await api('/api/admin/campaigns/'+id+'/hide-recap',{method:'POST'}); toast('Recap hidden'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
     window.deleteCampaign=async function(id){
@@ -1627,12 +1735,11 @@
           <td><span class="badge ${c.status}">${c.status}</span>${c.upi_id?'':' <span class="badge needs_reauth" title="No UPI ID on file yet -- cannot be paid directly until they add one">no UPI</span>'}</td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
-            <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id},'${esc(c.username).replace(/'/g,"\\'")}','${esc(c.display_name).replace(/'/g,"\\'")}','${esc(c.upi_id||'').replace(/'/g,"\\'")}','${esc(c.upi_account_name||'').replace(/'/g,"\\'")}')">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id})">Edit</button>
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
           </div></td>
-        </tr>
-        <tr class="expand" id="ux-${c.id}"><td colspan="8"><div id="uxb-${c.id}">Loading…</div></td></tr>`).join('');
+        </tr>`).join('');
       fillPaymentSelects();
     }
 
@@ -1720,16 +1827,31 @@
     /* ── Edit Login modal: shared by clippers and moderators. One place to
        force-reset a password, or change a username/display name. ── */
     let EDIT_TARGET=null;
-    window.openEditModal=function(type,id,username,display_name,upi_id,upi_account_name){
+    // Clipper edits look themselves up from CLIPPERS by id (same pattern
+    // toggleClipper uses) rather than threading every field through the
+    // onclick string -- that string was already growing a manually-escaped
+    // positional argument per field (upi_id, upi_account_name, ...), which
+    // is exactly the kind of thing that silently breaks on a stray quote.
+    // Moderators have no such growing field list, so that path is untouched.
+    window.openEditModal=function(type,id,username,display_name){
       EDIT_TARGET={type,id};
       document.getElementById('edit-modal-title').textContent=type==='clipper'?'Edit Clipper Login':'Edit Moderator Login';
-      document.getElementById('edit-username').value=username;
-      document.getElementById('edit-display').value=display_name;
       document.getElementById('edit-password').value='';
-      // Moderators are never paid through the site -- no UPI fields for them.
+      // Moderators are never paid through the site -- no UPI/contact fields for them.
       document.getElementById('edit-upi-flds').style.display=type==='clipper'?'':'none';
-      document.getElementById('edit-upi-id').value=upi_id||'';
-      document.getElementById('edit-upi-name').value=upi_account_name||'';
+      if(type==='clipper'){
+        const c=CLIPPERS.find(x=>x.id===id)||{};
+        document.getElementById('edit-username').value=c.username||'';
+        document.getElementById('edit-display').value=c.display_name||'';
+        document.getElementById('edit-upi-id').value=c.upi_id||'';
+        document.getElementById('edit-upi-name').value=c.upi_account_name||'';
+        document.getElementById('edit-legal-name').value=c.legal_name||'';
+        document.getElementById('edit-contact').value=c.contact_number||'';
+        document.getElementById('edit-email').value=c.email||'';
+      }else{
+        document.getElementById('edit-username').value=username;
+        document.getElementById('edit-display').value=display_name;
+      }
       document.getElementById('edit-modal-back').classList.add('open');
     };
     window.closeEditModal=function(){ document.getElementById('edit-modal-back').classList.remove('open'); };
@@ -1744,8 +1866,14 @@
       if(type==='clipper'){
         const upiId=document.getElementById('edit-upi-id').value.trim();
         const upiName=document.getElementById('edit-upi-name').value.trim();
+        const legalName=document.getElementById('edit-legal-name').value.trim();
+        const contact=document.getElementById('edit-contact').value.trim();
+        const emailVal=document.getElementById('edit-email').value.trim();
         if(upiId) body.upi_id=upiId;
         if(upiName) body.upi_account_name=upiName;
+        if(legalName) body.legal_name=legalName;
+        if(contact) body.contact_number=contact;
+        if(emailVal) body.email=emailVal;
       }
       try{
         await api(`/api/admin/${type==='clipper'?'clippers':'moderators'}/${id}`,{method:'PATCH',body:JSON.stringify(body)});
@@ -1824,7 +1952,9 @@
     const AUDIT_ACTION_LABEL={
       clipper_created:'Created a clipper login', clipper_kicked:'Kicked from a campaign',
       participation_paused:'Paused a participation', account_removed:'Disconnected an account',
-      refresh_triggered:'Triggered a refresh', access_request_approved:'Approved an access request'
+      refresh_triggered:'Triggered a refresh', access_request_approved:'Approved an access request',
+      campaign_auto_completed:'Campaign auto-completed (budget exhausted)',
+      campaign_auto_reopened:'Campaign auto-reopened (budget topped up)'
     };
     function auditRow(e){
       return `<tr>
@@ -1856,16 +1986,46 @@
         ? `https://youtube.com/${encodeURIComponent(a.username||'').replace('%40','@')}`
         : `https://instagram.com/${encodeURIComponent(a.username||'')}`;
     }
+    // Everything about one clipper, in its own wide panel -- replaces the old
+    // cramped inline row. GET /api/admin/clippers/:id already fetched money,
+    // quality, and video-level sync status; the old panel fetched all of it
+    // and only ever rendered a fraction. This renders all of it.
     window.toggleClipper=async function(id){
-      const row=document.getElementById('ux-'+id);
-      const opening=!row.classList.contains('open');
-      document.querySelectorAll('.expand.open').forEach(e=>e.classList.remove('open'));
-      if(!opening) return;
-      row.classList.add('open');
-      const box=document.getElementById('uxb-'+id);
+      const c=CLIPPERS.find(x=>x.id===id);
+      document.getElementById('cd-title').textContent=c?(c.display_name+' · @'+c.username):('Clipper #'+id);
+      document.getElementById('cd-subtitle').textContent='';
+      const body=document.getElementById('cd-body');
+      body.innerHTML='Loading…';
+      document.getElementById('clipper-detail-back').classList.add('open');
       try{
         const d=await api('/api/admin/clippers/'+id);
-        box.innerHTML=`
+        document.getElementById('cd-subtitle').textContent=
+          `@${d.clipper.username} · joined ${when(d.clipper.created_at)} · ${d.clipper.status}${d.clipper.upi_id?'':' · no UPI on file'}`;
+        body.innerHTML=`
+          <div class="sub-h">Overview</div>
+          <div class="stats">
+            <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Earned</div></div>
+            <div class="stat"><div class="stat-val w">${money(d.money.settled)}</div><div class="stat-lbl">Settled</div></div>
+            <div class="stat"><div class="stat-val w">${money(d.money.pending)}</div><div class="stat-lbl">Pending</div></div>
+            <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Paid${d.money.bonuses?' *':''}</div></div>
+            <div class="stat"><div class="stat-val g">${money(d.money.owed)}</div><div class="stat-lbl">Left to Pay</div></div>
+            <div class="stat"><div class="stat-val">${d.quality.quality_pct==null?'—':d.quality.quality_pct+'%'}</div><div class="stat-lbl">Quality</div></div>
+          </div>
+          <p class="note" style="margin:-.6rem 0 1.1rem">
+            Quality: ${d.quality.tick} tick, ${d.quality.cross} cross, ${d.quality.skip} skip.
+            ${d.money.advanced?money(d.money.advanced)+' advanced and not yet recovered. ':''}
+            ${d.money.bonuses?'* includes '+money(d.money.bonuses)+' in bonuses, not deducted from Left to Pay.':''}
+          </p>
+
+          <div class="sub-h">Contact &amp; UPI</div>
+          <div class="stats" style="margin-bottom:1.1rem">
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.legal_name?esc(d.clipper.legal_name):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">Legal Name</div></div>
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.contact_number?esc(d.clipper.contact_number):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">Contact Number</div></div>
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.email?esc(d.clipper.email):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">Email</div></div>
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.upi_id?esc(d.clipper.upi_id):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">UPI ID</div></div>
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.upi_account_name?esc(d.clipper.upi_account_name):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">UPI Account Name</div></div>
+          </div>
+
           <div class="sub-h">Connected Accounts (${d.accounts.length})</div>
           ${d.accounts.length?`<div class="table-wrap"><table>
             <thead><tr><th>Handle</th><th>Campaign</th><th>Platform</th><th>Type</th><th>Status</th><th>Tracking</th><th>Connected</th><th>Expires</th><th></th></tr></thead>
@@ -1886,12 +2046,14 @@
             </tr>`).join('')}</tbody></table></div>
             <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
 
-          <div class="sub-h">Campaigns (${d.participations.length})</div>
+          <div class="sub-h">Campaigns &amp; Which Account Is Linked (${d.participations.length})</div>
           ${d.participations.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Campaign</th><th>Account</th><th>Status</th><th>Note</th><th></th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Linked Account(s)</th><th>Status</th><th>Note</th><th></th></tr></thead>
             <tbody>${d.participations.map(p=>`<tr>
               <td>${esc(p.campaign_name)}</td>
-              <td class="muted">${linkedAccounts(p,{dash:true})}</td>
+              <td class="muted">${p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
+                `<span class="acct-line">${a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—')} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`
+              ).join('<br>'):'<span class="muted">&mdash;</span>'}</td>
               <td><span class="badge ${p.status}">${p.status}</span></td>
               <td class="muted">${esc(p.status_note||'')}</td>
               <td><div class="actions">
@@ -1899,6 +2061,21 @@
                 ${p.status!=='active'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Activate</button>`:''}
                 ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`:''}
               </div></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Not in any campaign yet.</p>'}
+
+          <div class="sub-h">Videos (${d.submissions.length})</div>
+          ${d.submissions.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Campaign</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th></tr></thead>
+            <tbody>${d.submissions.map(s=>`<tr>
+              <td class="muted">${esc(s.campaign_name)}</td>
+              <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+              <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
+              <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
+                    :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
+                    :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+                    :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
+                    :syncErrorBadge(s)}</td>
+            </tr>`).join('')}</tbody></table></div>
+            <p class="note" style="margin-top:.6rem">Manage pause/disqualify/delete from the campaign's own Videos table — this list is for visibility across all of this clipper's campaigns at once.</p>`:'<p class="muted">No videos submitted yet.</p>'}
 
           <div class="sub-h">Payments (${d.payments.length}) — ${money(d.money.paid)} paid of ${money(d.money.earned)} earned</div>
           ${d.payments.length?`<div class="table-wrap"><table>
@@ -1912,8 +2089,9 @@
 
           <div class="sub-h">Staff Notes (${d.notes.length}) — private, never shown to the clipper</div>
           ${(d.notes||[]).map(n=>`<div style="font-size:.8rem;margin-bottom:.5rem"><span class="muted">${esc(n.author_name)} (${esc(n.author_type)}) · ${when(n.created_at)}</span><br>${esc(n.note)}</div>`).join('')||'<p class="muted">No notes yet — moderators can leave one from their own dashboard.</p>'}`;
-      }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
+      }catch(e){ body.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
     };
+    window.closeClipperDetail=function(){ document.getElementById('clipper-detail-back').classList.remove('open'); };
 
     window.setClipper=async function(id,status){
       try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Clipper updated'); loadAll(); }
@@ -2132,6 +2310,8 @@
         ]);
         if(!CLIENTS.length) CLIENTS=clients;
         FIN_CAMPAIGNS=campaigns; FIN_WALLETS=overview.wallets;
+        document.getElementById('fin-margin-stat').innerHTML=
+          `<div class="stat"><div class="stat-val w">${money(overview.totals.view_margin_captured)}</div><div class="stat-lbl">Captured, All-Time</div></div>`;
         renderFinAlerts(overview.funding_alerts);
         renderFinCampaigns(campaigns);
         renderFinAgencyFee(campaigns);

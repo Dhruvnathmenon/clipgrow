@@ -130,7 +130,7 @@
     /* Settled: closed history, so it reads as neutral rather than alarming. */
     .badge.locked { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
     .badge.removed, .badge.disconnected, .badge.unavailable { background:rgba(255,77,77,.12); color:var(--red); }
-    .badge.ineligible { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
+    .badge.ineligible, .badge.tracking_complete { background:rgba(255,255,255,.06); color:var(--muted-l); border:1px solid var(--border-s); }
     .badge.completed, .badge.kicked, .badge.revoked, .badge.disqualified { background:rgba(255,77,77,.12); color:var(--red); }
     .badge.joined, .badge.locked { background:transparent; border:1px solid var(--border-s); color:var(--muted); }
     .badge.tick { background:rgba(61,255,122,.12); color:var(--neon); }
@@ -382,7 +382,7 @@
           <span class="streak-l" id="wm-streak-l">day streak</span>
         </div>
       </div>
-      <button class="sb-out" onclick="openPayoutModal()">Payout Details</button>
+      <button class="sb-out" onclick="openPayoutModal()">Your Details</button>
       <button class="sb-out" onclick="openPasswordModal()">Change Password</button>
       <button class="sb-out" onclick="logout()">Log out</button>
     </div>
@@ -392,12 +392,12 @@
     <div class="mob-head">
       <a href="index.html" class="sb-logo" style="padding:0">Clip<span>Grow</span></a>
       <div style="display:flex;gap:.5rem">
-        <button class="btn btn-ghost btn-sm" onclick="openPayoutModal()">Payout</button>
+        <button class="btn btn-ghost btn-sm" onclick="openPayoutModal()">Details</button>
         <button class="btn btn-ghost btn-sm" onclick="openPasswordModal()">Password</button>
         <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
       </div>
     </div>
-    <div id="upi-banner"></div>
+    <div id="details-banner"></div>
 
     <div id="ro-banner"></div>
     <div id="global-alert"></div>
@@ -544,11 +544,14 @@
   <div id="pd-back" onclick="if(event.target.id==='pd-back')closePayoutModal()">
     <div class="pf">
       <div class="pf-inner">
-        <h3 style="margin-bottom:1rem">Payout Details</h3>
-        <p class="note" style="margin-bottom:1rem">How ClipGrow pays you. Only you and the ClipGrow admin ever see this — never another clipper, and it's editable any time.</p>
+        <h3 style="margin-bottom:1rem">Fill in Your Details</h3>
+        <p class="note" style="margin-bottom:1rem">How ClipGrow reaches and pays you. Only you and the ClipGrow admin ever see this — never another clipper, and it's editable any time.</p>
         <form id="pd-form">
+          <div class="form-group"><label for="pd-email">Email</label><input type="email" id="pd-email" required placeholder="name@example.com" /></div>
+          <div class="form-group"><label for="pd-contact">Contact Number</label><input type="tel" id="pd-contact" required placeholder="9876543210" /></div>
           <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" required placeholder="yourname@bank" /></div>
           <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" required placeholder="Exactly as it appears on the account" /></div>
+          <div class="form-group"><label for="pd-legal">Legal Full Name <span class="note" style="display:inline">(optional)</span></label><input type="text" id="pd-legal" placeholder="As it appears on your ID" /></div>
           <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
         </form>
       </div>
@@ -645,15 +648,22 @@
           'Contact the ClipGrow admin if you think this is a mistake.');
       }
 
-      // Required before a payout can be sent your way -- see Payout Details.
-      // Not a hard block on the rest of the dashboard: joining campaigns,
-      // connecting accounts and posting clips all still work without it, so
-      // adding this never costs a day of tracked earnings while it waits.
-      document.getElementById('upi-banner').innerHTML=d.clipper.upi_id?'':alertBox('warn',
-        'Add your UPI details to get paid',
-        'ClipGrow pays clippers directly by UPI now. Add your UPI ID and the name on the account so your next payout doesn’t need us to message you for it.',
+      // One consolidated nudge for everything ClipGrow needs to reach and pay
+      // you -- email, contact number and UPI ID -- instead of a separate
+      // banner per field. Not a hard block on the rest of the dashboard:
+      // joining campaigns, connecting accounts and posting clips all still
+      // work without it, so this never costs a day of tracked earnings while
+      // it waits. Names exactly what's missing so it never nags about
+      // something already filled in.
+      const missing=[];
+      if(!d.clipper.email) missing.push('email');
+      if(!d.clipper.contact_number) missing.push('contact number');
+      if(!d.clipper.upi_id) missing.push('UPI ID');
+      document.getElementById('details-banner').innerHTML=missing.length?alertBox('warn',
+        'Fill in your details',
+        `ClipGrow needs your ${missing.join(', ')} to reach you and pay you directly, without messaging you for it on every payout.`,
         null,
-        '<div style="margin-top:.6rem"><button class="btn btn-sm" onclick="openPayoutModal()">Add UPI details</button></div>');
+        '<div style="margin-top:.6rem"><button class="btn btn-sm" onclick="openPayoutModal()">Fill in your details</button></div>'):'';
 
       const s=d.streak||{current:0,best:0};
       document.getElementById('wm-streak').textContent=s.current;
@@ -662,7 +672,7 @@
         :(s.current===1?'day streak':'day streak')+(s.best>s.current?` · best ${s.best}`:'');
 
       document.getElementById('home-stats').innerHTML=`
-        <div class="stat"><div class="stat-val">${money(d.money.earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
+        <div class="stat"><div class="stat-val">${money(d.money.clipper_earned)}</div><div class="stat-lbl">Clipper Earnings</div></div>
         <div class="stat"><div class="stat-val w">${money(d.money.paid)}</div><div class="stat-lbl">Paid</div></div>
         <div class="stat"><div class="stat-val g">${money(d.money.owed)}</div><div class="stat-lbl">Left to Pay</div>${d.money.advanced?`<div class="note" style="font-size:.66rem">after ${money(d.money.advanced)} already advanced</div>`:''}</div>
         <div class="stat"><div class="stat-val w">${num(d.totals.views)}</div><div class="stat-lbl">Total Views</div></div>
@@ -690,6 +700,26 @@
 
     function campCard(c){
       const p=c.participation, pct=c.budget>0?Math.min(100,Math.round((c.spent/c.budget)*100)):0;
+      // A campaign this clipper joined that has since ended -- the recap
+      // replaces the normal live-tracking card entirely rather than sitting
+      // alongside it, since nothing about budget/progress is still moving.
+      // Stops showing once the founder dismisses it (recap_hidden_at set,
+      // campaigns.recap_hidden_at) -- a single campaign-wide action, not
+      // per-clipper.
+      if(p && c.status==='completed' && !c.recap_hidden_at){
+        return `<div class="card">
+          <div class="card-top">
+            <div><div class="card-name">🎉 ${esc(c.name)} — campaign ended</div>
+              <div class="card-meta">Thanks for clipping on this one. Here's what you made of it.</div></div>
+            <span class="badge completed">Ended</span>
+          </div>
+          <div class="minirow">
+            <div class="mini"><b>${num(c.my_stats.videos)}</b>clips posted</div>
+            <div class="mini"><b>${num(c.my_stats.views)}</b>views generated</div>
+            <div class="mini"><b class="green">${money(c.my_stats.earned)}</b>earned</div>
+          </div>
+        </div>`;
+      }
       return `<div class="card click" onclick="openCampaign(${c.id})">
         <div class="card-top">
           <div><div class="card-name">${esc(c.name)}</div>
@@ -1084,10 +1114,10 @@
     const STATE_LABEL={verified:'Verified',tracking:'Tracking',issue:'Sync issue',disqualified:'Disqualified',
       paused:'Not monetised',below_min:'Below minimum',locked:'Locked',removed:'Removed from platform',no_insights:'No insights available',
       disconnected:'Account disconnected',reconnect:'Reconnect needed',unavailable:'Not updating',
-      ineligible:'Not eligible'};
+      ineligible:'Not eligible',tracking_complete:'Tracking complete'};
     // Every state that means "this clip is not earning right now" reads as
     // visually inactive, so a clipper never mistakes a stuck clip for a live one.
-    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible','no_insights']);
+    const OFF_STATES=new Set(['paused','disqualified','locked','removed','disconnected','unavailable','ineligible','no_insights','tracking_complete']);
 
     /* How long ago this clip's view count was last actually confirmed with the
        platform. Without this the card showed a big confident number with no
@@ -1352,29 +1382,41 @@
     document.getElementById('pw-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPasswordChange(); } });
 
     window.openPayoutModal=function(){
+      document.getElementById('pd-email').value=(ME&&ME.clipper.email)||'';
+      document.getElementById('pd-contact').value=(ME&&ME.clipper.contact_number)||'';
       document.getElementById('pd-upi').value=(ME&&ME.clipper.upi_id)||'';
       document.getElementById('pd-name').value=(ME&&ME.clipper.upi_account_name)||'';
+      document.getElementById('pd-legal').value=(ME&&ME.clipper.legal_name)||'';
       document.getElementById('pd-error').style.display='none';
       document.getElementById('pd-back').classList.add('open');
-      document.getElementById('pd-upi').focus();
+      document.getElementById('pd-email').focus();
     };
     window.closePayoutModal=function(){ document.getElementById('pd-back').classList.remove('open'); };
     window.submitPayoutDetails=async function(){
+      const email=document.getElementById('pd-email').value.trim();
+      const contactNumber=document.getElementById('pd-contact').value.trim();
       const upiId=document.getElementById('pd-upi').value.trim();
       const accountName=document.getElementById('pd-name').value.trim();
+      const legalName=document.getElementById('pd-legal').value.trim();
       const errorEl=document.getElementById('pd-error');
       const btn=document.getElementById('pd-submit');
       errorEl.style.display='none';
-      if(!upiId||!accountName){ errorEl.textContent='Fill in both fields.'; errorEl.style.display='block'; return; }
+      if(!email||!contactNumber||!upiId||!accountName){ errorEl.textContent='Fill in email, contact number, UPI ID and the name on the account.'; errorEl.style.display='block'; return; }
       btn.disabled=true; btn.textContent='Saving…';
       try{
-        await api('/api/clipper/me/upi',{method:'PATCH',body:JSON.stringify({upiId,accountName})});
+        await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify({email,contactNumber,upiId,accountName,legalName})});
+        ME.clipper.email=email; ME.clipper.contact_number=contactNumber;
         ME.clipper.upi_id=upiId; ME.clipper.upi_account_name=accountName;
-        document.getElementById('upi-banner').innerHTML='';
+        if(legalName) ME.clipper.legal_name=legalName;
+        document.getElementById('details-banner').innerHTML='';
         closePayoutModal();
-        toast('Payout details saved');
+        toast('Details saved');
       }catch(e){
-        errorEl.textContent=e.message||'Could not save your payout details.';
+        // The server rejects one bad field at a time with a message naming
+        // it (validateEmail/validateContactNumber/validateUpiId in db.js) --
+        // shown verbatim rather than a generic "something went wrong" so the
+        // clipper knows exactly which field to fix.
+        errorEl.textContent=e.message||'Could not save your details.';
         errorEl.style.display='block';
       }finally{
         btn.disabled=false; btn.textContent='Save';

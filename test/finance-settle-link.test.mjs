@@ -20,6 +20,9 @@ function seed() {
                   campaign_kind: 'client', fee_percent: 20 }],
     submissions: [{ id: 101, clipper_id: 1, campaign_id: 7, platform: 'instagram',
                     ig_media_id: 'm1', permalink: 'p1', views: 200000, earning: 8000,
+                    // 8000 is already an exact multiple of cpm 40 -- no margin gap,
+                    // this file is about ledger linkage, not the margin mechanism.
+                    clipper_earning: 8000,
                     status: 'active', eligible: 1, created_at: NOW, posted_at: NOW,
                     last_ok_sync_at: NOW }]
   });
@@ -127,6 +130,55 @@ test('a clip locked mid-flight rolls back the ledger entry too, not just the pay
   assert.equal(ws.find(w => w.kind === 'agency').balance, 40000, 'nothing left the wallet for a payout that never actually happened');
 });
 
+test('settling a clip with a real margin gap writes both entries in one batch, linked to the same payment', async () => {
+  // 8,000 views billed at cpm 40 = 8,000... this test wants an actual gap,
+  // so seed a clip whose billable amount does NOT land on a clean multiple.
+  const db = seed();
+  await db.prepare('UPDATE submissions SET earning = 8020, clipper_earning = 8000 WHERE id = 101').run();
+  const agency = (await walletOfKind(db, 'agency')).id;
+  await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
+                       category: 'client_payment', campaign_id: 7 });
+
+  const r = await settlePayment(db, {
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+  });
+  assert.equal(r.ok, true);
+
+  const payout = (await listEntries(db, {})).filter(e => e.category === 'clipper_payout');
+  const margin = (await listEntries(db, {})).filter(e => e.category === 'view_margin');
+  assert.equal(payout.length, 1);
+  assert.equal(margin.length, 1);
+  assert.equal(margin[0].amount, 20, 'the exact 8020 - 8000 gap');
+  assert.equal(margin[0].payment_id, payout[0].payment_id, 'linked to the same settlement');
+  assert.equal(margin[0].wallet_id, agency, 'lands in the same wallet clipper payouts draw from, not a third one');
+
+  const ws = await walletBalances(db);
+  // 40000 funded, -8000 payout, +20 margin realized.
+  assert.equal(ws.find(w => w.kind === 'agency').balance, 40000 - 8000 + 20);
+});
+
+test('reversing a settlement voids the margin entry too, not just the clipper_payout one', async () => {
+  const db = seed();
+  await db.prepare('UPDATE submissions SET earning = 8020, clipper_earning = 8000 WHERE id = 101').run();
+  const agency = (await walletOfKind(db, 'agency')).id;
+  await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
+                       category: 'client_payment', campaign_id: 7 });
+  await settlePayment(db, {
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+  });
+
+  const paymentId = db._rows('payments')[0].id;
+  await reversePayment(db, paymentId);
+
+  const liveMargin = (await listEntries(db, {})).filter(e => e.category === 'view_margin');
+  assert.equal(liveMargin.length, 0, 'no longer counted');
+  const allMargin = (await listEntries(db, { includeVoid: true })).filter(e => e.category === 'view_margin');
+  assert.equal(allMargin.length, 1, 'but still on the record, voided');
+
+  const ws = await walletBalances(db);
+  assert.equal(ws.find(w => w.kind === 'agency').balance, 40000, 'fully unwound, including the margin');
+});
+
 test('the payout does not become an agency cost', async () => {
   // The client's money passes through to clippers. Counting it as our cost
   // would make every delivered campaign look like a loss.
@@ -143,4 +195,22 @@ test('the payout does not become an agency cost', async () => {
   assert.equal(pnl.costs, 0, 'a client campaign payout is pass-through, not cost');
   assert.equal(pnl.fees_earned, 1600, '20% of the 8,000 delivered');
   assert.equal(pnl.agency_balance, 32000);
+  assert.equal(pnl.view_margin_captured, 0, 'no margin gap on this fixture');
+});
+
+test('agencyPnL reports view_margin_captured, and it is never counted as profit', async () => {
+  const db = seed();
+  await db.prepare('UPDATE submissions SET earning = 8020, clipper_earning = 8000 WHERE id = 101').run();
+  const agency = (await walletOfKind(db, 'agency')).id;
+  await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
+                       category: 'client_payment', campaign_id: 7 });
+  await settlePayment(db, {
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+  });
+
+  const pnl = await agencyPnL(db);
+  assert.equal(pnl.view_margin_captured, 20);
+  // profit = fees_earned - costs, unaffected by margin -- it is explicitly
+  // not profit, just held in reserve.
+  assert.equal(pnl.profit, pnl.fees_earned - pnl.costs);
 });

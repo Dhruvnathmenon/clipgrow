@@ -49,6 +49,51 @@ export function validateUpiId(input) {
   return null;
 }
 
+/**
+ * Strips everything but digits, then drops a leading '91' or '0' country/
+ * trunk prefix so '+91 98765 43210', '098765 43210' and '9876543210' all
+ * normalise to the same 10-digit number -- ClipGrow's clippers are all in
+ * India today, and this is the shape a real WhatsApp/call number takes here.
+ */
+export function normaliseContactNumber(input) {
+  let v = String(input == null ? '' : input).replace(/\D/g, '');
+  if (v.length === 12 && v.startsWith('91')) v = v.slice(2);
+  else if (v.length === 11 && v.startsWith('0')) v = v.slice(1);
+  return v;
+}
+
+/**
+ * Lenient on purpose, same reasoning as validateUpiId: only the shape (10
+ * digits, starting 6-9 as every real Indian mobile number does) is checked,
+ * not matched against a carrier registry.
+ */
+export function validateContactNumber(input) {
+  const v = normaliseContactNumber(input);
+  if (!v) return 'Enter a contact number';
+  if (!/^[6-9]\d{9}$/.test(v)) {
+    return 'That does not look like a 10-digit Indian mobile number.';
+  }
+  return null;
+}
+
+export function normaliseEmail(input) {
+  return String(input == null ? '' : input).trim().toLowerCase();
+}
+
+/**
+ * Lenient shape check, same spirit as validateUpiId -- catches an obviously
+ * malformed entry (no @, no domain) without pretending to be a full RFC 5322
+ * parser that could reject a real address it hasn't seen the shape of.
+ */
+export function validateEmail(input) {
+  const v = normaliseEmail(input);
+  if (!v) return 'Enter an email address';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+    return 'That does not look like a valid email address.';
+  }
+  return null;
+}
+
 export function getClipperByUsername(db, username) {
   // COLLATE NOCASE guards any row stored before normalisation existed.
   return db
@@ -70,17 +115,6 @@ export function getModeratorById(db, id) {
   return db.prepare('SELECT * FROM moderators WHERE id = ?').bind(id).first();
 }
 
-export function publicModerator(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    username: row.username,
-    display_name: row.display_name || row.username,
-    status: row.status,
-    created_at: row.created_at
-  };
-}
-
 export function getCampaignById(db, id) {
   return db.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first();
 }
@@ -88,10 +122,6 @@ export function getCampaignById(db, id) {
 export function getParticipation(db, clipperId, campaignId) {
   return db.prepare('SELECT * FROM participations WHERE clipper_id = ? AND campaign_id = ?')
     .bind(clipperId, campaignId).first();
-}
-
-export function getAccountById(db, id) {
-  return db.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(id).first();
 }
 
 /**
@@ -386,6 +416,10 @@ export function publicCampaign(row, spent) {
     spent: spent ?? 0,
     remaining: Math.max(0, budget - (spent ?? 0)),
     status: row.status,
+    // Only meaningful once status is 'completed' -- whether the clipper-
+    // facing "campaign ended" recap card still shows (NULL) or the founder
+    // has dismissed it for everyone (set).
+    recap_hidden_at: row.recap_hidden_at || null,
     model: row.model || '',
     created_at: row.created_at,
     blueprint: safeParse(row.blueprint_json)
@@ -407,6 +441,45 @@ export function spendExpr(alias = '') {
 }
 
 export const SPEND_EXPR = spendExpr();
+
+/**
+ * The clipper's real total, historical -- what they've actually been paid
+ * (settled) plus what they're currently owed (pending), never the billable
+ * figure SPEND_EXPR gives. Same shape as spendExpr, with clipper_earning in
+ * place of earning for the unlocked branch (the locked branch is identical:
+ * locked_earning is already the clipper's real settled amount, see
+ * src/payouts.js's settlePayment).
+ *
+ * SPEND_EXPR answers "how much campaign budget has this delivered" (an
+ * admin/client question -- budget consumption is fundamentally billable,
+ * see the Non-negotiables in the fractional-margin plan). This answers "how
+ * much has this clipper actually earned" -- a clipper-facing screen must
+ * never show the billable figure as if it were their own money.
+ */
+export function spendClipperExpr(alias = '') {
+  const p = alias ? alias + '.' : '';
+  return `COALESCE(SUM(CASE WHEN ${p}locked_at IS NOT NULL THEN COALESCE(${p}locked_earning,0) ` +
+         `WHEN ${p}status = 'active' THEN ${p}clipper_earning ELSE 0 END), 0)`;
+}
+
+export const SPEND_CLIPPER_EXPR = spendClipperExpr();
+
+/**
+ * What's still owed to the clipper on an UNLOCKED, active clip -- the
+ * "pending" half of clipperFinancials, factored out because it was being
+ * hand-written independently in four places (db.js's totalOutstanding and
+ * clipperFinancials, admin.js's unpaid_value and campaign-participants
+ * query) after the earning_math split, which is exactly the "same number,
+ * computed in several places, only some get updated" bug class this
+ * project has already hit twice (the roster/Issues badges, the refresh
+ * budget). One function now, reused everywhere.
+ */
+export function pendingClipperExpr(alias = '') {
+  const p = alias ? alias + '.' : '';
+  return `COALESCE(SUM(CASE WHEN ${p}locked_at IS NULL AND ${p}status = 'active' THEN ${p}clipper_earning ELSE 0 END), 0)`;
+}
+
+export const PENDING_CLIPPER_EXPR = pendingClipperExpr();
 
 export async function campaignSpend(db, campaignId) {
   const row = await db
@@ -441,6 +514,13 @@ export async function campaignWithSpend(db, row) {
 // Day boundaries are evaluated in IST so a clipper posting at 11pm local time
 // doesn't silently break their streak.
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+// A clipper counts as "active" -- as opposed to merely "joined" -- if they've
+// posted within this window. Joining a campaign is one click and says nothing
+// about whether someone is actually doing the work; a recent real post
+// (COALESCE(posted_at, created_at), same reasoning as the streak below: the
+// platform post date, never ClipGrow's import time) is the actual signal.
+export const ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function istDayNumber(ts) {
   return Math.floor((Number(ts) + IST_OFFSET_MS) / 86400000);
@@ -570,8 +650,7 @@ export async function totalOutstanding(db) {
     `SELECT COALESCE(SUM(MAX(0, owed)), 0) AS outstanding FROM (
        SELECT COALESCE(sub.pending, 0) - COALESCE(pay.advanced, 0) AS owed
          FROM clippers cl
-         LEFT JOIN (SELECT clipper_id,
-                           SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN earning ELSE 0 END) AS pending
+         LEFT JOIN (SELECT clipper_id, ${pendingClipperExpr()} AS pending
                       FROM submissions GROUP BY clipper_id) sub ON sub.clipper_id = cl.id
          LEFT JOIN (SELECT clipper_id,
                            SUM(CASE WHEN kind = 'advance' THEN amount - COALESCE(recovered_amount,0) ELSE 0 END) AS advanced
@@ -585,8 +664,9 @@ export async function clipperFinancials(db, clipperId) {
   const row = await db.prepare(
     `SELECT
        ${SPEND_EXPR} AS earned,
+       ${SPEND_CLIPPER_EXPR} AS clipper_earned,
        COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) ELSE 0 END), 0) AS settled,
-       COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN earning ELSE 0 END), 0) AS pending,
+       ${PENDING_CLIPPER_EXPR} AS pending,
        COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN 1 ELSE 0 END), 0) AS pending_clips
      FROM submissions WHERE clipper_id = ?`
   ).bind(clipperId).first();
@@ -602,7 +682,14 @@ export async function clipperFinancials(db, clipperId) {
   const advanced = paidRow.advanced || 0;
 
   return {
+    // The billable/delivered figure -- how much campaign value this
+    // clipper has generated. An admin/finance question; never show this to
+    // the clipper as if it were their own money -- use clipper_earned.
     earned: row.earned || 0,
+    // What the clipper has actually, genuinely earned: settled (paid) plus
+    // pending (owed), both already clipper_earning-based. This is the
+    // figure a clipper-facing screen must use.
+    clipper_earned: row.clipper_earned || 0,
     settled: row.settled || 0,
     pending,
     pending_clips: row.pending_clips || 0,

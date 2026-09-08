@@ -2,27 +2,21 @@ import { cpmEarning } from './earning-math.js';
 import { maxPayoutPerVideo } from './db.js';
 import { getAdapter, campaignPlatforms } from './platforms.js';
 import { makeCallCounter, getBudget, MAX_CLIPS_FOR_FULL_REFRESH, CLIP_COOLDOWN_MS } from './rate-budget.js';
-
-const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
-// Instagram tokens last 60 days, so a weekly renewal window is plenty. Google
-// access tokens last about an hour and are renewed inline by the adapter when
-// a call needs one, so YouTube accounts are deliberately not swept here.
-const PROACTIVE_REFRESH_PLATFORMS = ['instagram'];
+import { logAction } from './audit.js';
 
 export async function markAccount(db, accountId, { status, code }) {
   await db.prepare(
-    'UPDATE social_accounts SET status = ?, last_error_code = ?, last_error_at = ?, last_checked_at = ? WHERE id = ?'
-  ).bind(status, code || null, code ? Date.now() : null, Date.now(), accountId).run();
+    'UPDATE social_accounts SET status = ?, last_error_code = ?, last_error_at = ? WHERE id = ?'
+  ).bind(status, code || null, code ? Date.now() : null, accountId).run();
 }
 
 async function saveRefreshedToken(db, accountId, fresh) {
   await db.prepare(
     `UPDATE social_accounts
        SET access_token = ?, refresh_token = COALESCE(?, refresh_token),
-           token_expires_at = ?, last_checked_at = ?, last_error_code = NULL, status = 'connected'
+           token_expires_at = ?, last_error_code = NULL, status = 'connected'
      WHERE id = ?`
-  ).bind(fresh.access_token, fresh.refresh_token || null, fresh.expires_at || null, Date.now(), accountId).run();
+  ).bind(fresh.access_token, fresh.refresh_token || null, fresh.expires_at || null, accountId).run();
 }
 
 /**
@@ -40,28 +34,6 @@ export function withAccount(db, env, account, fn) {
   );
 }
 
-/** Renews tokens before they lapse; flags accounts that cannot be renewed. */
-export async function refreshExpiringTokens(db, env) {
-  const placeholders = PROACTIVE_REFRESH_PLATFORMS.map(() => '?').join(',');
-  const { results } = await db.prepare(
-    `SELECT * FROM social_accounts
-     WHERE platform IN (${placeholders}) AND status = 'connected'
-       AND access_token IS NOT NULL AND token_expires_at IS NOT NULL AND token_expires_at < ?`
-  ).bind(...PROACTIVE_REFRESH_PLATFORMS, Date.now() + REFRESH_WINDOW_MS).all();
-
-  for (const acct of results || []) {
-    try {
-      const adapter = getAdapter(acct.platform);
-      const fresh = await adapter.refreshToken(acct, env);
-      await saveRefreshedToken(db, acct.id, fresh);
-    } catch (e) {
-      await markAccount(db, acct.id, {
-        status: e && e.needsReauth ? 'needs_reauth' : 'connected',
-        code: (e && e.code) || 'UNKNOWN'
-      });
-    }
-  }
-}
 
 /**
  * Fetches views for one account's clips and writes the results.
@@ -255,7 +227,7 @@ export async function allocateCampaignEarnings(db, campaignId) {
   // clip reached ClipGrow -- an Instagram Reel and a YouTube Short compete for
   // the same pool on equal terms.
   const { results: submissions } = await db.prepare(
-    `SELECT s.id, s.views, s.earning, s.locked_at, s.locked_earning, s.eligible, s.frozen_earning,
+    `SELECT s.id, s.views, s.earning, s.clipper_earning, s.locked_at, s.locked_earning, s.eligible, s.frozen_earning,
             s.status AS sub_status, COALESCE(p.status, 'active') AS part_status
      FROM submissions s
      LEFT JOIN participations p ON p.clipper_id = s.clipper_id AND p.campaign_id = s.campaign_id
@@ -320,13 +292,52 @@ export async function allocateCampaignEarnings(db, campaignId) {
       allocated = Math.max(0, Math.min(naive, Math.max(0, remaining)));
       remaining -= allocated;
     }
-    if (allocated !== sub.earning) {
-      updates.push(db.prepare('UPDATE submissions SET earning = ? WHERE id = ? AND locked_at IS NULL').bind(allocated, sub.id));
+
+    // The clipper is paid in complete CPM-multiples of the billable amount
+    // above -- never the billable amount itself. Applies uniformly to every
+    // branch (paused/disqualified/kicked/below-min all already produce
+    // allocated=0, which floors to clipper_earning=0 the same way). Locked
+    // clips are the one exception: their clipper_earning was fixed forever
+    // at settlement (src/payouts.js), never touched by any later pass.
+    const clipperAllocated = sub.locked_at ? null : (cpm > 0 ? Math.floor(allocated / cpm) * cpm : 0);
+
+    if (allocated !== sub.earning || clipperAllocated !== sub.clipper_earning) {
+      updates.push(db.prepare(
+        'UPDATE submissions SET earning = ?, clipper_earning = ? WHERE id = ? AND locked_at IS NULL'
+      ).bind(allocated, clipperAllocated, sub.id));
     }
   }
   if (updates.length) await db.batch(updates);
 
-  if (campaign.status === 'active' && remaining <= 0) {
+  // Auto-completion: the campaign ends itself the instant remaining budget
+  // can't fund even one more full CPM unit for anyone, no admin click
+  // required -- confirmed explicitly by the founder. Layered ahead of the
+  // existing budget_full <-> active toggle below (which still handles every
+  // case this stricter check doesn't reach) and reversible: a top-up that
+  // brings remaining back above one CPM unit reopens it automatically. A
+  // campaign manually "Marked Over" (completed_reason = 'manual') is never
+  // touched by this -- budget math doesn't get to undo a deliberate human
+  // decision made for unrelated reasons.
+  const autoExhausted = campaign.status === 'completed' && campaign.completed_reason === 'budget_exhausted';
+  if (cpm > 0 && remaining < cpm && campaign.completed_reason !== 'manual' && !autoExhausted) {
+    await db.prepare("UPDATE campaigns SET status = 'completed', completed_reason = 'budget_exhausted' WHERE id = ?")
+      .bind(campaignId).run();
+    await logAction(db, {
+      staffType: 'system', staffName: 'Automatic (budget)', action: 'campaign_auto_completed',
+      targetType: 'campaign', targetId: campaignId, targetLabel: campaign.name,
+      detail: `Remaining budget (₹${remaining}) can no longer fund a full CPM unit (₹${cpm}) for anyone.`
+    });
+  } else if (cpm > 0 && remaining >= cpm && autoExhausted) {
+    // A top-up arrived. Reopens automatically -- this ending was never a
+    // deliberate human decision to begin with.
+    await db.prepare("UPDATE campaigns SET status = 'active', completed_reason = NULL WHERE id = ?")
+      .bind(campaignId).run();
+    await logAction(db, {
+      staffType: 'system', staffName: 'Automatic (budget)', action: 'campaign_auto_reopened',
+      targetType: 'campaign', targetId: campaignId, targetLabel: campaign.name,
+      detail: `A budget top-up brought remaining (₹${remaining}) back above one CPM unit (₹${cpm}).`
+    });
+  } else if (campaign.status === 'active' && remaining <= 0) {
     await db.prepare("UPDATE campaigns SET status = 'budget_full' WHERE id = ?").bind(campaignId).run();
   } else if (campaign.status === 'budget_full' && remaining > 0) {
     await db.prepare("UPDATE campaigns SET status = 'active' WHERE id = ?").bind(campaignId).run();

@@ -22,8 +22,6 @@ import { platformLabel } from './platforms.js';
 //
 // The whole point is that "Connect" never appears until connecting will work.
 
-export const ACCESS_STATES = ['none', 'requested', 'rejected', 'approved', 'connected'];
-
 /** What a clipper must hand over for each platform, and how it is checked. */
 export const IDENTIFIER_SPEC = {
   instagram: {

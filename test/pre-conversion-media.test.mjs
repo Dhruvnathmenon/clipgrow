@@ -34,7 +34,11 @@ test('classify: a different code-100 message still falls through to PERMISSION_M
 });
 
 test('clipState: PRE_CONVERSION_MEDIA reads as its own settled state, not a reconnect prompt', () => {
-  const state = clipState({ sync_error: 'PRE_CONVERSION_MEDIA', locked_at: null, eligible: 1, status: 'active' });
+  // created_at is NOT NULL in production -- a real row always has one.
+  // Without it here, the 7-day tracking-window check reads a missing
+  // timestamp as "created in 1970" and always wins, which isn't what this
+  // test is exercising.
+  const state = clipState({ sync_error: 'PRE_CONVERSION_MEDIA', locked_at: null, eligible: 1, status: 'active', created_at: Date.now() });
   assert.equal(state, 'no_insights');
   assert.notEqual(state, 'reconnect');
 });

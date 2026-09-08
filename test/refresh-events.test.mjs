@@ -45,7 +45,7 @@ function seed() {
         status: 'active', created_at: NOW }
     ],
     refresh_jobs: [{
-      id: 5, kind: 'global', clipper_id: null, triggered_by: 'cron', respect_cooldown: 1,
+      id: 5, kind: 'global', clipper_id: null, triggered_by: 'cron',
       status: 'running', pending_json: '[]', invocations: 1, clips_fetched: 0, clips_failed: 0,
       clips_skipped: 0, imported: 0, accounts_json: '{}', error: null,
       created_at: NOW, updated_at: NOW, finished_at: null

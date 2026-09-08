@@ -43,7 +43,7 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
       return { results: rows };
     }
     // settlePayment's lookup of the clips being settled
-    if (/^SELECT id, clipper_id, campaign_id, earning, status, locked_at\s+FROM submissions WHERE id IN/.test(sql)) {
+    if (/^SELECT id, clipper_id, campaign_id, earning, clipper_earning, status, locked_at\s+FROM submissions WHERE id IN/.test(sql)) {
       const ids = args.map(Number);
       return { results: state.submissions.filter(s => ids.includes(s.id)).map(s => ({ ...s })) };
     }
@@ -87,7 +87,8 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
         .map(s => {
           const part = state.participations.find(p => p.clipper_id === s.clipper_id && p.campaign_id === s.campaign_id);
           return {
-            id: s.id, views: s.views, earning: s.earning, locked_at: s.locked_at, locked_earning: s.locked_earning,
+            id: s.id, views: s.views, earning: s.earning, clipper_earning: s.clipper_earning ?? null,
+            locked_at: s.locked_at, locked_earning: s.locked_earning,
             eligible: s.eligible, frozen_earning: s.frozen_earning ?? null,
             sub_status: s.status, part_status: part ? part.status : 'active'
           };
@@ -131,7 +132,7 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
       const [locked_at, id] = args;
       const s = subById(id);
       if (s && !s.locked_at) {
-        Object.assign(s, { locked_at, locked_earning: 0, lock_reason: 'below_min', earning: 0 });
+        Object.assign(s, { locked_at, locked_earning: 0, lock_reason: 'below_min', earning: 0, clipper_earning: 0 });
         return { meta: { changes: 1 } };
       }
       return { meta: { changes: 0 } };
@@ -167,10 +168,10 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
       state.payments = state.payments.filter(p => p.id !== args[0]);
       return { meta: {} };
     }
-    if (/^UPDATE submissions SET earning = \? WHERE id = \?/.test(sql)) {
-      const [earning, id] = args;
+    if (/^UPDATE submissions SET earning = \?, clipper_earning = \? WHERE id = \?/.test(sql)) {
+      const [earning, clipper_earning, id] = args;
       const s = subById(id);
-      if (s) s.earning = earning;
+      if (s) Object.assign(s, { earning, clipper_earning });
       return { meta: {} };
     }
     if (/^UPDATE campaigns SET status = 'budget_full' WHERE id = \?/.test(sql)) {
@@ -179,6 +180,21 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
     }
     if (/^UPDATE campaigns SET status = 'active' WHERE id = \?/.test(sql)) {
       const c = campaignById(args[0]); if (c) c.status = 'active';
+      return { meta: {} };
+    }
+    if (/^UPDATE campaigns SET status = 'completed', completed_reason = 'budget_exhausted' WHERE id = \?/.test(sql)) {
+      const c = campaignById(args[0]); if (c) { c.status = 'completed'; c.completed_reason = 'budget_exhausted'; }
+      return { meta: {} };
+    }
+    if (/^UPDATE campaigns SET status = 'active', completed_reason = NULL WHERE id = \?/.test(sql)) {
+      const c = campaignById(args[0]); if (c) { c.status = 'active'; c.completed_reason = null; }
+      return { meta: {} };
+    }
+    // logAction's audit trail for the auto-complete/auto-reopen transitions --
+    // this fake has no staff_audit_log table, so just accept and no-op it,
+    // same spirit as this file's other "record it, but the test doesn't need
+    // to read it back" writes.
+    if (/^INSERT INTO staff_audit_log/.test(sql)) {
       return { meta: {} };
     }
     throw new Error('fake-payouts-db: unhandled run() query: ' + sql);

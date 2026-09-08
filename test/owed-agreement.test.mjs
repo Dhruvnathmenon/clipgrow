@@ -30,6 +30,11 @@ const clipper = (id, o = {}) => ({
 const clip = (id, clipperId, earning, o = {}) => ({
   id, clipper_id: clipperId, campaign_id: 1, account_id: null, platform: 'instagram',
   ig_media_id: 'm' + id, permalink: 'p' + id, views: earning * 10, earning,
+  // This file is about cross-clipper netting, not the fractional-margin
+  // mechanism -- every earning value here is already a clean multiple of
+  // the seeded campaign's cpm (40), so clipper_earning === earning (no
+  // margin gap) keeps that unrelated invariant intact.
+  clipper_earning: earning,
   status: 'active', created_at: NOW, ...o
 });
 

@@ -27,8 +27,6 @@
 
 import { campaignSpend } from './db.js';
 
-export const WALLET_KINDS = ['agency', 'clipgrow'];
-
 // Clippers and clients always see the FULL campaign budget and its limits. This
 // wallet split is internal bookkeeping only -- it never changes a public number.
 
@@ -36,6 +34,13 @@ export const LEDGER_CATEGORIES = [
   'client_payment',     // in  — the clipper share of a client payment
   'clipper_payout',     // out — money reaching a clipper
   'management_fee',     // in  — ClipGrow's share of a client payment
+  // in — the gap between what a clip was billed and the CPM-multiple floor
+  // actually paid to the clipper, realized at settlement (src/payouts.js's
+  // settlePayment). Deliberately NOT profit taken to pocket -- lands in the
+  // same wallet clipper payouts draw from, held in reserve for clipper
+  // bonuses or campaign promotion spend. See src/earnings.js's
+  // allocateCampaignEarnings for how clipper_earning is derived.
+  'view_margin',
   'capital_in',         // in  — a founder putting their own money in
   'capital_repayment',  // out — paying a founder back
   'refund',             // out — returning unconsumed money to a client
@@ -62,7 +67,7 @@ const BALANCE_SQL = `
 /** Every wallet with its balance. Voided entries never count. */
 export async function walletBalances(db) {
   const { results } = await db.prepare(
-    `SELECT w.id, w.name, w.kind, w.owner, w.client_id, w.status,
+    `SELECT w.id, w.name, w.kind, w.status,
             ${BALANCE_SQL} AS balance
        FROM wallets w
        LEFT JOIN ledger_entries le
@@ -72,14 +77,6 @@ export async function walletBalances(db) {
       ORDER BY CASE w.kind WHEN 'agency' THEN 0 WHEN 'personal' THEN 1 ELSE 2 END, w.name`
   ).all();
   return (results || []).map(w => ({ ...w, balance: w.balance || 0 }));
-}
-
-export async function getWallet(db, id) {
-  return db.prepare('SELECT * FROM wallets WHERE id = ?').bind(id).first();
-}
-
-export async function walletByName(db, name) {
-  return db.prepare('SELECT * FROM wallets WHERE name = ?').bind(name).first();
 }
 
 /** The two fixed pots, by kind. */
@@ -145,6 +142,76 @@ export async function recordClientPayment(db, {
   const [poolEntryId, feeEntryId] = results.map(r => r.meta.last_row_id);
 
   return { ok: true, total, pool_share: poolShare, fee, pool_entry: poolEntryId, fee_entry: feeEntryId || null };
+}
+
+/**
+ * Tops up a campaign's clipper-payable budget.
+ *
+ * Deliberately NOT the same shape as recordClientPayment above. That
+ * function takes a total client payment and carves the fee OUT of it
+ * (poolShare = total - fee), matching how a fresh client payment against an
+ * existing budget is recorded. A top-up is the opposite direction: the
+ * admin decides how much MORE spending power the campaign needs -- the
+ * same round number a campaign's initial budget already is at creation
+ * time (`POST /api/admin/campaigns` takes `budget` directly, no fee split)
+ * -- and the 20% fee is an ADDITIONAL amount charged on top of that, not a
+ * slice taken from it. `campaigns.budget` increases by exactly `amount`,
+ * the same literal value used for the ledger's pool-share entry -- one
+ * variable, not two independently-derived ones, so they can never drift.
+ */
+export async function topUpCampaignBudget(db, {
+  campaignId, amount, feePercent = 20,
+  method = null, reference = null, note = null, occurredAt = null, createdBy = 'admin'
+}) {
+  if (!campaignId) return { error: 'A campaign is required.', status: 400 };
+  const campaign = await db.prepare('SELECT id FROM campaigns WHERE id = ?').bind(campaignId).first();
+  if (!campaign) return { error: 'Campaign not found.', status: 404 };
+
+  const budgetIncrease = Math.round(Number(amount));
+  if (!Number.isFinite(budgetIncrease) || budgetIncrease <= 0) {
+    return { error: 'Amount must be a positive number.', status: 400 };
+  }
+  const agency = await walletOfKind(db, 'agency');
+  const clipgrow = await walletOfKind(db, 'clipgrow');
+  if (!agency || !clipgrow) return { error: 'Wallets are not set up.', status: 500 };
+
+  // An extra 20% ON TOP of the budget increase, not carved out of it.
+  const fee = Math.round((budgetIncrease * feePercent) / 100);
+  const total = budgetIncrease + fee;
+  const at = occurredAt || Date.now();
+  const common = { campaign_id: campaignId, method, reference, occurred_at: at, created_by: createdBy };
+
+  const built = [
+    buildEntryStatement(db, {
+      ...common, direction: 'in', amount: budgetIncrease, wallet_id: agency.id,
+      category: 'client_payment',
+      note: note ? `${note} — budget top-up` : 'Budget top-up — clipper share'
+    })
+  ];
+  if (fee > 0) {
+    built.push(buildEntryStatement(db, {
+      ...common, direction: 'in', amount: fee, wallet_id: clipgrow.id,
+      category: 'management_fee',
+      note: note ? `${note} — ${feePercent}% fee` : `Management fee on top-up (${feePercent}%)`
+    }));
+  }
+  const failed = built.find(b => b.error);
+  if (failed) return failed;
+
+  // Same budgetIncrease variable feeds both this UPDATE and the ledger
+  // entry above -- see the doc comment.
+  const statements = [
+    ...built.map(b => b.statement),
+    db.prepare('UPDATE campaigns SET budget = budget + ? WHERE id = ?').bind(budgetIncrease, campaignId)
+  ];
+  const results = await db.batch(statements);
+  const [poolEntryId, feeEntryId] = results.map(r => r.meta.last_row_id);
+
+  return {
+    ok: true, budget_increase: budgetIncrease, fee, total,
+    pool_share: budgetIncrease, // kept for API-shape compatibility with recordClientPayment's response
+    pool_entry: poolEntryId, fee_entry: fee > 0 ? feeEntryId : null
+  };
 }
 
 /**
@@ -224,7 +291,7 @@ async function sumEntries(db, { direction = null, categories = null, campaignId 
  */
 export async function campaignFinancials(db, campaignId) {
   const campaign = await db.prepare(
-    'SELECT id, name, budget, fee_percent, campaign_kind, client_id, status, notice_at, notice_ends_at, closed_at FROM campaigns WHERE id = ?'
+    'SELECT id, name, budget, fee_percent, campaign_kind, status FROM campaigns WHERE id = ?'
   ).bind(campaignId).first();
   if (!campaign) return null;
 
@@ -309,7 +376,6 @@ export async function campaignFinancials(db, campaignId) {
   return {
     campaign_id: campaign.id,
     name: campaign.name,
-    client_id: campaign.client_id,
     is_internal: internal,
     budget: campaign.budget || 0,
     delivered,
@@ -333,10 +399,7 @@ export async function campaignFinancials(db, campaignId) {
     balance: internal ? 0 : clientPaid - obligation,
     refund_due: refundDue,
     shortfall,
-    status: campaign.status,
-    notice_at: campaign.notice_at,
-    notice_ends_at: campaign.notice_ends_at,
-    closed_at: campaign.closed_at
+    status: campaign.status
   };
 }
 
@@ -371,6 +434,11 @@ export async function agencyPnL(db, { from = null, to = null } = {}) {
   const clientPaid = campaigns.reduce((n, c) => n + (c.client_paid || 0), 0);
 
   const feesCollected = await sumEntries(db, { direction: 'in', categories: ['management_fee'], from, to });
+  // Unlike the management fee, margin has no separate accrual figure -- it
+  // only ever comes into existence the instant a settlement realizes it
+  // (src/payouts.js's settlePayment), so "captured" and "earned" are the
+  // same number by construction; nothing to double-report.
+  const viewMarginCaptured = await sumEntries(db, { direction: 'in', categories: ['view_margin'], from, to });
   const directCosts = await sumEntries(db, { direction: 'out', categories: COST_CATEGORIES, from, to });
   // The specific pair "what did clients actually send us" vs "what actually
   // reached a clipper" -- narrower than money_in/money_out below, which also
@@ -389,6 +457,12 @@ export async function agencyPnL(db, { from = null, to = null } = {}) {
   return {
     fees_earned: feesEarned,
     fees_collected: feesCollected,
+    // Explicitly NOT profit -- confirmed reserved for clipper bonuses and
+    // campaign promotion spend, not taken to pocket. Reported alongside the
+    // fee figures because it's the same "second revenue stream" question a
+    // founder is asking when they look at this panel, even though it isn't
+    // counted in `profit` below.
+    view_margin_captured: viewMarginCaptured,
     costs,
     direct_costs: directCosts,
     internal_campaign_cost: internalCost,

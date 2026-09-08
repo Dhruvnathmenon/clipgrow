@@ -72,57 +72,103 @@ test('normaliseUpiId trims and strips internal whitespace', () => {
 });
 
 /* ── clipper self-service ── */
+// PATCH /api/clipper/me/upi was folded into the consolidated
+// /api/clipper/me/profile endpoint (migration 030 / the "Fill in your
+// details" prompt) -- one write path for email + contact number + UPI
+// instead of a separate one just for UPI.
 
-test('a clipper with no UPI on file sees null, not a missing field', async () => {
+const fullProfile = (overrides = {}) => ({
+  email: 'ravi@example.com', contactNumber: '9876543210',
+  upiId: '9999999999@upi', accountName: 'Ravi Kumar', ...overrides
+});
+
+test('a clipper with no profile details on file sees null fields, not missing ones', async () => {
   const env = seedEnv();
   const res = await clipperRequest(env, '/api/clipper/me');
   assert.equal(res.status, 200);
   const { clipper } = await res.json();
   assert.equal(clipper.upi_id, null);
   assert.equal(clipper.upi_account_name, null);
+  assert.equal(clipper.email, null);
+  assert.equal(clipper.contact_number, null);
+  assert.equal(clipper.legal_name, null);
 });
 
-test('a clipper can set their own UPI details', async () => {
+test('a clipper can set their own profile in one save', async () => {
   const env = seedEnv();
-  const res = await clipperRequest(env, '/api/clipper/me/upi', {
-    method: 'PATCH', body: { upiId: '9999999999@upi', accountName: 'Ravi Kumar' }
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ legalName: 'Ravi Kumar Singh' })
   });
   assert.equal(res.status, 200);
 
-  const row = await env.DB.prepare('SELECT upi_id, upi_account_name FROM clippers WHERE id = 1').first();
+  const row = await env.DB.prepare(
+    'SELECT upi_id, upi_account_name, email, contact_number, legal_name FROM clippers WHERE id = 1'
+  ).first();
   assert.equal(row.upi_id, '9999999999@upi');
   assert.equal(row.upi_account_name, 'Ravi Kumar');
+  assert.equal(row.email, 'ravi@example.com');
+  assert.equal(row.contact_number, '9876543210');
+  assert.equal(row.legal_name, 'Ravi Kumar Singh');
 
   const me = await (await clipperRequest(env, '/api/clipper/me')).json();
   assert.equal(me.clipper.upi_id, '9999999999@upi');
-  assert.equal(me.clipper.upi_account_name, 'Ravi Kumar');
+  assert.equal(me.clipper.email, 'ravi@example.com');
+  assert.equal(me.clipper.contact_number, '9876543210');
+  assert.equal(me.clipper.legal_name, 'Ravi Kumar Singh');
 });
 
-test('an invalid UPI id is rejected before it reaches the database', async () => {
+test('legal name is optional and omitting it leaves an existing value untouched', async () => {
   const env = seedEnv();
-  const res = await clipperRequest(env, '/api/clipper/me/upi', {
-    method: 'PATCH', body: { upiId: 'nope', accountName: 'Ravi Kumar' }
+  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ legalName: 'Ravi Kumar Singh' }) });
+  // Re-save without a legal name (e.g. only fixing a typo'd phone number).
+  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ contactNumber: '9123456780' }) });
+  const row = await env.DB.prepare('SELECT legal_name, contact_number FROM clippers WHERE id = 1').first();
+  assert.equal(row.legal_name, 'Ravi Kumar Singh', 'not cleared just because this save omitted it');
+  assert.equal(row.contact_number, '9123456780');
+});
+
+test('an invalid UPI id is rejected before anything reaches the database', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ upiId: 'nope' })
   });
   assert.equal(res.status, 400);
-  const row = await env.DB.prepare('SELECT upi_id FROM clippers WHERE id = 1').first();
+  const row = await env.DB.prepare('SELECT upi_id, email FROM clippers WHERE id = 1').first();
   assert.equal(row.upi_id, null);
+  assert.equal(row.email, null, 'a rejected field must not let the others through either');
 });
 
-test('a blank account name is rejected even with a valid UPI id', async () => {
+test('an invalid contact number is rejected the same way', async () => {
   const env = seedEnv();
-  const res = await clipperRequest(env, '/api/clipper/me/upi', {
-    method: 'PATCH', body: { upiId: '9999999999@upi', accountName: '  ' }
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ contactNumber: '12345' })
   });
   assert.equal(res.status, 400);
 });
 
-test('a disabled clipper can still update their UPI details', async () => {
+test('an invalid email is rejected the same way', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ email: 'not-an-email' })
+  });
+  assert.equal(res.status, 400);
+});
+
+test('a blank account name is rejected even with everything else valid', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ accountName: '  ' })
+  });
+  assert.equal(res.status, 400);
+});
+
+test('a disabled clipper can still update their profile', async () => {
   // Same reasoning as password change: a disabled account can be owed money
   // from before it was disabled and must still be able to say how to pay it.
   const env = seedEnv();
   await env.DB.prepare("UPDATE clippers SET status = 'disabled' WHERE id = 1").run();
-  const res = await clipperRequest(env, '/api/clipper/me/upi', {
-    method: 'PATCH', body: { upiId: '9999999999@upi', accountName: 'Ravi Kumar' }
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile()
   });
   assert.equal(res.status, 200);
 });

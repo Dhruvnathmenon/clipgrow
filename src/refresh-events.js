@@ -11,20 +11,6 @@
 // refresh: a failure to write history is strictly less bad than a failure to
 // sync, so every write is wrapped and swallowed with a console line.
 
-/**
- * Actionable buckets. Deliberately named after what the ADMIN has to do, not
- * after what the platform called it -- the whole point is turning
- * "TOKEN_REVOKED" into "this clipper must reconnect".
- */
-export const EVENT_KINDS = {
-  reauth: 'Needs the clipper to reconnect',
-  rate_limit: 'Rate limited — will clear on its own',
-  gone: 'The post no longer exists',
-  permission: 'Account type or permissions',
-  network: 'Temporary network or platform error',
-  config: 'Campaign or account setup',
-  unknown: 'Unrecognised'
-};
 
 const BY_CODE = [
   [/^(TOKEN_EXPIRED|TOKEN_REVOKED|OAUTH|UNAUTHOR|INVALID_TOKEN|NO_TOKEN|REAUTH)/i, 'reauth'],

@@ -44,15 +44,30 @@ test('handles zero and missing inputs without producing NaN', () => {
 
 /* ─────────────────────── why a clip earned that ─────────────────────── */
 
-const clip = (o = {}) => ({ views: 10000, earning: 400, status: 'active', eligible: 1,
+// clipper_earning defaults to match earning (no margin gap) so existing
+// scenarios below stay about their own concern; tests specifically about
+// the clipper/billable split set both explicitly.
+const clip = (o = {}) => ({ views: 10000, earning: 400, clipper_earning: o.earning ?? 400,
+                            status: 'active', eligible: 1,
                             locked_at: null, locked_earning: null, lock_reason: null, ...o });
 
 test('a plain CPM earning says so', () => {
   const x = explainEarning(clip(), { cpm: 40, minViews: 1000 });
   assert.equal(x.reason, 'cpm');
   assert.equal(x.full_earning, 400);
-  assert.equal(x.amount, 400);
-  assert.match(explainEarningText(x), /10,000 views at ₹40 per 1,000/);
+  assert.equal(x.amount, 400, 'no margin gap here -- 400 is already an exact multiple of cpm 40');
+  assert.equal(x.next_milestone.amount, 440);
+  assert.match(explainEarningText(x), /₹400 earned so far/);
+});
+
+test('amount is the clipper figure, never the billable one, when they genuinely differ', () => {
+  // 10,000 views billed 400 (unchanged, exact cpm math), but this clip's
+  // clipper_earning was floored to 360 (e.g. a max_per_video edge) -- amount
+  // must report 360, with the billable figure still visible separately.
+  const x = explainEarning(clip({ clipper_earning: 360 }), { cpm: 40, minViews: 1000 });
+  assert.equal(x.amount, 360);
+  assert.equal(x.billed_earning, 400);
+  assert.match(explainEarningText(x), /₹360 earned so far/);
 });
 
 test('a clip under the minimum says how many views it still needs', () => {
@@ -65,29 +80,34 @@ test('a clip under the minimum says how many views it still needs', () => {
   assert.match(explainEarningText(one), /1 more view to start/, 'singular, not "1 more views"');
 });
 
-test('a clip stopped by the per-video cap says which cap and what it would have been', () => {
-  // 10,000 views at 40 = 400, capped at 250.
-  const x = explainEarning(clip({ earning: 250 }), { cpm: 40, minViews: 1000, maxPerVideo: 250 });
+test('a clip stopped by the per-video cap says which cap, and pays the CPM floor of it', () => {
+  // 10,000 views at 40 = 400, capped at 250. The clipper is then paid the CPM
+  // floor of that capped 250 -- floor(250/40)*40 = 240, margin 10.
+  const x = explainEarning(clip({ earning: 250, clipper_earning: 240 }), { cpm: 40, minViews: 1000, maxPerVideo: 250 });
   assert.equal(x.reason, 'capped');
   assert.equal(x.full_earning, 400);
   assert.equal(x.capped_earning, 250);
-  assert.match(explainEarningText(x), /capped at this campaign's maximum of ₹250/);
+  assert.equal(x.billed_earning, 250);
+  assert.equal(x.amount, 240, 'paid the CPM floor of the capped billable amount, not the cap itself');
+  assert.match(explainEarningText(x), /₹240 earned.*maximum of ₹250 per video/);
 });
 
 test('a clip clamped by the campaign budget is distinguishable from a small clip', () => {
   // This is the gap that existed: 400 earned nothing but 90 because the budget
   // ran dry, and the clip looked exactly like one with a quarter of the views.
-  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000 });
+  // The clipper is then paid the CPM floor of that 90 -- floor(90/40)*40 = 80.
+  const x = explainEarning(clip({ earning: 90, clipper_earning: 80 }), { cpm: 40, minViews: 1000 });
   assert.equal(x.reason, 'budget');
   assert.equal(x.full_earning, 400);
-  assert.equal(x.amount, 90);
-  assert.match(explainEarningText(x), /budget ran out/);
+  assert.equal(x.billed_earning, 90);
+  assert.equal(x.amount, 80);
+  assert.match(explainEarningText(x), /₹80 earned so far/);
 });
 
 test('the cap is checked before the budget, matching the allocator order', () => {
   // Capped to 250, then the budget only allowed 90. The binding constraint the
   // clipper needs told about is the budget, not the cap.
-  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, maxPerVideo: 250 });
+  const x = explainEarning(clip({ earning: 90, clipper_earning: 80 }), { cpm: 40, minViews: 1000, maxPerVideo: 250 });
   assert.equal(x.reason, 'budget');
   assert.equal(x.capped_earning, 250);
 });

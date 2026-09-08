@@ -4,13 +4,15 @@ import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
-  normaliseUpiId, validateUpiId
+  normaliseUpiId, validateUpiId,
+  normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
+  ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
 import {
-  walletBalances, walletOfKind, agencyAvailable, recordClientPayment,
+  walletBalances, walletOfKind, agencyAvailable, recordClientPayment, topUpCampaignBudget,
   campaignFinancials, allCampaignFinancials, campaignFunding, fundingAlerts,
   agencyPnL, addEntry, voidEntry, listEntries, LEDGER_CATEGORIES
 } from '../finance.js';
@@ -24,10 +26,21 @@ import { logAction, listAuditLog } from '../audit.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, moderatorActivity
 } from '../reviews.js';
+import { TERMINAL_SYNC_ERRORS } from '../clipstate.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
 const PART_STATUSES = ['active', 'paused', 'kicked'];
+// Static, hardcoded error codes -- safe to inline into SQL text directly
+// rather than as bound parameters, and it lets every NOT IN (...) below
+// read from the one list in clipstate.js instead of repeating the tuple.
+const TERMINAL_SYNC_ERRORS_SQL = TERMINAL_SYNC_ERRORS.map(c => `'${c}'`).join(', ');
+// A submission the admin has personally acknowledged (migration 029) is
+// suppressed the same way a terminal sync_error is -- until sync_error
+// actually changes, at which point this stops matching and the count
+// reopens on its own. Shared so the Overview counts and any per-campaign
+// count agree with the acknowledge/unflag action in admin.html.
+const NOT_ACKNOWLEDGED_SQL = '(sync_error_acknowledged_as IS NULL OR sync_error_acknowledged_as != sync_error)';
 
 /**
  * Sanitises the platform list for a campaign. Falls back to Instagram when the
@@ -84,8 +97,24 @@ export async function handleAdmin(request, env, url) {
     const STUCK_AFTER_MS = 12 * 60 * 60 * 1000;
     const s = await env.DB.prepare(
       `SELECT
-        (SELECT COUNT(*) FROM clippers WHERE status='active') AS active_clippers,
+        -- Registered + enabled clipper accounts. Anyone can join a campaign
+        -- with one click, so this alone says nothing about who is actually
+        -- doing the work -- see active_clippers below for that.
+        (SELECT COUNT(*) FROM clippers WHERE status='active') AS joined_clippers,
+        -- Clippers who have actually posted (real platform post date, never
+        -- import time) within ACTIVE_WINDOW_MS. Distinct, so a clipper active
+        -- across several campaigns still counts once here.
+        (SELECT COUNT(DISTINCT s2.clipper_id) FROM submissions s2
+           JOIN clippers cl2 ON cl2.id = s2.clipper_id
+          WHERE s2.status = 'active' AND cl2.status = 'active'
+            AND COALESCE(s2.posted_at, s2.created_at) >= ?) AS active_clippers,
         (SELECT COUNT(*) FROM campaigns WHERE status='active') AS active_campaigns,
+        -- The whole-history number, across every clip in every status. A
+        -- clip past its 7-day tracking window (clipstate.js's
+        -- TRACKING_WINDOW_MS) has already stopped syncing, so its views
+        -- column IS its final count -- this SUM needs no separate
+        -- bookkeeping to reflect that.
+        (SELECT COALESCE(SUM(views),0) FROM submissions) AS total_views,
         (SELECT ${SPEND_EXPR} FROM submissions) AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
         -- outstanding is computed separately by totalOutstanding()
@@ -105,7 +134,8 @@ export async function handleAdmin(request, env, url) {
         -- dashboard, so it needs no admin attention on either line here.
         (SELECT COUNT(*) FROM submissions
            WHERE sync_error IS NOT NULL AND status='active'
-             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')) AS submissions_with_errors,
+             AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             AND ${NOT_ACKNOWLEDGED_SQL}) AS submissions_with_errors,
         (SELECT COUNT(*) FROM submissions
            WHERE sync_error IS NOT NULL AND status='active' AND locked_at IS NULL
              -- A clip that has never had a successful sync has no
@@ -121,8 +151,9 @@ export async function handleAdmin(request, env, url) {
              -- flagged the same clips forever with no action anyone could take.
              -- clipstate.js already gives both their own explained, final state
              -- ('removed' / 'no_insights') on the clipper's own dashboard.
-             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')) AS submissions_stuck`
-    ).bind(Date.now() - STUCK_AFTER_MS).first();
+             AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             AND ${NOT_ACKNOWLEDGED_SQL}) AS submissions_stuck`
+    ).bind(Date.now() - ACTIVE_WINDOW_MS, Date.now() - STUCK_AFTER_MS).first();
 
     // The counts above say something is wrong; these say WHICH account, so the
     // banner can name it. A count alone means opening every clipper in turn to
@@ -152,7 +183,8 @@ export async function handleAdmin(request, env, url) {
              -- flagged the same clips forever with no action anyone could take.
              -- clipstate.js already gives both their own explained, final state
              -- ('removed' / 'no_insights') on the clipper's own dashboard.
-             AND sync_error NOT IN ('MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA')
+             AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             AND ${NOT_ACKNOWLEDGED_SQL}
        GROUP BY s.account_id
        ORDER BY clips DESC`
     ).bind(Date.now() - STUCK_AFTER_MS).all();
@@ -318,7 +350,9 @@ export async function handleAdmin(request, env, url) {
         quality: await clipperQuality(env.DB, c.id),
         // Admin-only -- deliberately not part of publicClipper() (shared with
         // moderator.js's roster), see migration 028's comment.
-        upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null
+        upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null,
+        // Same admin-only boundary, migration 030.
+        contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null
       });
     }
     return json({ clippers: out });
@@ -406,6 +440,13 @@ export async function handleAdmin(request, env, url) {
 
   params = matchPath('/api/admin/clippers/:id', pathname);
   if (params && method === 'GET') {
+    // Same '|'-delimited "platform:username:status" shape the linked_accounts
+    // GROUP_CONCAT below produces -- turned into real objects so the wide
+    // clipper detail panel can render a table instead of parsing a string.
+    const parseLinkedAccounts = raw => (raw || '').split('|').filter(Boolean).map(part => {
+      const i = part.indexOf(':'), j = part.indexOf(':', i + 1);
+      return { platform: part.slice(0, i), username: part.slice(i + 1, j) || null, status: part.slice(j + 1) || null };
+    });
     const clipper = await env.DB.prepare('SELECT * FROM clippers WHERE id = ?').bind(params.id).first();
     if (!clipper) return err('Not found', 404);
     // mismatch_approved_as: the identifier that was actually approved for a
@@ -420,8 +461,10 @@ export async function handleAdmin(request, env, url) {
          -- "pending videos are deleted".
          (SELECT COUNT(*) FROM submissions s
             WHERE s.account_id = a.id AND s.locked_at IS NULL) AS unpaid_clips,
-         (SELECT COALESCE(SUM(s.earning),0) FROM submissions s
-            WHERE s.account_id = a.id AND s.locked_at IS NULL AND s.status = 'active') AS unpaid_value,
+         -- What disconnecting destroys: what the CLIPPER would have been
+         -- owed on this account's still-pending clips (never the billable
+         -- figure -- see src/db.js's pendingClipperExpr).
+         (SELECT ${pendingClipperExpr('s')} FROM submissions s WHERE s.account_id = a.id) AS unpaid_value,
          (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
             JOIN participation_accounts pa ON pa.account_id = a.id
             JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
@@ -465,14 +508,22 @@ export async function handleAdmin(request, env, url) {
     return json({
       clipper: {
         ...publicClipper(clipper),
-        upi_id: clipper.upi_id || null, upi_account_name: clipper.upi_account_name || null
+        upi_id: clipper.upi_id || null, upi_account_name: clipper.upi_account_name || null,
+        contact_number: clipper.contact_number || null, email: clipper.email || null,
+        legal_name: clipper.legal_name || null,
+        created_at: clipper.created_at
       },
       money: await clipperFinancials(env.DB, params.id),
       quality: await clipperQuality(env.DB, params.id),
       // mismatch_approved_as is deliberately not part of publicAccount (shared
       // with the clipper's own dashboard) -- it's admin-only oversight info.
       accounts: (accounts || []).map(a => ({ ...publicAccount(a), mismatch_approved_as: a.mismatch_approved_as || null, campaign_name: a.campaign_name || null })),
-      participations: parts || [],
+      // linked_accounts stays the old '|'-delimited string (existing callers
+      // outside this endpoint's own new admin.html panel parse that shape) --
+      // linked_accounts_list is the same data as a real array, added
+      // alongside it rather than replacing it, so the wider clipper detail
+      // panel can render a proper table instead of parsing a delimited string.
+      participations: (parts || []).map(p => ({ ...p, linked_accounts_list: parseLinkedAccounts(p.linked_accounts) })),
       submissions: subs || [],
       payments: pays || [],
       notes: notes || []
@@ -480,7 +531,10 @@ export async function handleAdmin(request, env, url) {
   }
 
   if (params && method === 'PATCH') {
-    const { status, username, display_name, password, upi_id, upi_account_name } = await readJson(request);
+    const {
+      status, username, display_name, password, upi_id, upi_account_name,
+      contact_number, email, legal_name
+    } = await readJson(request);
     if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
     // Username stays lowercase no matter what was typed -- same rule as
     // creation, enforced here too so an edit can never drift from it.
@@ -513,6 +567,23 @@ export async function handleAdmin(request, env, url) {
       const name = String(upi_account_name).trim();
       if (!name) return err('Enter the name on the UPI account');
       await env.DB.prepare('UPDATE clippers SET upi_account_name = ? WHERE id = ?').bind(name, params.id).run();
+    }
+    // Contact profile (migration 030) -- same "admin can fix it, same
+    // validator as the clipper's own self-service endpoint" reasoning as
+    // UPI above.
+    if (contact_number != null) {
+      const invalid = validateContactNumber(contact_number);
+      if (invalid) return err(invalid);
+      await env.DB.prepare('UPDATE clippers SET contact_number = ? WHERE id = ?')
+        .bind(normaliseContactNumber(contact_number), params.id).run();
+    }
+    if (email != null) {
+      const invalid = validateEmail(email);
+      if (invalid) return err(invalid);
+      await env.DB.prepare('UPDATE clippers SET email = ? WHERE id = ?').bind(normaliseEmail(email), params.id).run();
+    }
+    if (legal_name != null) {
+      await env.DB.prepare('UPDATE clippers SET legal_name = ? WHERE id = ?').bind(String(legal_name).trim(), params.id).run();
     }
     return json({ ok: true });
   }
@@ -554,7 +625,17 @@ export async function handleAdmin(request, env, url) {
     for (const c of results || []) {
       const parts = await env.DB.prepare(
         "SELECT COUNT(*) AS n FROM participations WHERE campaign_id = ? AND status != 'kicked'").bind(c.id).first();
-      out.push({ ...(await campaignWithSpend(env.DB, c)), participants: parts.n });
+      // "Joined" (parts.n, above) is one click and proves nothing about
+      // whether someone is actually clipping for this campaign -- "active"
+      // is a real post on it, recently, per ACTIVE_WINDOW_MS (db.js).
+      const active = await env.DB.prepare(
+        `SELECT COUNT(DISTINCT s.clipper_id) AS n
+           FROM submissions s
+           JOIN participations p ON p.clipper_id = s.clipper_id AND p.campaign_id = s.campaign_id
+          WHERE s.campaign_id = ? AND s.status = 'active' AND p.status != 'kicked'
+            AND COALESCE(s.posted_at, s.created_at) >= ?`
+      ).bind(c.id, Date.now() - ACTIVE_WINDOW_MS).first();
+      out.push({ ...(await campaignWithSpend(env.DB, c)), participants: parts.n, active_participants: active.n });
     }
     return json({ campaigns: out });
   }
@@ -588,6 +669,25 @@ export async function handleAdmin(request, env, url) {
     const slug = slugify(name, id);
     await env.DB.prepare('UPDATE campaigns SET slug = ? WHERE id = ?').bind(slug, id).run();
     return json({ ok: true, id, slug }, 201);
+  }
+
+  // A client top-up, exactly like the Payments tab's client-payment form --
+  // same 20%-fee split -- plus it raises this campaign's budget by the pool
+  // share in the same atomic write (src/finance.js's topUpCampaignBudget).
+  // If the campaign had auto-completed from running dry, the next
+  // allocation pass reopens it automatically.
+  params = matchPath('/api/admin/campaigns/:id/top-up', pathname);
+  if (params && method === 'POST') {
+    const body = await readJson(request);
+    const r = await topUpCampaignBudget(env.DB, {
+      campaignId: Number(params.id), amount: body.amount,
+      feePercent: body.fee_percent != null ? Number(body.fee_percent) : 20,
+      method: body.method, reference: body.reference, note: body.note,
+      occurredAt: body.occurred_at || null, createdBy: 'admin'
+    });
+    if (r.error) return err(r.error, r.status || 400);
+    await reallocateCampaign(env.DB, Number(params.id));
+    return json(r, 201);
   }
 
   // "How much do I still owe on THIS campaign?" -- previously answerable only
@@ -646,8 +746,7 @@ export async function handleAdmin(request, env, url) {
               (SELECT COUNT(*) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS videos,
               (SELECT COALESCE(SUM(views),0) FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id AND s.status='active') AS views,
               (SELECT ${SPEND_EXPR} FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS earned,
-              (SELECT COALESCE(SUM(CASE WHEN s.locked_at IS NULL AND s.status='active' THEN s.earning ELSE 0 END),0)
-                 FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS pending,
+              (SELECT ${pendingClipperExpr('s')} FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS pending,
               (SELECT COALESCE(SUM(CASE WHEN s.locked_at IS NOT NULL THEN COALESCE(s.locked_earning,0) ELSE 0 END),0)
                  FROM submissions s WHERE s.clipper_id=p.clipper_id AND s.campaign_id=p.campaign_id) AS settled
        FROM participations p
@@ -668,7 +767,7 @@ export async function handleAdmin(request, env, url) {
       // Delete on every row -- all three of which the API rejects with a 409
       // once a clip is paid. Every one of those buttons was guaranteed to fail
       // after the first payout run, which is the error the founder walked into.
-      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.created_at, s.last_synced_at, s.source, s.platform,
+      `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.sync_error_acknowledged_as, s.created_at, s.last_synced_at, s.source, s.platform,
               s.locked_at, s.locked_earning, s.lock_reason, s.payment_id,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
@@ -697,8 +796,19 @@ export async function handleAdmin(request, env, url) {
     // it used to slip past the repricing check below -- the campaign kept
     // paying the old cap until some unrelated refresh happened to run.
     const capChanged = String(priorBlueprint.max_payout ?? '') !== String(merged.max_payout ?? '');
+    // Any status change made through THIS endpoint is inherently a human
+    // decision -- 'manual', never 'budget_exhausted' (that reason is only
+    // ever written by the automatic budget-math transition in
+    // src/earnings.js's allocateCampaignEarnings). Marking Over here must
+    // never later look like something a budget top-up should silently
+    // reopen. Reopening via this same endpoint (status set to anything but
+    // 'completed') clears a stale reason; leaving status untouched in a
+    // regular edit leaves completed_reason untouched too.
+    const completedReason = payload.status
+      ? (payload.status === 'completed' ? 'manual' : null)
+      : existing.completed_reason;
     await env.DB.prepare(
-      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, model = ?, blueprint_json = ?, allowed_platforms = ?, campaign_kind = ? WHERE id = ?`
+      `UPDATE campaigns SET name = ?, description = ?, cpm = ?, budget = ?, min_views = ?, status = ?, completed_reason = ?, model = ?, blueprint_json = ?, allowed_platforms = ?, campaign_kind = ? WHERE id = ?`
     ).bind(
       payload.name != null ? String(payload.name).trim() || existing.name : existing.name,
       payload.description != null ? payload.description : existing.description,
@@ -710,6 +820,7 @@ export async function handleAdmin(request, env, url) {
       numOr(payload.budget, existing.budget),
       numOr(payload.min_views, existing.min_views),
       payload.status || existing.status,
+      completedReason,
       payload.model != null ? payload.model : existing.model,
       JSON.stringify(merged),
       payload.allowed_platforms != null
@@ -727,6 +838,22 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true });
   }
 
+  // Dismisses the clipper-facing "campaign ended" recap card, for
+  // everyone at once -- one founder action, not per-clipper. Only makes
+  // sense once the campaign has actually completed.
+  params = matchPath('/api/admin/campaigns/:id/hide-recap', pathname);
+  if (params && method === 'POST') {
+    const existingCampaign = await env.DB.prepare('SELECT status FROM campaigns WHERE id = ?').bind(params.id).first();
+    if (!existingCampaign) return err('Not found', 404);
+    if (existingCampaign.status !== 'completed') return err('This campaign has not ended yet.');
+    await env.DB.prepare('UPDATE campaigns SET recap_hidden_at = ? WHERE id = ?').bind(now(), params.id).run();
+    return json({ ok: true });
+  }
+
+  // Re-matched: the hide-recap block above reassigned `params` to its own
+  // (narrower) pattern, which would otherwise silently break the DELETE
+  // handler below for every normal /api/admin/campaigns/:id request.
+  params = matchPath('/api/admin/campaigns/:id', pathname);
   if (params && method === 'DELETE') {
     const subCount = await env.DB.prepare('SELECT COUNT(*) AS n FROM submissions WHERE campaign_id = ?').bind(params.id).first();
     if (subCount.n > 0) {
@@ -749,11 +876,10 @@ export async function handleAdmin(request, env, url) {
       return err(`'${status}' is not a valid participation status. Accepted: ${PART_STATUSES.join(', ')}.`);
     }
     await env.DB.prepare(
-      'UPDATE participations SET status = ?, status_note = ?, status_changed_at = ?, account_id = ? WHERE id = ?'
+      'UPDATE participations SET status = ?, status_note = ?, account_id = ? WHERE id = ?'
     ).bind(
       status || part.status,
       note != null ? note : part.status_note,
-      status && status !== part.status ? now() : part.status_changed_at,
       account_id !== undefined ? account_id : part.account_id,
       params.id
     ).run();
@@ -855,14 +981,9 @@ export async function handleAdmin(request, env, url) {
 
     const nextStatus = status || reqRow.status;
     await env.DB.prepare(
-      `UPDATE tester_requests SET status = ?, note = ?,
-         invited_at = CASE WHEN ? = 'invited' AND invited_at IS NULL THEN ? ELSE invited_at END,
-         confirmed_at = CASE WHEN ? = 'confirmed' AND confirmed_at IS NULL THEN ? ELSE confirmed_at END
-       WHERE id = ?`
+      'UPDATE tester_requests SET status = ?, note = ? WHERE id = ?'
     ).bind(
       nextStatus, note != null ? note : reqRow.note,
-      nextStatus, now(),
-      nextStatus, now(),
       params.id
     ).run();
     // Audit log: only an actual approval transition, not a re-save of an
@@ -926,6 +1047,31 @@ export async function handleAdmin(request, env, url) {
       await env.DB.prepare('UPDATE submissions SET status = ? WHERE id = ?').bind(status, params.id).run();
     }
     await reallocateCampaign(env.DB, sub.campaign_id);
+    return json({ ok: true });
+  }
+
+  // "I've looked at this video's sync issue, it's not worth chasing" --
+  // mirrors /api/admin/accounts/:id/acknowledge (migration 022) but for one
+  // submission's sync_error (migration 029). Deliberately reversible (unlike
+  // 'disqualified', it touches nothing about earning/locking): acknowledging
+  // stores the exact sync_error value, so it stays suppressed only while
+  // nothing has actually changed and reopens on its own the moment a fresh,
+  // different error occurs; un-acknowledging just clears it back out.
+  // MEDIA_NOT_FOUND/PRE_CONVERSION_MEDIA never need this -- they already
+  // read as calm, explained badges (TERMINAL_SYNC_ERRORS) with nothing to
+  // acknowledge.
+  params = matchPath('/api/admin/submissions/:id/acknowledge-sync-error', pathname);
+  if (params && method === 'PATCH') {
+    const { acknowledge } = await readJson(request);
+    const sub = await env.DB.prepare('SELECT id, sync_error FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub) return err('Not found', 404);
+    if (acknowledge === false) {
+      await env.DB.prepare('UPDATE submissions SET sync_error_acknowledged_as = NULL WHERE id = ?').bind(params.id).run();
+    } else {
+      if (!sub.sync_error) return err('This video has no sync issue to skip.');
+      await env.DB.prepare('UPDATE submissions SET sync_error_acknowledged_as = ? WHERE id = ?')
+        .bind(sub.sync_error, params.id).run();
+    }
     return json({ ok: true });
   }
 

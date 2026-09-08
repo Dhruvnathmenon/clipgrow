@@ -9,9 +9,32 @@
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// A sync_error that will never change no matter how many times we ask
+// again: the post is gone, or it predates Instagram publishing insights for
+// it at all. Single source of truth for "this is a settled fact, not an
+// open problem" -- clipState() below turns these into their own explained,
+// final states ('removed' / 'no_insights'); every admin surface that counts
+// or badges sync issues (src/routes/admin.js's Overview query, admin.html's
+// campaign video table) reads from this same list, so a clip can never
+// read as "stuck, investigate" in one place and "explained, nothing to do"
+// in another.
+export const TERMINAL_SYNC_ERRORS = ['MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA'];
+
 // How long a clip may go without a successful view fetch before it stops being
 // "a hiccup" and starts being reported as genuinely stuck.
 export const STALE_AFTER_MS = 3 * DAY_MS;
+
+// Every clip's view-tracking lifecycle is 7 days from the moment ClipGrow
+// picked it up (created_at -- paste time or auto-import time, never the
+// platform's own post date, which we may not even learn until the first
+// successful sync). Confirmed against this platform's real numbers: ~95% of
+// a clip's lifetime views land inside this window, so nothing past it is
+// worth spending Instagram's 200-calls/hour budget chasing. Once the window
+// closes, whatever `views` holds is final -- earnings.js's planInstagramSync
+// and refresh-jobs.js's buildAccountItems both stop offering the clip for a
+// sync at all, so nothing here writes a new column; the clip's own age is
+// the only fact needed.
+export const TRACKING_WINDOW_MS = 7 * DAY_MS;
 
 export function daysSince(ts) {
   if (!ts) return null;
@@ -28,6 +51,14 @@ export function clipState(s) {
   // Ruled out by the platform's own rules at import time -- currently a
   // YouTube upload that is not a Short. Tracked and visible, never earns.
   if (s.eligible === 0) return 'ineligible';
+
+  // Past its 7-day tracking window -- outranks every sync_error branch below
+  // on purpose. Once we've stopped asking, WHY a clip stopped moving (a real
+  // platform problem vs. simply aging out) no longer matters: the number is
+  // final either way, and a clip that just quietly aged out should never
+  // read as "stuck" or "reconnect needed" -- that's an open problem waiting
+  // on someone; this is an expected, calm ending waiting on no one.
+  if (Date.now() - (s.created_at || 0) > TRACKING_WINDOW_MS) return 'tracking_complete';
 
   if (s.sync_error) {
     if (s.sync_error === 'MEDIA_NOT_FOUND') return 'removed';
@@ -90,6 +121,12 @@ export function clipStateMessage(state, s) {
       // ago" to a clip that can never update would read as if it is broken
       // and getting worse, when the true fact is it was never going to work.
       return `Instagram does not provide view counts for anything posted before this account switched to Business/Creator. This one predates that switch, so it can never earn.`;
+    case 'tracking_complete':
+      // No staleNote -- same reasoning as 'no_insights': this clip isn't
+      // broken or getting worse, its 7-day window simply ran out on schedule.
+      return s.min_views && s.views < s.min_views
+        ? `This clip's 7-day tracking window has closed. It reached ${s.views} views, short of the campaign's ${s.min_views}-view minimum, so it earns nothing.`
+        : `This clip's 7-day tracking window has closed. ${s.views} views is the final count this campaign will pay on.`;
     case 'disconnected':
       return `The ${site} account this clip was posted from is disconnected. ${staleNote}`;
     case 'reconnect':
@@ -109,10 +146,4 @@ export function clipStateMessage(state, s) {
     default:
       return null;
   }
-}
-
-/** True when a clip is stuck badly enough that the admin should act on it. */
-export function needsAttention(state) {
-  return state === 'removed' || state === 'disconnected' ||
-         state === 'reconnect' || state === 'unavailable';
 }

@@ -65,9 +65,9 @@ test('a YouTube-only campaign gets the same request/wait/approved states as Inst
 test('a confirmed request moves YouTube to approved, exactly like Instagram', async () => {
   const env = seedEnv();
   await env.DB.prepare(
-    `INSERT INTO tester_requests (clipper_id, ig_username, identifier, platform, status, campaign_id, requested_at, confirmed_at)
-     VALUES (1, '@mychannel', '@mychannel', 'youtube', 'confirmed', 1, ?, ?)`
-  ).bind(NOW, NOW).run();
+    `INSERT INTO tester_requests (clipper_id, ig_username, identifier, platform, status, campaign_id, requested_at)
+     VALUES (1, '@mychannel', '@mychannel', 'youtube', 'confirmed', 1, ?)`
+  ).bind(NOW).run();
 
   const res = await clipperRequest(env, '/api/clipper/campaigns');
   const { campaigns } = await res.json();
@@ -96,9 +96,9 @@ test('OAuth start refuses to begin without an approved request, even hit directl
 test('OAuth start proceeds to Google once the request is confirmed', async () => {
   const env = seedEnv();
   await env.DB.prepare(
-    `INSERT INTO tester_requests (clipper_id, ig_username, identifier, platform, status, campaign_id, requested_at, confirmed_at)
-     VALUES (1, '@mychannel', '@mychannel', 'youtube', 'confirmed', 1, ?, ?)`
-  ).bind(NOW, NOW).run();
+    `INSERT INTO tester_requests (clipper_id, ig_username, identifier, platform, status, campaign_id, requested_at)
+     VALUES (1, '@mychannel', '@mychannel', 'youtube', 'confirmed', 1, ?)`
+  ).bind(NOW).run();
 
   const cookie = await createSessionCookie('clipper', 1, env.SESSION_SECRET);
   const request = new Request('https://clipgrow.in/api/auth/youtube/start?campaign_id=1', {

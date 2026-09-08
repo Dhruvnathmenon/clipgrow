@@ -24,6 +24,7 @@ import { withAccount, markAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
 import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, pruneOldEvents } from './refresh-events.js';
+import { TRACKING_WINDOW_MS } from './clipstate.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -89,6 +90,13 @@ export async function jobAccounts(db, { clipperId = null } = {}) {
 export async function buildAccountItems(db, account, { respectCooldown = true } = {}) {
   const items = [];
 
+  // A completed campaign (Section B3 -- auto-completed on budget exhaustion,
+  // or manually "Marked Over") is finished: no new clips picked up, and
+  // nothing already on it needs another view check either, regardless of a
+  // clip's own 7-day tracking window below. One connected account works one
+  // live campaign at a time, so this one check covers both legs.
+  if (account.campaign_status === 'completed') return items;
+
   // Paused means "submit nothing new", so the import leg is withheld while the
   // view legs below still run. Without this, pausing a clipper would silently
   // keep sweeping their uploads into the campaign.
@@ -96,11 +104,16 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
     items.push({ t: 'import', a: account.account_id });
   }
 
+  // Past its 7-day tracking window (clipstate.js's TRACKING_WINDOW_MS): the
+  // clip's view count is final, so there's nothing left to spend Instagram's
+  // 200-calls/hour budget checking. Excluded here, at the source, rather than
+  // filtered out after fetching -- it never even enters the queue.
   const { results } = await db.prepare(
     `SELECT id, ig_media_id, last_ok_sync_at FROM submissions
      WHERE account_id = ? AND status = 'active' AND locked_at IS NULL AND eligible != 0
+       AND created_at > ?
      ORDER BY id`
-  ).bind(account.account_id).all();
+  ).bind(account.account_id, Date.now() - TRACKING_WINDOW_MS).all();
 
   const now = Date.now();
   const due = (results || []).filter(s =>
@@ -158,10 +171,10 @@ export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy
   let res;
   try {
     res = await db.prepare(
-      `INSERT INTO refresh_jobs (kind, clipper_id, triggered_by, respect_cooldown, status,
+      `INSERT INTO refresh_jobs (kind, clipper_id, triggered_by, status,
          pending_json, accounts_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`
-    ).bind(kind, clipperId, triggeredBy, respectCooldown ? 1 : 0, JSON.stringify(pending),
+       VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`
+    ).bind(kind, clipperId, triggeredBy, JSON.stringify(pending),
            JSON.stringify(acctStats), ts, ts).run();
   } catch (e) {
     if (/UNIQUE constraint/i.test(e.message || '')) {
@@ -592,7 +605,8 @@ async function loadAccount(db, accountId, cache) {
   // reported success while writing nothing.
   const row = await db.prepare(
     `SELECT a.*, a.id AS account_id,
-            p.campaign_id, p.id AS participation_id, p.status AS part_status, c.allowed_platforms
+            p.campaign_id, p.id AS participation_id, p.status AS part_status,
+            c.allowed_platforms, c.status AS campaign_status
      FROM social_accounts a
      LEFT JOIN participation_accounts pa ON pa.account_id = a.id
      LEFT JOIN participations p ON p.id = pa.participation_id AND p.status IN ('active', 'paused')
@@ -658,13 +672,13 @@ async function runImport(db, env, account, counter, adapters) {
     const res = await db.prepare(
       `INSERT OR IGNORE INTO submissions
          (clipper_id, campaign_id, account_id, platform, ig_media_id, permalink, views, earning, status,
-          media_product_type, thumbnail_url, posted_at, created_at, source,
+          thumbnail_url, posted_at, created_at, source,
           duration_seconds, is_short, eligible)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, ?, 'auto', ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active', ?, ?, ?, 'auto', ?, ?, ?)`
     ).bind(
       account.clipper_id, account.campaign_id, account.account_id, account.platform,
       m.external_id, m.permalink || '',
-      m.media_type || null, m.thumbnail_url || null,
+      m.thumbnail_url || null,
       m.posted_at || Date.now(), Date.now(),
       m.duration_seconds == null ? null : m.duration_seconds,
       m.is_short == null ? null : (m.is_short ? 1 : 0),

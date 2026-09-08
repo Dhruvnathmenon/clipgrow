@@ -14,6 +14,7 @@ import {
 } from '../src/refresh-jobs.js';
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 /* A D1 stand-in covering exactly the queries the engine issues. Submissions
    and accounts are real mutable rows so guarded writes can be observed. */
@@ -87,7 +88,8 @@ function makeDb({ job, submissions = [], accounts = [], igCalls = [] } = {}) {
   function all(sql, a) {
     if (/SELECT id, ig_media_id, last_ok_sync_at FROM submissions/.test(sql)) {
       return { results: state.submissions.filter(s =>
-        s.account_id === a[0] && s.status === 'active' && s.locked_at == null && s.eligible !== 0) };
+        s.account_id === a[0] && s.status === 'active' && s.locked_at == null && s.eligible !== 0
+        && s.created_at > a[1]) };
     }
     if (/SELECT ig_media_id FROM submissions WHERE platform/.test(sql)) {
       return { results: state.submissions.filter(s => s.account_id === a[1]).map(s => ({ ig_media_id: s.ig_media_id })) };
@@ -118,7 +120,8 @@ const igAccount = (o = {}) => ({ id: 1, platform: 'instagram', username: 'ig', s
   access_token: 't', auto_import: 0, connected_at: 0, active_job_id: null, ...o });
 
 const clip = (o = {}) => ({ id: 1, account_id: 1, ig_media_id: 'm1', status: 'active',
-  locked_at: null, eligible: 1, views: 0, last_ok_sync_at: null, sync_error: null, ...o });
+  locked_at: null, eligible: 1, views: 0, last_ok_sync_at: null, sync_error: null,
+  created_at: Date.now(), ...o });
 
 // Adapter double: one call per Instagram id, recorded via onAttempt exactly as
 // the real igFetch does at the HTTP layer.
@@ -290,6 +293,19 @@ test('buildAccountItems: cooldown is respected for cron and ignored for a human 
 
   const human = await buildAccountItems(db, acct, { respectCooldown: false });
   assert.equal(human.length, 3, 'a human full refresh checks every eligible clip');
+});
+
+test('buildAccountItems: a clip past its 7-day tracking window is excluded, even with a human refresh', async () => {
+  const now = Date.now();
+  const subs = [
+    clip({ id: 1, ig_media_id: 'young', created_at: now - 6 * DAY }),
+    clip({ id: 2, ig_media_id: 'old', created_at: now - 8 * DAY })
+  ];
+  const db = makeDb({ submissions: subs, accounts: [igAccount()] });
+  const acct = { account_id: 1, platform: 'instagram', auto_import: 0 };
+
+  const items = await buildAccountItems(db, acct, { respectCooldown: false });
+  assert.deepEqual(items.map(i => i.m), ['young'], 'the 8-day-old clip is final -- never offered for another sync');
 });
 
 test('buildAccountItems: YouTube batches 50 clips per call instead of one item each', async () => {

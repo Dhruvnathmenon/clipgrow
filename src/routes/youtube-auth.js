@@ -147,16 +147,16 @@ export async function handleYoutubeAuth(request, env, url) {
         await env.DB.prepare(
           `UPDATE social_accounts SET username = ?, account_type = 'channel', access_token = ?,
              refresh_token = ?, token_expires_at = ?, meta_json = ?, status = 'connected',
-             last_error_code = NULL, last_error_at = NULL, last_checked_at = ? WHERE id = ?`
+             last_error_code = NULL, last_error_at = NULL WHERE id = ?`
         ).bind(channel.username, tokens.access_token, tokens.refresh_token,
-               tokens.expires_at, meta, now(), accountId).run();
+               tokens.expires_at, meta, accountId).run();
       } else {
         const res = await env.DB.prepare(
           `INSERT INTO social_accounts (clipper_id, platform, external_id, username, account_type,
-             access_token, refresh_token, token_expires_at, meta_json, status, connected_at, last_checked_at)
-           VALUES (?, 'youtube', ?, ?, 'channel', ?, ?, ?, ?, 'connected', ?, ?)`
+             access_token, refresh_token, token_expires_at, meta_json, status, connected_at)
+           VALUES (?, 'youtube', ?, ?, 'channel', ?, ?, ?, ?, 'connected', ?)`
         ).bind(session.sub, channel.id, channel.username, tokens.access_token,
-               tokens.refresh_token, tokens.expires_at, meta, now(), now()).run();
+               tokens.refresh_token, tokens.expires_at, meta, now()).run();
         accountId = res.meta.last_row_id;
       }
 

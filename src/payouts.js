@@ -54,7 +54,7 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
   const since = days > 0 ? Date.now() - days * DAY_MS : 0;
 
   const { results } = await db.prepare(
-    `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.source,
+    `SELECT s.id, s.permalink, s.views, s.earning, s.clipper_earning, s.status, s.sync_error, s.source,
             s.platform, s.duration_seconds, s.is_short, s.eligible,
             s.created_at, s.posted_at, s.last_synced_at, s.last_ok_sync_at,
             s.locked_at, s.locked_earning, s.lock_reason, s.payment_id,
@@ -105,7 +105,16 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       cpm: r.cpm,
       min_views: r.min_views || 0,
       views_needed: Math.max(0, (r.min_views || 0) - r.views),
-      earning: r.earning,
+      // What the CLIPPER is paid -- a CPM-multiple floor of the billed
+      // amount below, never the billed amount itself (src/earnings.js's
+      // allocateCampaignEarnings). This is the number the Payouts tab
+      // displays, lets the admin select, and pays.
+      earning: r.clipper_earning,
+      // The exact billed amount -- what the campaign budget was actually
+      // charged for this clip. Kept alongside `earning` so the admin can
+      // see both ("billed ₹170, clipper gets ₹150") rather than only the
+      // clipper figure with no visible explanation for the gap.
+      billed_earning: r.earning,
       uncapped_earning: uncapped,
       max_per_video: maxPerVideo,
       // True only when the per-video ceiling is the actual reason the number is
@@ -135,8 +144,11 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
       payment_id: r.payment_id,
       payment_reference: r.payment_reference,
       payment_paid_at: r.payment_paid_at,
-      // Only unlocked clips can be settled now.
-      selectable: !r.locked_at && r.status === 'active' && r.earning > 0,
+      // Only unlocked clips can be settled now. Gated on clipper_earning,
+      // not the billable amount -- a clip billed a small, non-CPM-multiple
+      // amount (e.g. ₹30 at ₹50 CPM) has nothing to actually pay the
+      // clipper yet, even though it's billable > 0.
+      selectable: !r.locked_at && r.status === 'active' && (r.clipper_earning || 0) > 0,
       locked: !!r.locked_at
     };
   });
@@ -209,7 +221,7 @@ export async function settlePayment(db, {
   const allIds = [...payIds, ...offIds];
   const placeholders = allIds.map(() => '?').join(',');
   const { results: rows } = await db.prepare(
-    `SELECT id, clipper_id, campaign_id, earning, status, locked_at
+    `SELECT id, clipper_id, campaign_id, earning, clipper_earning, status, locked_at
      FROM submissions WHERE id IN (${placeholders})`
   ).bind(...allIds).all();
 
@@ -263,9 +275,15 @@ export async function settlePayment(db, {
     };
   }
 
-  // The amount owed, computed from the clips themselves rather than trusted
-  // from the client, so the locked total always matches what was really earned.
-  const clipsTotal = payIds.reduce((n, id) => n + (found.get(id).earning || 0), 0);
+  // The amount owed to the CLIPPER, computed from the clips themselves
+  // rather than trusted from the client, so the locked total always matches
+  // what was really earned. This is the CPM-multiple-floor figure
+  // (src/earnings.js's allocateCampaignEarnings), never the billable one --
+  // billedTotal below is that separate figure, used only to work out the
+  // margin realized by this settlement.
+  const clipsTotal = payIds.reduce((n, id) => n + (found.get(id).clipper_earning || 0), 0);
+  const billedTotal = payIds.reduce((n, id) => n + (found.get(id).earning || 0), 0);
+  const marginCapture = billedTotal - clipsTotal;
 
   // The admin pays an amount they read off a page snapshot, but earnings move
   // whenever a refresh job lands. Without this check a clip whose earning rose
@@ -330,16 +348,35 @@ export async function settlePayment(db, {
     ledgerStmtIndex = stmts.length;
     stmts.push(built.statement);
   }
+  // The margin this settlement realizes: the gap between what these clips
+  // were billed and the CPM-multiple floor actually paid out above. Same
+  // batch as the payout and the locks below -- a margin entry can never
+  // exist without its matching settlement, or vice versa. See
+  // reversePayment for the symmetric void-on-unlock.
+  if (payIds.length && walletId && marginCapture > 0) {
+    const built = buildEntryStatement(db, {
+      direction: 'in', amount: marginCapture, wallet_id: walletId,
+      category: 'view_margin', campaign_id: campaignId || null,
+      clipper_id: clipperId, payment_id: paymentId,
+      note: `Fractional margin — ${payIds.length} clip(s) settled`,
+      occurred_at: ts, created_by: 'settle'
+    });
+    if (built.error) {
+      if (paymentId != null) await db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId).run();
+      return { error: `Could not record this settlement's margin in the ledger: ${built.error}. Nothing was charged.`, status: 500 };
+    }
+    stmts.push(built.statement);
+  }
   for (const id of payIds) {
     const row = found.get(id);
     stmts.push(db.prepare(
       `UPDATE submissions SET locked_at = ?, locked_earning = ?, lock_reason = 'paid', payment_id = ?
        WHERE id = ? AND locked_at IS NULL`
-    ).bind(ts, row.earning || 0, paymentId, id));
+    ).bind(ts, row.clipper_earning || 0, paymentId, id));
   }
   for (const id of offIds) {
     stmts.push(db.prepare(
-      `UPDATE submissions SET locked_at = ?, locked_earning = 0, lock_reason = 'below_min', earning = 0
+      `UPDATE submissions SET locked_at = ?, locked_earning = 0, lock_reason = 'below_min', earning = 0, clipper_earning = 0
        WHERE id = ? AND locked_at IS NULL`
     ).bind(ts, id));
   }
@@ -536,7 +573,7 @@ export async function writeOffAllBelowMin(db, { campaignId = null, clipperId = n
 
   const ts = now();
   await db.batch(rows.map(r => db.prepare(
-    `UPDATE submissions SET locked_at = ?, locked_earning = 0, lock_reason = 'below_min', earning = 0
+    `UPDATE submissions SET locked_at = ?, locked_earning = 0, lock_reason = 'below_min', earning = 0, clipper_earning = 0
      WHERE id = ? AND locked_at IS NULL`
   ).bind(ts, r.id)));
 

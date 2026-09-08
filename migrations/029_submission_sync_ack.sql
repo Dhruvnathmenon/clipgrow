@@ -1,0 +1,19 @@
+-- Lets an admin say "I've looked at this video, it's not worth chasing" for
+-- a specific submission's sync_error -- without that silently hiding a
+-- genuinely NEW problem on the same clip later. Same shape as
+-- social_accounts.mismatch_acknowledged_as (migration 022): not a plain
+-- "dismissed forever" boolean, but the exact sync_error value that was true
+-- at the moment of acknowledgment.
+--
+-- MEDIA_NOT_FOUND (deleted on the platform) and PRE_CONVERSION_MEDIA (posted
+-- before the account went Business/Creator) already get their own
+-- explained, final state from clipstate.js and are already excluded from
+-- the Overview banner (src/routes/admin.js) -- those two need no ack at all.
+-- This column is for everything else: a case the admin has personally
+-- decided is not worth chasing, on a clip-by-clip basis.
+ALTER TABLE submissions ADD COLUMN sync_error_acknowledged_as TEXT;
+-- Suppresses the sync-issue badge while submissions.sync_error still equals
+-- this value. The moment sync_error changes to anything else -- including
+-- clearing entirely on a later successful sync -- this no longer matches,
+-- so the badge reflects reality again automatically. No code elsewhere has
+-- to know this column exists.

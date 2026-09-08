@@ -33,7 +33,7 @@ function seed(jobs, accounts = []) {
 }
 
 const job = (o = {}) => ({
-  id: 1, kind: 'global', clipper_id: null, triggered_by: 'cron', respect_cooldown: 1,
+  id: 1, kind: 'global', clipper_id: null, triggered_by: 'cron',
   status: 'running', pending_json: '[]', invocations: 1,
   clips_fetched: 0, clips_failed: 0, clips_skipped: 0, imported: 0,
   accounts_json: '{}', error: null,

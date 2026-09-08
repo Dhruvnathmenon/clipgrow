@@ -30,9 +30,13 @@ export function cpmEarning(views, cpm) {
 /**
  * Why a clip is worth what it is worth.
  *
- * `amount` is the authoritative figure for the clip -- locked_earning once it
- * is locked, earning otherwise. Everything else is the arithmetic that
- * produced it, so a screen can show the working rather than a bare number.
+ * `amount` is the CLIPPER's authoritative figure -- locked_earning once
+ * locked (already the clipper's real settled amount, see src/payouts.js's
+ * settlePayment), or clipper_earning while live. Never the billable figure
+ * -- a clipper-facing screen must never lead with a number bigger than what
+ * they'll actually be paid. `billed_earning` carries the billable amount
+ * explicitly instead, as visible context ("billed ₹170, you get ₹150"),
+ * not a silent gap.
  *
  * reason is one of:
  *   paid        settled and locked; this is history and will not move
@@ -48,13 +52,15 @@ export function cpmEarning(views, cpm) {
 export function explainEarning(row, { cpm, minViews = 0, maxPerVideo = 0 } = {}) {
   const views = Number(row.views || 0);
   const locked = !!row.locked_at;
-  const amount = locked ? Number(row.locked_earning || 0) : Number(row.earning || 0);
+  const cpmVal = Number(cpm || 0);
+  const amount = locked ? Number(row.locked_earning || 0) : Number(row.clipper_earning || 0);
+  const billed = locked ? amount : Number(row.earning || 0);
 
   const full = cpmEarning(views, cpm);
   const ceiling = maxPerVideo > 0 ? Math.min(full, maxPerVideo) : full;
 
   const base = {
-    amount, views, cpm: Number(cpm || 0),
+    amount, billed_earning: billed, views, cpm: cpmVal,
     min_views: Number(minViews || 0),
     max_per_video: Number(maxPerVideo || 0),
     full_earning: full,
@@ -70,16 +76,35 @@ export function explainEarning(row, { cpm, minViews = 0, maxPerVideo = 0 } = {})
     return { ...base, reason: 'below_min', views_needed: Math.max(0, minViews - views) };
   }
   // The allocator applies the per-video cap first, then clamps to whatever
-  // budget is left. Comparing against both tells us which one actually bit.
-  if (amount < ceiling) return { ...base, reason: 'budget' };
-  if (ceiling < full) return { ...base, reason: 'capped' };
-  return { ...base, reason: 'cpm' };
+  // budget is left. Comparing the BILLABLE figures tells us which one
+  // actually bit -- amount (clipper) is a step removed from that
+  // comparison now that it's floored to a CPM multiple on top.
+  const budgetBit = billed < ceiling;
+  const cappedBit = !budgetBit && ceiling < full;
+  // How many more views unlock the next full CPM block, and what that
+  // block pays -- only meaningful when nothing else is capping/clamping
+  // the clip, which is exactly the plain 'cpm' case below.
+  const nextMilestone = (!budgetBit && !cappedBit && cpmVal > 0)
+    ? { views_needed: Math.max(0, (Math.floor(views / 1000) + 1) * 1000 - views), amount: amount + cpmVal }
+    : null;
+
+  if (budgetBit) return { ...base, reason: 'budget' };
+  if (cappedBit) return { ...base, reason: 'capped' };
+  return { ...base, reason: 'cpm', next_milestone: nextMilestone };
 }
 
 const RS = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 const NUM = (n) => Number(n || 0).toLocaleString('en-IN');
 
-/** One plain sentence a clipper can read, from the same explanation. */
+/**
+ * One plain sentence a clipper can read, from the same explanation.
+ *
+ * Leads with `amount` -- the real, paid-in-full-CPM-blocks figure -- in
+ * every case, never the billable one. ClipGrow pays in complete ₹cpm
+ * blocks; a clip billed ₹170 that pays ₹150 is not a shortfall to explain
+ * away, it's how the model always works, so the wording says so plainly
+ * rather than implying something went wrong.
+ */
 export function explainEarningText(x) {
   switch (x.reason) {
     case 'paid':
@@ -95,12 +120,17 @@ export function explainEarningText(x) {
     case 'below_min':
       return `${NUM(x.views_needed)} more view${x.views_needed === 1 ? '' : 's'} to start earning (minimum ${NUM(x.min_views)}).`;
     case 'capped':
-      return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.full_earning)}, ` +
-             `capped at this campaign's maximum of ${RS(x.max_per_video)} per video.`;
+      return `${RS(x.amount)} earned — this clip hit the campaign's maximum of ${RS(x.max_per_video)} per video. ` +
+             `ClipGrow pays in complete ${RS(x.cpm)} blocks, so it's paid in full.`;
     case 'budget':
-      return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.capped_earning)}, ` +
-             `but the campaign budget ran out — this clip earned ${RS(x.amount)} of it.`;
+      return `${RS(x.amount)} earned so far. The campaign budget is running low, so the rest of this clip's ` +
+             `views (billed ${RS(x.billed_earning)}) are waiting on more budget before they can be paid.`;
+    case 'cpm':
+      return x.next_milestone && x.next_milestone.views_needed > 0
+        ? `${RS(x.amount)} earned so far. ${NUM(x.next_milestone.views_needed)} more ` +
+          `view${x.next_milestone.views_needed === 1 ? '' : 's'} unlocks your next ${RS(x.cpm)}.`
+        : `${RS(x.amount)} earned so far.`;
     default:
-      return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.amount)}.`;
+      return `${RS(x.amount)} earned so far.`;
   }
 }

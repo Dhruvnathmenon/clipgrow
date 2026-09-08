@@ -32,7 +32,6 @@ function seed({ budget = 100000, feePercent = 20, kind = 'client', clips = [] } 
                  password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW }],
     campaigns: [{ id: 7, name: 'Acme', cpm: 40, budget, status: 'active', created_at: NOW,
                   min_views: 1000, allowed_platforms: 'instagram',
-                  client_id: kind === 'client' ? 1 : null,
                   campaign_kind: kind, fee_percent: feePercent }],
     submissions: clips.map((c, i) => ({
       id: 100 + i, clipper_id: 1, campaign_id: 7, platform: 'instagram',

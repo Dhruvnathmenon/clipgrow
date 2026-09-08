@@ -16,9 +16,13 @@ function campaign(overrides = {}) {
 
 function sub(overrides = {}) {
   const now = Date.now();
+  // This suite is about payableClips/settlement plumbing, not the
+  // fractional-margin mechanism -- clipper_earning defaults to match
+  // earning (no margin gap) unless a test explicitly overrides it.
+  const earning = overrides.earning ?? 0;
   return {
     id: 1, clipper_id: 1, campaign_id: 1, account_id: null,
-    permalink: 'https://instagram.com/reel/x', views: 0, earning: 0,
+    permalink: 'https://instagram.com/reel/x', views: 0, earning, clipper_earning: earning,
     status: 'active', sync_error: null, source: 'manual', platform: 'instagram',
     duration_seconds: null, is_short: null, eligible: 1,
     created_at: now, posted_at: now, last_synced_at: null, last_ok_sync_at: null,
