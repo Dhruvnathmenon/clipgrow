@@ -161,6 +161,14 @@ export async function linkParticipationAccount(db, participationId, accountId, p
   if (platform === 'instagram') {
     await db.prepare('UPDATE participations SET account_id = ? WHERE id = ?').bind(accountId, participationId).run();
   }
+  // Auto-reinstatement for a participation the inactivity cleanup flagged
+  // (removeInactiveJoins, src/refresh-jobs.js): connecting anything at all
+  // is the exact condition that would have prevented the flag in the first
+  // place, so the moment it happens they're back -- no re-joining, no admin
+  // action, and nothing else about the participation ever moved while
+  // flagged, so there's nothing to "restore" beyond clearing this.
+  await db.prepare('UPDATE participations SET inactive_at = NULL WHERE id = ? AND inactive_at IS NOT NULL')
+    .bind(participationId).run();
 }
 
 export async function unlinkParticipationAccount(db, participationId, platform) {

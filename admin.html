@@ -1405,18 +1405,50 @@
       revoked:'Revoked', disconnected:'Disconnected'
     };
 
+    // wa.me needs a full international number. Numbers here are stored as
+    // plain 10-digit Indian mobile numbers (the only kind this form has ever
+    // collected), so a 10-digit value gets '91' prefixed; anything else is
+    // left as-is on the assumption it already carries a country code.
+    function waNumber(raw){
+      const digits=String(raw||'').replace(/\D/g,'');
+      if(!digits) return null;
+      return digits.length===10?'91'+digits:digits;
+    }
+
     /* One line per account, naming it, so the admin knows where to look
-       instead of opening every clipper in turn to find the broken one. */
+       instead of opening every clipper in turn to find the broken one --
+       plus what actually fixes it and by whom, and a real way to act on it
+       from here: message the clipper directly (if a number is on file), or
+       Unflag once you've already handled it some other way. Unflagging
+       reuses the exact mechanism the Issues panel already has (migration
+       022) -- it un-flags itself again automatically the moment a NEW
+       error occurs, so this is never a "dismiss forever". */
     function troubleLine(a){
       const handle=a.platform==='youtube'?esc(a.username||''):'@'+esc(a.username||'');
+      const importIssue=String(a.last_error_code||'').startsWith('IMPORT_');
       const why=ACCOUNT_TROUBLE[a.last_error_code]
-        ||(String(a.last_error_code||'').startsWith('IMPORT_')?'new uploads are not being picked up':'needs attention');
+        ||(importIssue?'new uploads are not being picked up':'needs attention');
+      // A needs_reauth account can ONLY be fixed by the clipper themselves,
+      // reconnecting from their own dashboard -- there is no admin-side
+      // fix, and no button here can do it for them. An import failure is a
+      // different animal (often an account-type or permission issue on the
+      // platform's side) so it gets its own, softer wording.
+      const fix=!importIssue
+        ?'Only the clipper can fix this — nothing here reconnects it for them.'
+        :'Worth checking their account type and permissions on the platform, or asking them to reconnect.';
+      const wa=waNumber(a.contact_number);
+      const msg=`Hi ${a.clipper}, your ${platName(a.platform)} connection on ClipGrow needs reconnecting (${why}). Please open your ClipGrow dashboard and reconnect it -- nothing is lost, it picks up right where it left off.`;
       return `<div class="trouble"><span class="badge ${platBadge(a.platform)}">${platName(a.platform)}</span>
-        <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>`;
+        <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>
+        <div class="muted" style="font-size:.72rem;margin:.1rem 0 .55rem 1.5rem">${esc(fix)}
+          ${wa?`· <a href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener" style="color:var(--neon)">Message via WhatsApp</a>`
+              :'· no contact number on file'}
+          · <button class="btn btn-ghost btn-sm" onclick="acknowledgeAccountIssue(${a.id},'error')" style="margin-left:.2rem">Unflag</button>
+        </div>`;
     }
 
     async function loadOverview(){
-      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],stalled_jobs:stalledJobs=[]}=await api('/api/admin/overview');
+      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],transient_errors:transient=[],stalled_jobs:stalledJobs=[]}=await api('/api/admin/overview');
       document.getElementById('hero-views').innerHTML=
         `<div class="hero-stat"><div class="stat-val">${num(o.total_views)}</div><div class="stat-lbl">Total Views Generated</div></div>`;
       document.getElementById('overview').innerHTML=`
@@ -1462,13 +1494,25 @@
         const who=j.kind==='global'?'Global refresh':`Refresh for clipper #${j.clipper_id}`;
         urgent.push(`<div class="trouble"><strong>${who} (job #${j.id})</strong> — no progress for ${mins} min, started by ${esc(j.triggered_by||'?')}. It is blocking new syncs until it is retried or auto-released.</div>`);
       });
+      // Named the same way the urgent list is, instead of a bare count with
+      // no way to see which clips or check for yourself -- that read as
+      // something that might need attention with nothing to actually look
+      // at. This genuinely needs no action: it's the normal noise of an
+      // API rate limit or a momentary blip, and it clears on its own within
+      // 6 hours (the next cron sync). It only becomes the URGENT list above
+      // if the SAME clip is still failing 12+ hours later.
       const soft=[];
-      const passing=o.submissions_with_errors-o.submissions_stuck;
-      if(passing>0) soft.push(`${passing} video(s) hit a transient sync error, expected to clear on the next sync`);
+      if(transient.length) soft.push(transient.map(a=>{
+        const handle=a.username?(a.platform==='youtube'?esc(a.username):'@'+esc(a.username)):'no linked account';
+        return `<div class="trouble"><span class="badge ${platBadge(a.platform||'instagram')}">${platName(a.platform||'instagram')}</span>
+          <strong>${handle}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${num(a.clips)} video(s)</div>`;
+      }).join(''));
 
       document.getElementById('health').innerHTML =
         (urgent.length?`<div class="alert bad"><strong>Needs attention</strong>${urgent.join('')}</div>`:'') +
-        (soft.length?`<div class="alert info" style="margin-top:.6rem"><strong>FYI:</strong> ${soft.join(' · ')}</div>`:'');
+        (soft.length?`<div class="alert info" style="margin-top:.6rem"><strong>FYI — nothing to do:</strong>
+          <div class="muted" style="font-size:.78rem;margin:.2rem 0 .4rem">A rate limit or momentary API hiccup, not a real problem. Clears itself on the next sync (within 6 hours). Only worth checking if the exact same clip is still here after that -- it would move up to "Needs attention" on its own if so.</div>
+          ${soft.join('')}</div>`:'');
     }
 
     /* ---------- blueprint upload ---------- */
@@ -1597,31 +1641,47 @@
           api('/api/admin/campaigns/'+id+'/participants'),
           api('/api/admin/campaigns/'+id)
         ]);
-        // Kicked participants no longer sit in the same table as everyone
-        // still on the roster -- a kick used to be reversible with the exact
-        // same one-click "Reinstate" a pause gets, which reads as barely a
-        // kick at all. They now live in their own, collapsed-by-default
-        // section below; reinstating still means opening it and clicking
-        // Reinstate there, never a stray button next to active people.
-        const activeParticipants=participants.filter(p=>p.status!=='kicked');
+        // Three buckets, not one flat list. Kicked used to sit in the same
+        // table as everyone still on the roster with a one-click "Reinstate"
+        // barely different from a pause -- now its own collapsed section,
+        // admin-only to reverse. Inactive (joined a week+ ago, never
+        // connected anything -- src/refresh-jobs.js's removeInactiveJoins)
+        // is a THIRD bucket, not the same as kicked: nothing was done to
+        // them, status is still 'active' underneath, and it clears itself
+        // the instant they connect -- the manual button here is just a
+        // shortcut for "I already know they're back", never required.
         const kickedParticipants=participants.filter(p=>p.status==='kicked');
-        const partRow=p=>`<tr>
+        const inactiveParticipants=participants.filter(p=>p.status!=='kicked'&&p.inactive_at);
+        const activeParticipants=participants.filter(p=>p.status!=='kicked'&&!p.inactive_at);
+        const partRow=p=>{
+          const inactive=p.status!=='kicked'&&p.inactive_at;
+          return `<tr>
               <td class="handle">${esc(p.display_name||p.username)}</td>
               <td>${linkedAccounts(p,{badge:true})}</td>
               <td>${num(p.videos)}</td><td>${num(p.views)}</td><td class="money">${money(p.earned)}</td>
-              <td><span class="badge ${p.status}">${p.status}</span></td>
+              <td>${inactive
+                ?`<span class="badge needs_reauth" title="Joined ${when(p.joined_at)}, never connected an account">not connected</span>`
+                :`<span class="badge ${p.status}">${p.status}</span>`}</td>
               <td><div class="actions">
-                ${p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
-                ${p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
+                ${inactive?`<button class="btn btn-ghost btn-sm" onclick="reinstateInactive(${p.id})" title="Not required -- clears on its own the moment they connect an account">Reinstate now</button>`:''}
+                ${!inactive&&p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
+                ${!inactive&&p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
                 ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
                                      :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
               </div></td></tr>`;
+        };
         const partTable=rows=>`<div class="table-wrap"><table>
             <thead><tr><th>Clipper</th><th>Account</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${rows.map(partRow).join('')}</tbody></table></div>`;
         box.innerHTML=`
           <div class="sub-h">Participants (${activeParticipants.length})</div>
           ${activeParticipants.length?partTable(activeParticipants):'<p class="muted">No clippers have joined yet.</p>'}
+
+          <details style="margin:1rem 0">
+            <summary class="sub-h" style="display:inline-block;cursor:pointer">Not Connected (${inactiveParticipants.length})</summary>
+            <p class="note" style="margin:.4rem 0 .6rem">Joined a week or more ago and never connected an account. Not kicked, not paused -- just not counted as active. Reinstates itself the instant they connect one; "Reinstate now" is only for when you already know they're back.</p>
+            <div>${inactiveParticipants.length?partTable(inactiveParticipants):'<p class="muted">Nobody currently flagged.</p>'}</div>
+          </details>
 
           <details style="margin:1rem 0">
             <summary class="sub-h" style="display:inline-block;cursor:pointer">Removed (${kickedParticipants.length})</summary>
@@ -1672,6 +1732,15 @@
       }
       try{ await api('/api/admin/participations/'+id,{method:'PATCH',body:JSON.stringify({status,note})});
         toast('Participant updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    // Manual shortcut only -- this clears on its own the instant the
+    // clipper connects an account (linkParticipationAccount, src/db.js).
+    // Use this when you already know they're back through some other
+    // channel and don't want to wait.
+    window.reinstateInactive=async function(id){
+      try{ await api('/api/admin/participations/'+id,{method:'PATCH',body:JSON.stringify({clear_inactive:true})});
+        toast('Reinstated'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
     window.setSub=async function(id,status){
@@ -1804,7 +1873,11 @@
       try{
         await api('/api/admin/accounts/'+id+'/acknowledge',{method:'PATCH',body:JSON.stringify({type})});
         toast('Unflagged');
+        // Called from both the Issues panel (Clippers tab) and the
+        // Overview's "Needs attention" banner (troubleLine) -- refresh
+        // whichever one you're actually looking at.
         loadAccountsPanel();
+        loadOverview();
       }catch(e){ toast(e.message,true); }
     };
 
@@ -1971,7 +2044,7 @@
       clipper_created:'Created a clipper login', clipper_kicked:'Kicked from a campaign',
       participation_paused:'Paused a participation', account_removed:'Disconnected an account',
       refresh_triggered:'Triggered a refresh', access_request_approved:'Approved an access request',
-      participation_auto_removed:'Auto-removed (joined, never connected an account)'
+      participation_marked_inactive:'Flagged inactive (joined, never connected an account)'
     };
     function auditRow(e){
       return `<tr>
@@ -2018,6 +2091,54 @@
         const d=await api('/api/admin/clippers/'+id);
         document.getElementById('cd-subtitle').textContent=
           `@${d.clipper.username} · joined ${when(d.clipper.created_at)} · ${d.clipper.status}${d.clipper.upi_id?'':' · no UPI on file'}`;
+        // Built outside the big body.innerHTML template below rather than as
+        // an inline `${(()=>{...})()}` -- an IIFE's own braces sitting inside
+        // a `${}` substitution defeats page-functions.test.mjs's brace
+        // tracking (it only understands `${`/`}` pairs, not arbitrary nested
+        // code blocks), which silently broke detection for everything in the
+        // template after it.
+        const campaignsSectionHtml=(()=>{
+          // Same three-way split as the campaign's own Participants table.
+          const kickedP=d.participations.filter(p=>p.status==='kicked');
+          const inactiveP=d.participations.filter(p=>p.status!=='kicked'&&p.inactive_at);
+          const activeP=d.participations.filter(p=>p.status!=='kicked'&&!p.inactive_at);
+          const linkCell=p=>p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
+              `<span class="acct-line">${a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—')} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`
+            ).join('<br>'):'<span class="muted">&mdash;</span>';
+          const row=p=>{
+            const inactive=p.status!=='kicked'&&p.inactive_at;
+            return `<tr>
+              <td>${esc(p.campaign_name)}</td>
+              <td class="muted">${linkCell(p)}</td>
+              <td>${inactive
+                ?`<span class="badge needs_reauth" title="Joined ${when(p.joined_at)}, never connected an account">not connected</span>`
+                :`<span class="badge ${p.status}">${p.status}</span>`}</td>
+              <td class="muted">${esc(p.status_note||'')}</td>
+              <td><div class="actions">
+                ${inactive?`<button class="btn btn-ghost btn-sm" onclick="reinstateInactive(${p.id})" title="Not required -- clears on its own the moment they connect an account">Reinstate now</button>`:''}
+                ${!inactive&&p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
+                ${!inactive&&p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
+                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
+                                     :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
+              </div></td></tr>`;
+          };
+          const table=rows=>`<div class="table-wrap"><table>
+              <thead><tr><th>Campaign</th><th>Linked Account(s)</th><th>Status</th><th>Note</th><th></th></tr></thead>
+              <tbody>${rows.map(row).join('')}</tbody></table></div>`;
+          return `
+          <div class="sub-h">Campaigns &amp; Which Account Is Linked (${activeP.length})</div>
+          ${activeP.length?table(activeP):'<p class="muted">Not in any campaign yet.</p>'}
+
+          <details style="margin:1rem 0">
+            <summary class="sub-h" style="display:inline-block;cursor:pointer">Not Connected (${inactiveP.length})</summary>
+            <div style="margin-top:.6rem">${inactiveP.length?table(inactiveP):'<p class="muted">Nobody currently flagged.</p>'}</div>
+          </details>
+
+          <details style="margin:1rem 0">
+            <summary class="sub-h" style="display:inline-block;cursor:pointer">Removed (${kickedP.length})</summary>
+            <div style="margin-top:.6rem">${kickedP.length?table(kickedP):'<p class="muted">Not removed from anything.</p>'}</div>
+          </details>`;
+        })();
         body.innerHTML=`
           <div class="sub-h">Overview</div>
           <div class="stats">
@@ -2063,39 +2184,7 @@
             </tr>`).join('')}</tbody></table></div>
             <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
 
-          ${(()=>{
-            // Same split as the campaign's own Participants table: a kick
-            // is not a one-click-reversible pause, so it doesn't share a
-            // table (or an "Activate" button that meant two different
-            // things depending on which state you started from).
-            const activeP=d.participations.filter(p=>p.status!=='kicked');
-            const kickedP=d.participations.filter(p=>p.status==='kicked');
-            const linkCell=p=>p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
-                `<span class="acct-line">${a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—')} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`
-              ).join('<br>'):'<span class="muted">&mdash;</span>';
-            const row=p=>`<tr>
-              <td>${esc(p.campaign_name)}</td>
-              <td class="muted">${linkCell(p)}</td>
-              <td><span class="badge ${p.status}">${p.status}</span></td>
-              <td class="muted">${esc(p.status_note||'')}</td>
-              <td><div class="actions">
-                ${p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
-                ${p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
-                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
-                                     :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
-              </div></td></tr>`;
-            const table=rows=>`<div class="table-wrap"><table>
-              <thead><tr><th>Campaign</th><th>Linked Account(s)</th><th>Status</th><th>Note</th><th></th></tr></thead>
-              <tbody>${rows.map(row).join('')}</tbody></table></div>`;
-            return `
-          <div class="sub-h">Campaigns &amp; Which Account Is Linked (${activeP.length})</div>
-          ${activeP.length?table(activeP):'<p class="muted">Not in any campaign yet.</p>'}
-
-          <details style="margin:1rem 0">
-            <summary class="sub-h" style="display:inline-block;cursor:pointer">Removed (${kickedP.length})</summary>
-            <div style="margin-top:.6rem">${kickedP.length?table(kickedP):'<p class="muted">Not removed from anything.</p>'}</div>
-          </details>`;
-          })()}
+          ${campaignsSectionHtml}
 
           <div class="sub-h">Videos (${d.submissions.length})</div>
           ${d.submissions.length?`<div class="table-wrap"><table>

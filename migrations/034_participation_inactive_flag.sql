@@ -1,0 +1,12 @@
+-- Corrects yesterday's inactive-join cleanup (introduced same day, never
+-- run in production): removeInactiveJoins used to DELETE the participation
+-- outright. The founder's actual requirement is softer -- these clippers
+-- haven't done anything wrong, they just haven't connected yet, and losing
+-- their spot entirely (needing a fresh Join click) was the wrong shape for
+-- that. inactive_at marks a participation the cleanup flagged; status stays
+-- 'active' throughout, so every clipper-facing code path (campaign
+-- visibility, connect eligibility) is completely unaffected -- nothing
+-- about their experience changes until this is set. The moment they
+-- connect ANY account, linkParticipationAccount (src/db.js) clears it
+-- automatically -- no re-joining, no admin action, no lost history.
+ALTER TABLE participations ADD COLUMN inactive_at INTEGER;

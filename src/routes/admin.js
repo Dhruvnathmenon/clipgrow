@@ -157,15 +157,21 @@ export async function handleAdmin(request, env, url) {
 
     // The counts above say something is wrong; these say WHICH account, so the
     // banner can name it. A count alone means opening every clipper in turn to
-    // find the one that needs attention.
-    const { results: problemAccounts } = await env.DB.prepare(
-      `SELECT a.id, a.platform, a.username, a.status, a.last_error_code,
-              COALESCE(cl.display_name, cl.username) AS clipper
+    // find the one that needs attention. Fetches every candidate row and
+    // filters with accountIssues() -- the exact same open/acknowledged logic
+    // the Issues panel already uses -- rather than re-deriving the
+    // acknowledgment check in SQL a second time and risking the two drifting
+    // apart (this banner used to skip the ack check entirely, so unflagging
+    // an account elsewhere never made it stop showing up here).
+    const { results: problemCandidates } = await env.DB.prepare(
+      `SELECT a.id, a.platform, a.username, a.status, a.last_error_code, a.last_error_at, a.error_acknowledged_at,
+              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
        WHERE a.status = 'needs_reauth'
           OR (a.status = 'connected' AND a.last_error_code LIKE 'IMPORT!_%' ESCAPE '!')
        ORDER BY a.platform, cl.username`
     ).all();
+    const problemAccounts = (problemCandidates || []).filter(a => accountIssues(a).errorOpen);
 
     // Stuck clips grouped by account: five clips stuck on one account is one
     // problem to go and look at, not five.
@@ -189,6 +195,27 @@ export async function handleAdmin(request, env, url) {
        ORDER BY clips DESC`
     ).bind(Date.now() - STUCK_AFTER_MS).all();
 
+    // The FYI line's transient errors, named the same way stuckAccounts
+    // above names the urgent ones -- "4 video(s) hit a transient sync
+    // error" with no way to see which ones was the actual complaint: it
+    // read as if it might need attention with nothing to check. Same query
+    // shape as stuckAccounts, flipped to the NOT-yet-12h+ side of the same
+    // cutoff, so between the two lists every submissions_with_errors row is
+    // accounted for exactly once.
+    const { results: transientErrors } = await env.DB.prepare(
+      `SELECT a.platform, a.username, COALESCE(cl.display_name, cl.username) AS clipper,
+              COUNT(*) AS clips
+       FROM submissions s
+       JOIN clippers cl ON cl.id = s.clipper_id
+       LEFT JOIN social_accounts a ON a.id = s.account_id
+       WHERE s.sync_error IS NOT NULL AND s.status = 'active' AND s.locked_at IS NULL
+         AND COALESCE(s.last_ok_sync_at, s.created_at) >= ?
+             AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             AND ${NOT_ACKNOWLEDGED_SQL}
+       GROUP BY s.account_id
+       ORDER BY clips DESC`
+    ).bind(Date.now() - STUCK_AFTER_MS).all();
+
     // A wedged refresh job is otherwise invisible: publicJob only computes
     // `stalled` when someone polls that specific job id, and there is no job
     // list. Meanwhile it blocks every subsequent sync.
@@ -203,6 +230,7 @@ export async function handleAdmin(request, env, url) {
       overview: { ...s, outstanding: await totalOutstanding(env.DB) },
       problem_accounts: problemAccounts || [],
       stuck_accounts: stuckAccounts || [],
+      transient_errors: transientErrors || [],
       stalled_jobs: stalledJobs || []
     });
   }
@@ -737,7 +765,7 @@ export async function handleAdmin(request, env, url) {
   params = matchPath('/api/admin/campaigns/:id/participants', pathname);
   if (params && method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT p.id, p.status, p.status_note, p.joined_at, p.clipper_id,
+      `SELECT p.id, p.status, p.status_note, p.joined_at, p.clipper_id, p.inactive_at,
               cl.username, cl.display_name,
               a.username AS account_username, a.status AS account_status, a.account_type, a.last_error_code,
               (SELECT GROUP_CONCAT(a2.platform || ':' || COALESCE(a2.username,'') || ':' || a2.status, '|')
@@ -869,18 +897,22 @@ export async function handleAdmin(request, env, url) {
   // --------------------------------------------------------- participations
   params = matchPath('/api/admin/participations/:id', pathname);
   if (params && method === 'PATCH') {
-    const { status, note, account_id } = await readJson(request);
+    const { status, note, account_id, clear_inactive } = await readJson(request);
     const part = await env.DB.prepare('SELECT * FROM participations WHERE id = ?').bind(params.id).first();
     if (!part) return err('Not found', 404);
     if (status && !PART_STATUSES.includes(status)) {
       return err(`'${status}' is not a valid participation status. Accepted: ${PART_STATUSES.join(', ')}.`);
     }
     await env.DB.prepare(
-      'UPDATE participations SET status = ?, status_note = ?, account_id = ? WHERE id = ?'
+      'UPDATE participations SET status = ?, status_note = ?, account_id = ?, inactive_at = ? WHERE id = ?'
     ).bind(
       status || part.status,
       note != null ? note : part.status_note,
       account_id !== undefined ? account_id : part.account_id,
+      // Manual early reinstatement -- the automatic path is connecting an
+      // account (linkParticipationAccount clears this on its own); this is
+      // for the admin to say "I know they're back" without waiting on that.
+      clear_inactive ? null : part.inactive_at,
       params.id
     ).run();
     // Kicking freezes this clipper's unpaid clips at what they are worth right

@@ -331,11 +331,11 @@ export default {
       }
 
       // A joined-but-never-connected participation a week or older is
-      // removed outright -- see removeInactiveJoins's own comment for why
-      // this is safe to run unattended every cron cycle.
+      // flagged inactive (not removed) -- see removeInactiveJoins's own
+      // comment for why this is safe to run unattended every cron cycle.
       try {
-        const removed = await removeInactiveJoins(env.DB);
-        if (removed.length) console.log(`[cron sync] removed inactive join(s): ${removed.join(', ')}`);
+        const flagged = await removeInactiveJoins(env.DB);
+        if (flagged.length) console.log(`[cron sync] flagged inactive join(s): ${flagged.join(', ')}`);
       } catch (e) {
         console.error('[cron sync] inactive-join cleanup failed', e && e.message);
       }

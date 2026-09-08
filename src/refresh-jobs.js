@@ -557,13 +557,24 @@ export async function reapStalledJobs(db, { now = Date.now() } = {}) {
 // roster -- inflates "joined" headcount with someone who will never post a
 // clip, and (until this) never surfaced as kicked, paused or anything else
 // that distinguishes them from someone genuinely working. One week is the
-// grace period; after that, pressing Join Campaign again is all it takes to
-// come back -- this is NOT the same as kicked, which blocks self-rejoining.
+// grace period.
 export const JOIN_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Removes a participation outright once it has gone a full week with zero
- * accounts ever linked to it.
+ * Flags a participation once it has gone a full week with zero accounts
+ * ever linked to it -- inactive_at (migration 034), not a status change and
+ * not a delete. This clipper hasn't done anything wrong, they just haven't
+ * connected yet, so nothing about their actual participation is disturbed:
+ * status stays 'active' throughout, every clipper-facing code path (campaign
+ * visibility, connect eligibility) is unaffected, and joined_at/history are
+ * untouched. It only changes what the ADMIN roster shows -- pulling them out
+ * of the "active" count into their own bucket -- and it clears itself
+ * automatically: the instant any account gets linked, linkParticipationAccount
+ * (src/db.js) clears inactive_at right back to NULL, so reconnecting (or a
+ * fresh Join click, which behaves identically) picks up from exactly where
+ * they left off. No admin action required either way, and nothing to lose --
+ * this is deliberately NOT the same as kicked, which blocks self-service
+ * recovery entirely and needs an admin to reverse it.
  *
  * "Zero accounts linked" is read from participation_accounts (migration
  * 012), not from social_accounts.status -- a connection that broke after
@@ -572,10 +583,6 @@ export const JOIN_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
  * detaching to relink) or never having connected at all leaves nothing
  * there. So someone whose token merely expired this week is never swept up
  * by this, only someone who never actually connected anything.
- *
- * A straight DELETE, not a status change: this is meant to be as reversible
- * as never having joined -- clicking Join Campaign again does a clean
- * INSERT (src/routes/clipper.js), no admin action required, unlike a kick.
  */
 export async function removeInactiveJoins(db, { now = Date.now(), gracePeriodMs = JOIN_GRACE_PERIOD_MS } = {}) {
   const cutoff = now - gracePeriodMs;
@@ -584,28 +591,30 @@ export async function removeInactiveJoins(db, { now = Date.now(), gracePeriodMs 
      FROM participations p
      JOIN clippers cl ON cl.id = p.clipper_id
      JOIN campaigns c ON c.id = p.campaign_id
-     WHERE p.status = 'active' AND p.joined_at <= ?
+     WHERE p.status = 'active' AND p.inactive_at IS NULL AND p.joined_at <= ?
        AND NOT EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)`
   ).bind(cutoff).all();
   const rows = results || [];
   if (!rows.length) return [];
 
-  const removed = [];
+  const flagged = [];
   for (const row of rows) {
-    // Guarded on status so a participation that changed between the SELECT
-    // and here (e.g. an admin kicked them in the same moment) is left alone.
-    const res = await db.prepare(`DELETE FROM participations WHERE id = ? AND status = 'active'`)
-      .bind(row.id).run();
+    // Guarded on status/inactive_at so a participation that changed between
+    // the SELECT and here (kicked in the same moment, or connected in the
+    // literal instant between the two queries) is left alone.
+    const res = await db.prepare(
+      `UPDATE participations SET inactive_at = ? WHERE id = ? AND status = 'active' AND inactive_at IS NULL`
+    ).bind(now, row.id).run();
     if ((res.meta && res.meta.changes) > 0) {
-      removed.push(row.id);
+      flagged.push(row.id);
       await logAction(db, {
-        staffType: 'system', staffName: 'Automatic (inactivity)', action: 'participation_auto_removed',
+        staffType: 'system', staffName: 'Automatic (inactivity)', action: 'participation_marked_inactive',
         targetType: 'clipper', targetId: row.clipper_id, targetLabel: row.username,
-        detail: `Removed from "${row.campaign_name}" — joined over a week ago, never connected an account.`
+        detail: `Marked inactive on "${row.campaign_name}" — joined over a week ago, never connected an account. Clears itself the moment they connect one.`
       });
     }
   }
-  return removed;
+  return flagged;
 }
 
 /**
