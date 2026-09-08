@@ -2,6 +2,7 @@ import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
+import { logError } from '../error-log.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, exchangeForLongLivedToken, fetchProfile, IgError
 } from '../instagram.js';
@@ -19,17 +20,40 @@ function redirect(path) {
   return new Response(null, { status: 302, headers: { Location: path } });
 }
 
-function failure(campaignId, e) {
+// These two are normal flow, not a problem worth the founder's attention:
+// NOT_APPROVED just means they haven't been approved yet (an expected step,
+// happens on every clipper before approval), and DENIED means they cancelled
+// Instagram's own permission screen (self-resolving -- they just try again).
+// Logging either would flood error_log with noise instead of real failures.
+const SILENT_CODES = new Set(['NOT_APPROVED', 'DENIED']);
+
+async function failure(env, session, campaignId, e) {
   const q = new URLSearchParams({ ig: 'error' });
   if (campaignId) q.set('campaign', String(campaignId));
+  let code, msg, fix;
   if (e instanceof IgError) {
-    q.set('code', e.code);
-    q.set('msg', e.message);
-    q.set('fix', e.fix || '');
+    code = e.code; msg = e.message; fix = e.fix || '';
   } else {
-    q.set('code', 'UNKNOWN');
-    q.set('msg', e && e.message ? e.message : 'Instagram connection failed.');
-    q.set('fix', 'Try again — if it keeps happening, tell the ClipGrow admin.');
+    code = 'UNKNOWN';
+    msg = e && e.message ? e.message : 'Instagram connection failed.';
+    fix = 'Try again — if it keeps happening, tell the ClipGrow admin.';
+  }
+  q.set('code', code);
+  q.set('msg', msg);
+  q.set('fix', fix);
+  if (!SILENT_CODES.has(code)) {
+    // The session only carries the clipper's id, not their name -- one extra
+    // lookup, but this path only runs on an actual failure, never on the
+    // happy path.
+    const clipper = session
+      ? await env.DB.prepare('SELECT username, display_name FROM clippers WHERE id = ?').bind(session.sub).first()
+      : null;
+    await logError(env.DB, {
+      actorType: 'clipper', actorId: session ? session.sub : null,
+      actorLabel: clipper ? (clipper.display_name || clipper.username) : null,
+      source: 'instagram_oauth', code, message: msg,
+      detail: e && e.stack, path: campaignId ? `campaign ${campaignId}` : null
+    });
   }
   return redirect('/dashboard.html?' + q.toString());
 }
@@ -61,7 +85,7 @@ export async function handleInstagramAuth(request, env, url) {
     if (!session) return redirect('/login.html');
 
     if (!env.IG_CLIENT_ID || !env.IG_CLIENT_SECRET) {
-      return failure(url.searchParams.get('campaign_id'), new IgError(
+      return failure(env, session, url.searchParams.get('campaign_id'), new IgError(
         'NOT_CONFIGURED',
         'Instagram connection is not switched on yet.',
         'The ClipGrow admin still needs to finish the Instagram app setup. Nothing you can fix from here.'
@@ -69,22 +93,22 @@ export async function handleInstagramAuth(request, env, url) {
     }
 
     const campaignId = url.searchParams.get('campaign_id');
-    if (!campaignId) return failure(null, new Error('No campaign was specified for this connection.'));
+    if (!campaignId) return failure(env, session, null, new Error('No campaign was specified for this connection.'));
 
     const clipper = await env.DB.prepare('SELECT status FROM clippers WHERE id = ?').bind(session.sub).first();
     if (!clipper || clipper.status !== 'active') {
-      return failure(campaignId, new Error('Your account is disabled, so accounts cannot be connected. Contact the ClipGrow admin.'));
+      return failure(env, session, campaignId, new Error('Your account is disabled, so accounts cannot be connected. Contact the ClipGrow admin.'));
     }
 
     const campaign = await getCampaignById(env.DB, campaignId);
-    if (!campaign) return failure(campaignId, new Error('Campaign not found.'));
+    if (!campaign) return failure(env, session, campaignId, new Error('Campaign not found.'));
     if (!campaignPlatforms(campaign).includes('instagram')) {
-      return failure(campaignId, new Error('This campaign does not accept Instagram.'));
+      return failure(env, session, campaignId, new Error('This campaign does not accept Instagram.'));
     }
 
     const part = await getParticipation(env.DB, session.sub, campaignId);
-    if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
-    if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
+    if (!part) return failure(env, session, campaignId, new Error('Join the campaign before connecting an account to it.'));
+    if (part.status === 'kicked') return failure(env, session, campaignId, new Error('You have been removed from this campaign.'));
 
     // The account must have been approved (added as a Meta app Tester) first.
     // Enforced here and not only by hiding the button, because this URL is a
@@ -93,7 +117,7 @@ export async function handleInstagramAuth(request, env, url) {
     // opaque platform error with an explanation of what to do next.
     const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'instagram');
     if (!gate.allowed) {
-      return failure(campaignId, new IgError('NOT_APPROVED', gate.title, gate.reason));
+      return failure(env, session, campaignId, new IgError('NOT_APPROVED', gate.title, gate.reason));
     }
 
     const redirectUri = callbackUri(env, url);
@@ -112,15 +136,15 @@ export async function handleInstagramAuth(request, env, url) {
 
     if (url.searchParams.get('error')) {
       const desc = url.searchParams.get('error_description') || 'You cancelled the Instagram connection.';
-      return failure(campaignId, new IgError('DENIED', desc, 'Connect again and tap Allow on every permission Instagram asks for.'));
+      return failure(env, session, campaignId, new IgError('DENIED', desc, 'Connect again and tap Allow on every permission Instagram asks for.'));
     }
 
     const code = url.searchParams.get('code');
     if (!session || !statePayload || !code) {
-      return failure(campaignId, new Error('That connection link expired. Start the connection again.'));
+      return failure(env, session, campaignId, new Error('That connection link expired. Start the connection again.'));
     }
     if (String(statePayload.sub) !== String(session.sub)) {
-      return failure(campaignId, new Error('That connection link belonged to a different login.'));
+      return failure(env, session, campaignId, new Error('That connection link belonged to a different login.'));
     }
 
     try {
@@ -181,7 +205,7 @@ export async function handleInstagramAuth(request, env, url) {
       const q = new URLSearchParams({ ig: 'connected', campaign: String(campaignId), handle: profile.username });
       return redirect('/dashboard.html?' + q.toString());
     } catch (e) {
-      return failure(campaignId, e);
+      return failure(env, session, campaignId, e);
     }
   }
 

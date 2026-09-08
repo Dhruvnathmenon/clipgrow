@@ -123,3 +123,25 @@ or the tools disappear from availability mid-session.
 `npx wrangler d1 execute clipgrow --remote --command "..."` via Bash
 instead. It's slower per call but has been consistently reliable this
 project, unlike the MCP connector.
+
+---
+
+## A semicolon inside a migration's `--` comment silently truncates the statement
+
+**Symptom:** `test/sql-queries.test.mjs` (or any test using
+`real-schema.mjs`) fails with `<file>.sql: incomplete input`, pointing at a
+`CREATE TABLE` that looks completely fine.
+
+**Cause:** `test/helpers/real-schema.mjs`'s `statements()` splits a
+migration file into statements with a naive `.split(';')` after stripping
+whole-line `--` comments — it does not understand that a `;` *inside* an
+inline trailing comment (e.g. `col INTEGER, -- id where known; NULL if not`)
+isn't a real statement terminator. The split happens right there, so the
+back half of the `CREATE TABLE` becomes its own fragment and fails to parse
+on its own.
+
+**Fix:** never put a literal `;` inside a `--` comment in a migration file
+— rephrase with a comma or an em dash, or move the comment to its own line
+above the column instead of trailing it. (Real example: migration 038's
+`error_log` table, caught immediately by this exact test before it ever
+reached a real database.)

@@ -235,6 +235,7 @@
       <button class="tab" data-v="testers" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
       <button class="tab" data-v="moderators" onclick="showView('moderators',this)">Moderators</button>
       <button class="tab" data-v="review" onclick="showView('review',this)">Video Review</button>
+      <button class="tab" data-v="errors" onclick="showView('errors',this)">Error Log <span class="tab-count" id="error-count"></span></button>
       <button class="tab" data-v="auditlog" onclick="showView('auditlog',this)" style="margin-left:auto">Audit Log</button>
     </div>
 
@@ -563,6 +564,29 @@
       </div>
     </div>
 
+    <!-- ERROR LOG -->
+    <div class="view" id="v-errors">
+      <div class="panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
+          <h2 class="panel-title">Errors</h2>
+          <div class="actions">
+            <button class="btn btn-ghost btn-sm on" id="err-filter-open" onclick="setErrorFilter(true)">Needs attention</button>
+            <button class="btn btn-ghost btn-sm" id="err-filter-all" onclick="setErrorFilter(false)">All (last 7 days)</button>
+          </div>
+        </div>
+        <p class="note" style="margin:.3rem 0 .9rem">
+          Real failures a clipper, moderator, or admin actually hit -- an Instagram/YouTube connect
+          that failed, or anything unexpected on the site. Routine "you typed something wrong"
+          messages aren't here; those already show up to the person directly. Anything not resolved
+          within 7 days is cleared out automatically.
+        </p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>When</th><th>Who</th><th>Where</th><th>What happened</th><th>Actions</th></tr></thead>
+          <tbody id="errors-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <!-- AUDIT LOG -->
     <div class="view" id="v-auditlog">
       <div class="panel">
@@ -822,6 +846,7 @@
       if(name==='testers') loadTesters();
       if(name==='moderators') loadModerators();
       if(name==='review') loadReviewQueue();
+      if(name==='errors') loadErrorLog();
       if(name==='auditlog') loadAuditLog();
     };
 
@@ -2062,6 +2087,69 @@
       }catch(e){ toast(e.message,true); }
     };
 
+    /* ── Error Log ── */
+    // Same as errActor/errorRow always distinguishing 'clipper' rows for the
+    // WhatsApp/Discord buttons -- source names the SYSTEM that failed, not
+    // who hit it.
+    const ERROR_SOURCE_LABEL={ instagram_oauth:'Instagram connect', youtube_oauth:'YouTube connect', api:'Site error' };
+    const ERROR_SOURCE_BADGE={ instagram_oauth:'neutral', youtube_oauth:'budget_full', api:'needs_reauth' };
+    let ERROR_SHOW_ALL=false;
+    function setErrorCount(n){
+      const el=document.getElementById('error-count');
+      if(!el) return;
+      el.textContent=n>0?n:'';
+      el.style.display=n>0?'':'none';
+    }
+    window.setErrorFilter=function(openOnly){
+      ERROR_SHOW_ALL=!openOnly;
+      document.getElementById('err-filter-open').classList.toggle('on',openOnly);
+      document.getElementById('err-filter-all').classList.toggle('on',!openOnly);
+      loadErrorLog();
+    };
+    function errorRow(e){
+      const who=e.actor_type==='clipper'?esc(e.actor_label||'Unknown clipper')
+        :e.actor_type==='moderator'?`${esc(e.actor_label||'Unknown moderator')} <span class="muted" style="font-size:.7rem">(moderator)</span>`
+        :e.actor_type==='client'?`${esc(e.actor_label||'Unknown client')} <span class="muted" style="font-size:.7rem">(client)</span>`
+        :e.actor_type==='admin'?'Admin'
+        :'<span class="muted">not signed in</span>';
+      const wa=e.actor_type==='clipper'?waNumber(e.contact_number):null;
+      const msg=e.actor_type==='clipper'
+        ?`Hi ${e.actor_label||'there'}, we saw an error on ClipGrow (${e.message}). Could you try again from your dashboard? Let us know if it keeps happening.`
+        :'';
+      const discordMsg=msg.replace(/'/g,"\\'");
+      return `<tr>
+        <td class="muted">${when(e.created_at)}</td>
+        <td>${who}</td>
+        <td><span class="badge ${ERROR_SOURCE_BADGE[e.source]||'neutral'}">${esc(ERROR_SOURCE_LABEL[e.source]||e.source)}</span>${e.code?` <span class="muted" style="font-size:.68rem">${esc(e.code)}</span>`:''}</td>
+        <td style="max-width:340px">${esc(e.message)}
+          ${e.detail?`<details style="margin-top:.25rem"><summary class="muted" style="font-size:.68rem;cursor:pointer">detail</summary><pre style="white-space:pre-wrap;font-size:.68rem;color:var(--muted-l);margin:.3rem 0 0">${esc(e.detail)}</pre></details>`:''}
+        </td>
+        <td class="actions">
+          ${wa?`<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}">WhatsApp</a>`:''}
+          ${e.actor_type==='clipper'&&e.discord_id?`<button class="btn btn-ghost btn-sm" onclick="messageOnDiscord('${e.discord_id}','${discordMsg}')">Discord</button>`:''}
+          ${e.resolved_at
+            ?`<button class="btn btn-ghost btn-sm" onclick="resolveErrorLog(${e.id},false)">Reopen</button>`
+            :`<button class="btn btn-sm" onclick="resolveErrorLog(${e.id},true)">Resolve</button>`}
+        </td>
+      </tr>`;
+    }
+    async function loadErrorLog(){
+      const {errors}=await api('/api/admin/error-log'+(ERROR_SHOW_ALL?'':'?unresolved=1'));
+      setErrorCount(errors.filter(e=>!e.resolved_at).length);
+      const body=document.getElementById('errors-body');
+      if(!body) return; // tab not in the DOM yet on first paint -- count above still updated
+      body.innerHTML=errors.length
+        ? errors.map(errorRow).join('')
+        : `<tr><td colspan="5" class="empty">${ERROR_SHOW_ALL?'Nothing in the last 7 days.':'Nothing needs attention.'}</td></tr>`;
+    }
+    window.resolveErrorLog=async function(id,resolved){
+      try{
+        await api('/api/admin/error-log/'+id,{method:'PATCH',body:JSON.stringify({resolved})});
+        toast(resolved?'Resolved':'Reopened');
+        loadErrorLog();
+      }catch(e){ toast(e.message,true); }
+    };
+
     /* ── Audit Log ── */
     let AUDIT_CURSOR=null;
     const AUDIT_ACTION_LABEL={
@@ -2666,7 +2754,11 @@
         run('Campaigns',loadCampaigns,'campaigns-body'),
         run('Clippers',loadClippers,'clippers-body'),
         run('Accounts',loadAccountsPanel,'accounts-panel'),
-        run('Access requests',loadTesters,null)
+        run('Access requests',loadTesters,null),
+        // The tab-count badge rides on every page load, same reasoning as
+        // Access requests above -- you should see "3 need attention" without
+        // having to think to open the tab.
+        run('Errors',loadErrorLog,null)
       ]);
     }
     /* ── Instagram tester queue ── */

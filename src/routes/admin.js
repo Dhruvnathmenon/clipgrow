@@ -24,6 +24,7 @@ import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.
 import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
 import { makeCallCounter } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
+import { listErrors, resolveError } from '../error-log.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, moderatorActivity
 } from '../reviews.js';
@@ -1674,6 +1675,43 @@ export async function handleAdmin(request, env, url) {
     const limit = Number(url.searchParams.get('limit')) || 50;
     const beforeId = url.searchParams.get('before_id') ? Number(url.searchParams.get('before_id')) : null;
     return json({ entries: await listAuditLog(env.DB, { limit, beforeId }) });
+  }
+
+  // ---------------------------------------------------------- error log
+  // What actually went wrong for a clipper/moderator/admin -- see
+  // src/error-log.js's own header for what feeds this and what's
+  // deliberately excluded (routine validation, and the two OAuth outcomes
+  // that are normal flow, not a problem).
+  if (pathname === '/api/admin/error-log' && method === 'GET') {
+    const unresolvedOnly = url.searchParams.get('unresolved') === '1';
+    const rows = await listErrors(env.DB, { unresolvedOnly });
+    // Contact info is joined live, not stored on the row -- an updated
+    // WhatsApp number or Discord ID should always be the one the "message
+    // them" button actually uses. actor_label, by contrast, is denormalised
+    // at write time (see error-log.js) so it isn't affected by this.
+    const clipperIds = [...new Set(rows.filter(r => r.actor_type === 'clipper' && r.actor_id).map(r => r.actor_id))];
+    let contactById = {};
+    if (clipperIds.length) {
+      const ph = clipperIds.map(() => '?').join(',');
+      const { results } = await env.DB.prepare(
+        `SELECT id, contact_number, discord_id FROM clippers WHERE id IN (${ph})`
+      ).bind(...clipperIds).all();
+      contactById = Object.fromEntries((results || []).map(r => [r.id, r]));
+    }
+    const errors = rows.map(r => ({
+      ...r,
+      contact_number: contactById[r.actor_id] ? contactById[r.actor_id].contact_number : null,
+      discord_id: contactById[r.actor_id] ? contactById[r.actor_id].discord_id : null
+    }));
+    return json({ errors });
+  }
+
+  params = matchPath('/api/admin/error-log/:id', pathname);
+  if (params && method === 'PATCH') {
+    const { resolved } = await readJson(request);
+    const ok = await resolveError(env.DB, params.id, { resolved: resolved !== false });
+    if (!ok) return err('Not found, or already in that state', 404);
+    return json({ ok: true });
   }
 
   // Diagnostic: shows every Instagram insights metric Meta will answer for one

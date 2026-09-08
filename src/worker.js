@@ -14,6 +14,29 @@ import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
+import { logError, pruneErrorLog } from './error-log.js';
+
+// A session only ever carries a role + a bare id (auth.js's signSession
+// payload) -- never a name -- so resolving a human-readable actor_label for
+// the error log needs one extra lookup per role. Only ever runs on an actual
+// unhandled failure, never on the happy path.
+async function resolveActor(env, session) {
+  if (!session) return { actorType: 'anonymous', actorId: null, actorLabel: null };
+  if (session.role === 'admin') return { actorType: 'admin', actorId: null, actorLabel: 'Admin' };
+  if (session.role === 'clipper') {
+    const row = await env.DB.prepare('SELECT username, display_name FROM clippers WHERE id = ?').bind(session.sub).first();
+    return { actorType: 'clipper', actorId: session.sub, actorLabel: row ? (row.display_name || row.username) : null };
+  }
+  if (session.role === 'moderator') {
+    const row = await env.DB.prepare('SELECT username, display_name FROM moderators WHERE id = ?').bind(session.sub).first();
+    return { actorType: 'moderator', actorId: session.sub, actorLabel: row ? (row.display_name || row.username) : null };
+  }
+  if (session.role === 'client') {
+    const row = await env.DB.prepare('SELECT username, company_name FROM clients WHERE id = ?').bind(session.sub).first();
+    return { actorType: 'client', actorId: session.sub, actorLabel: row ? (row.company_name || row.username) : null };
+  }
+  return { actorType: 'anonymous', actorId: null, actorLabel: null };
+}
 
 const handlers = [handleInstagramAuth, handleYoutubeAuth, handleAdmin, handleClipper, handleModerator, handleClient, handlePublic, handleMedia];
 
@@ -153,6 +176,21 @@ async function route(request, env, url) {
         if (res) return res;
       } catch (e) {
         console.error(`handler error on ${path}:`, e.stack || e.message);
+        // Safety net: catches whatever breaks next, not just the specific
+        // failure modes anyone thought to instrument explicitly (see
+        // instagram-auth.js / youtube-auth.js's own logError calls for
+        // those). A session lookup failing here must never turn a real 500
+        // into a worse one, so it's its own try/catch.
+        try {
+          const session = await getSession(request, env);
+          const actor = await resolveActor(env, session);
+          await logError(env.DB, {
+            ...actor, source: 'api', message: e && e.message ? e.message : 'Unhandled error',
+            detail: e && e.stack, path
+          });
+        } catch (logErr) {
+          console.error('error-log write failed:', logErr && logErr.message);
+        }
         return err('Internal server error', 500);
       }
     }
@@ -338,6 +376,15 @@ export default {
         if (flagged.length) console.log(`[cron sync] flagged inactive join(s): ${flagged.join(', ')}`);
       } catch (e) {
         console.error('[cron sync] inactive-join cleanup failed', e && e.message);
+      }
+
+      // error_log has no archive -- a row past 7 days is just gone (the
+      // founder's own call). Same retention-sweep shape as refresh_events.
+      try {
+        const pruned = await pruneErrorLog(env.DB);
+        if (pruned) console.log(`[cron sync] pruned ${pruned} error_log row(s) older than 7 days`);
+      } catch (e) {
+        console.error('[cron sync] error_log prune failed', e && e.message);
       }
 
       // respectCooldown TRUE, unlike a human-triggered refresh. Without it an

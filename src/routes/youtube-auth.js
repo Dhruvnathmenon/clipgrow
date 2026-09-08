@@ -2,6 +2,7 @@ import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
+import { logError } from '../error-log.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, fetchChannel, YtError, YT_ERRORS
 } from '../youtube.js';
@@ -24,17 +25,33 @@ function redirect(path) {
   return new Response(null, { status: 302, headers: { Location: path } });
 }
 
-function failure(campaignId, e) {
+// See instagram-auth.js's identical constant for why these two are excluded.
+const SILENT_CODES = new Set(['NOT_APPROVED', 'DENIED']);
+
+async function failure(env, session, campaignId, e) {
   const q = new URLSearchParams({ yt: 'error' });
   if (campaignId) q.set('campaign', String(campaignId));
+  let code, msg, fix;
   if (e instanceof YtError) {
-    q.set('code', e.code);
-    q.set('msg', e.message);
-    q.set('fix', e.fix || '');
+    code = e.code; msg = e.message; fix = e.fix || '';
   } else {
-    q.set('code', 'UNKNOWN');
-    q.set('msg', (e && e.message) || 'YouTube connection failed.');
-    q.set('fix', 'Try again — if it keeps happening, tell the ClipGrow admin.');
+    code = 'UNKNOWN';
+    msg = (e && e.message) || 'YouTube connection failed.';
+    fix = 'Try again — if it keeps happening, tell the ClipGrow admin.';
+  }
+  q.set('code', code);
+  q.set('msg', msg);
+  q.set('fix', fix);
+  if (!SILENT_CODES.has(code)) {
+    const clipper = session
+      ? await env.DB.prepare('SELECT username, display_name FROM clippers WHERE id = ?').bind(session.sub).first()
+      : null;
+    await logError(env.DB, {
+      actorType: 'clipper', actorId: session ? session.sub : null,
+      actorLabel: clipper ? (clipper.display_name || clipper.username) : null,
+      source: 'youtube_oauth', code, message: msg,
+      detail: e && e.stack, path: campaignId ? `campaign ${campaignId}` : null
+    });
   }
   return redirect('/dashboard.html?' + q.toString());
 }
@@ -49,24 +66,24 @@ export async function handleYoutubeAuth(request, env, url) {
     if (!session) return redirect('/clipper');
 
     const campaignId = url.searchParams.get('campaign_id');
-    if (!campaignId) return failure(null, new Error('No campaign was specified for this connection.'));
+    if (!campaignId) return failure(env, session, null, new Error('No campaign was specified for this connection.'));
 
-    if (!env.YT_CLIENT_ID || !env.YT_CLIENT_SECRET) return failure(campaignId, YT_ERRORS.NOT_CONFIGURED());
+    if (!env.YT_CLIENT_ID || !env.YT_CLIENT_SECRET) return failure(env, session, campaignId, YT_ERRORS.NOT_CONFIGURED());
 
     const clipper = await env.DB.prepare('SELECT status FROM clippers WHERE id = ?').bind(session.sub).first();
     if (!clipper || clipper.status !== 'active') {
-      return failure(campaignId, new Error('Your account is disabled, so accounts cannot be connected. Contact the ClipGrow admin.'));
+      return failure(env, session, campaignId, new Error('Your account is disabled, so accounts cannot be connected. Contact the ClipGrow admin.'));
     }
 
     const campaign = await getCampaignById(env.DB, campaignId);
-    if (!campaign) return failure(campaignId, new Error('Campaign not found.'));
+    if (!campaign) return failure(env, session, campaignId, new Error('Campaign not found.'));
     if (!campaignPlatforms(campaign).includes('youtube')) {
-      return failure(campaignId, new Error('This campaign does not accept YouTube. Connect Instagram for it instead.'));
+      return failure(env, session, campaignId, new Error('This campaign does not accept YouTube. Connect Instagram for it instead.'));
     }
 
     const part = await getParticipation(env.DB, session.sub, campaignId);
-    if (!part) return failure(campaignId, new Error('Join the campaign before connecting an account to it.'));
-    if (part.status === 'kicked') return failure(campaignId, new Error('You have been removed from this campaign.'));
+    if (!part) return failure(env, session, campaignId, new Error('Join the campaign before connecting an account to it.'));
+    if (part.status === 'kicked') return failure(env, session, campaignId, new Error('You have been removed from this campaign.'));
 
     // The channel must have been approved by the admin first -- reinstated
     // after a clipper reported connecting a YouTube channel with no review
@@ -81,7 +98,7 @@ export async function handleYoutubeAuth(request, env, url) {
     // could have kept from an earlier session or simply typed.
     const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'youtube');
     if (!gate.allowed) {
-      return failure(campaignId, new YtError('NOT_APPROVED', gate.title, gate.reason));
+      return failure(env, session, campaignId, new YtError('NOT_APPROVED', gate.title, gate.reason));
     }
 
     const state = await signSession(
@@ -99,16 +116,16 @@ export async function handleYoutubeAuth(request, env, url) {
 
     if (url.searchParams.get('error')) {
       const desc = url.searchParams.get('error_description') || 'You cancelled the YouTube connection.';
-      return failure(campaignId, new YtError('DENIED', desc,
+      return failure(env, session, campaignId, new YtError('DENIED', desc,
         'Connect again and tap Allow on every permission Google asks for.'));
     }
 
     const code = url.searchParams.get('code');
     if (!session || !statePayload || !code) {
-      return failure(campaignId, new Error('That connection link expired. Start the connection again.'));
+      return failure(env, session, campaignId, new Error('That connection link expired. Start the connection again.'));
     }
     if (String(statePayload.sub) !== String(session.sub)) {
-      return failure(campaignId, new Error('That connection link belonged to a different login.'));
+      return failure(env, session, campaignId, new Error('That connection link belonged to a different login.'));
     }
 
     try {
@@ -172,7 +189,7 @@ export async function handleYoutubeAuth(request, env, url) {
       });
       return redirect('/dashboard.html?' + q.toString());
     } catch (e) {
-      return failure(campaignId, e);
+      return failure(env, session, campaignId, e);
     }
   }
 
