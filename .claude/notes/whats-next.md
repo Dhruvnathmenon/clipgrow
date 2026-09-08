@@ -11,13 +11,19 @@ letting it grow into a full history (that's what changelog.md is for).
   (Cloudflare Email Routing recommended, ~10 min setup). Neither confirmed
   done as of 2026-08-27. See memory `project-clipgrow-verification-status`
   for the full playbook.
-- **ranjith and sam** had not completed their one-time YouTube reconnect
-  as of 2026-08-27 (the Testing→Production migration on 2026-08-26 forced
-  every existing YouTube connection to re-auth once). Worth a nudge if
-  still pending — check with:
-  `npx wrangler d1 execute clipgrow --remote --command "SELECT cl.username, a.status, a.last_error_code FROM social_accounts a JOIN clippers cl ON cl.id=a.clipper_id WHERE a.platform='youtube'"`
-
 ## Recently landed, worth knowing about if it comes up
+
+- **ranjith and sam's YouTube reconnect** (was pending as of 2026-08-27) is
+  done — both show `status: connected` as of 2026-09-08.
+- The fractional-margin clipper-payout split (Plan B, shipped 2026-09-07/08)
+  was **reverted** on 2026-09-08 at the founder's request — clippers are
+  paid the full billable amount again, campaigns no longer auto-complete on
+  budget exhaustion. The schema/columns and everything else from that work
+  (contact profile, top-up, recap card, dead-column cleanup) stayed. See
+  commit `0a6da71` and its message for the full scope. The admin Finance
+  tab's "View Margin" panel is now vestigial (will always read ₹0) since
+  nothing generates margin anymore — flagged to the founder, not yet
+  removed.
 
 - The clipper-triggered full refresh button was **removed entirely** on
   2026-08-27 (commit `09922fa`) after confirming the cron itself was

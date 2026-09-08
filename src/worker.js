@@ -11,7 +11,7 @@ import { handleSitemap } from './routes/sitemap.js';
 import { handleGuide } from './routes/guides.js';
 import { handleMarketing } from './routes/marketing.js';
 import { reallocateAll } from './earnings.js';
-import { createRefreshJob, advanceJob, reapStalledJobs } from './refresh-jobs.js';
+import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 
@@ -328,6 +328,16 @@ export default {
         if (reaped.length) console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
       } catch (e) {
         console.error('[cron sync] reaper failed', e && e.message);
+      }
+
+      // A joined-but-never-connected participation a week or older is
+      // removed outright -- see removeInactiveJoins's own comment for why
+      // this is safe to run unattended every cron cycle.
+      try {
+        const removed = await removeInactiveJoins(env.DB);
+        if (removed.length) console.log(`[cron sync] removed inactive join(s): ${removed.join(', ')}`);
+      } catch (e) {
+        console.error('[cron sync] inactive-join cleanup failed', e && e.message);
       }
 
       // respectCooldown TRUE, unlike a human-triggered refresh. Without it an

@@ -434,12 +434,6 @@
       <div id="fin-alerts"></div>
 
       <div class="panel">
-        <h2 class="panel-title">View Margin</h2>
-        <p class="note" style="margin-bottom:1rem">The gap between what a clip is billed and the complete-CPM-block amount actually paid to the clipper, realized the moment each settlement runs. Not agency profit — held in the same wallet clipper payouts draw from, for clipper bonuses or campaign promotion spend.</p>
-        <div class="stats" id="fin-margin-stat"></div>
-      </div>
-
-      <div class="panel">
         <h2 class="panel-title">Per Campaign</h2>
         <p class="note" style="margin-bottom:1rem">Every number, per campaign, budget side and agency-fee side both — nothing rolled up, nothing hidden.</p>
         <div class="table-wrap"><table>
@@ -1400,6 +1394,16 @@
       PERMISSION_MISSING:'a permission was left unticked when connecting',
       NOT_A_TESTER:'not on the platform’s approved list'
     };
+    // Same words everywhere a social_accounts.status shows up -- the
+    // Connected Accounts table below used to fall back to the raw column
+    // value (status.replace('_',' ') -> "needs reauth", plus the literal
+    // error code like "TOKEN_EXPIRED" next to it), while this Overview
+    // panel already spoke in plain English for the same states. One map
+    // used everywhere fixes the inconsistency.
+    const ACCOUNT_STATUS_LABEL={
+      connected:'Connected', needs_reauth:'Needs reconnecting',
+      revoked:'Revoked', disconnected:'Disconnected'
+    };
 
     /* One line per account, naming it, so the admin knows where to look
        instead of opening every clipper in turn to find the broken one. */
@@ -1593,11 +1597,15 @@
           api('/api/admin/campaigns/'+id+'/participants'),
           api('/api/admin/campaigns/'+id)
         ]);
-        box.innerHTML=`
-          <div class="sub-h">Participants (${participants.length})</div>
-          ${participants.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Clipper</th><th>Account</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>${participants.map(p=>`<tr>
+        // Kicked participants no longer sit in the same table as everyone
+        // still on the roster -- a kick used to be reversible with the exact
+        // same one-click "Reinstate" a pause gets, which reads as barely a
+        // kick at all. They now live in their own, collapsed-by-default
+        // section below; reinstating still means opening it and clicking
+        // Reinstate there, never a stray button next to active people.
+        const activeParticipants=participants.filter(p=>p.status!=='kicked');
+        const kickedParticipants=participants.filter(p=>p.status==='kicked');
+        const partRow=p=>`<tr>
               <td class="handle">${esc(p.display_name||p.username)}</td>
               <td>${linkedAccounts(p,{badge:true})}</td>
               <td>${num(p.videos)}</td><td>${num(p.views)}</td><td class="money">${money(p.earned)}</td>
@@ -1607,8 +1615,18 @@
                 ${p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
                 ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
                                      :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
-              </div></td></tr>`).join('')}</tbody></table></div>`
-            :'<p class="muted">No clippers have joined yet.</p>'}
+              </div></td></tr>`;
+        const partTable=rows=>`<div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Account</th><th>Videos</th><th>Views</th><th>Clipper Earnings</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${rows.map(partRow).join('')}</tbody></table></div>`;
+        box.innerHTML=`
+          <div class="sub-h">Participants (${activeParticipants.length})</div>
+          ${activeParticipants.length?partTable(activeParticipants):'<p class="muted">No clippers have joined yet.</p>'}
+
+          <details style="margin:1rem 0">
+            <summary class="sub-h" style="display:inline-block;cursor:pointer">Removed (${kickedParticipants.length})</summary>
+            <div style="margin-top:.6rem">${kickedParticipants.length?partTable(kickedParticipants):'<p class="muted">Nobody has been removed from this campaign.</p>'}</div>
+          </details>
 
           <div class="sub-h">Videos (${submissions.length})</div>
           ${submissions.length?`<div class="table-wrap"><table>
@@ -1756,7 +1774,7 @@
     function acctReasonLine(r,row){
       const extra=r==='mismatch'
         ? ` — connected as <strong>${esc(row.username)}</strong>, approved as <strong>${esc(row.mismatch_approved_as)}</strong>`
-        : (row.last_error_code?` — ${esc(row.last_error_code)}`:'');
+        : (row.last_error_code?` — ${esc(ACCOUNT_TROUBLE[row.last_error_code]||row.last_error_code)}`:'');
       const type=r==='mismatch'?'mismatch':'error';
       return `<div class="trouble">${esc(ACCT_REASON_LABEL[r]||r)}${extra}
         <button class="btn btn-ghost btn-sm" onclick="acknowledgeAccountIssue(${row.id},'${type}')">Unflag</button></div>`;
@@ -1953,8 +1971,7 @@
       clipper_created:'Created a clipper login', clipper_kicked:'Kicked from a campaign',
       participation_paused:'Paused a participation', account_removed:'Disconnected an account',
       refresh_triggered:'Triggered a refresh', access_request_approved:'Approved an access request',
-      campaign_auto_completed:'Campaign auto-completed (budget exhausted)',
-      campaign_auto_reopened:'Campaign auto-reopened (budget topped up)'
+      participation_auto_removed:'Auto-removed (joined, never connected an account)'
     };
     function auditRow(e){
       return `<tr>
@@ -2034,7 +2051,7 @@
               <td class="muted">${esc(a.campaign_name||'—')}</td>
               <td><span class="badge ${a.platform==='youtube'?'budget_full':'neutral'}">${a.platform==='youtube'?'YouTube':'Instagram'}</span></td>
               <td class="muted">${esc(a.account_type||'—')}</td>
-              <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(a.last_error_code)}</span>`:''}</td>
+              <td><span class="badge ${a.status}">${esc(ACCOUNT_STATUS_LABEL[a.status]||a.status.replace(/_/g,' '))}</span>${a.last_error_code?` <span class="muted" style="font-size:.7rem">${esc(ACCOUNT_TROUBLE[a.last_error_code]||a.last_error_code)}</span>`:''}</td>
               <td><span class="badge ${a.auto_import?'active':'paused'}">${a.auto_import?'automatic':'paste only'}</span>
                 <div><button class="btn btn-ghost btn-sm" style="margin-top:.3rem" onclick="toggleAutoImport(${a.id},${a.auto_import?'false':'true'},'${esc(a.username).replace(/'/g,'')}')">${a.auto_import?'Switch to paste-only':'Switch to automatic'}</button></div></td>
               <td class="muted">${when(a.connected_at)}</td>
@@ -2046,21 +2063,39 @@
             </tr>`).join('')}</tbody></table></div>
             <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
 
-          <div class="sub-h">Campaigns &amp; Which Account Is Linked (${d.participations.length})</div>
-          ${d.participations.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Campaign</th><th>Linked Account(s)</th><th>Status</th><th>Note</th><th></th></tr></thead>
-            <tbody>${d.participations.map(p=>`<tr>
-              <td>${esc(p.campaign_name)}</td>
-              <td class="muted">${p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
+          ${(()=>{
+            // Same split as the campaign's own Participants table: a kick
+            // is not a one-click-reversible pause, so it doesn't share a
+            // table (or an "Activate" button that meant two different
+            // things depending on which state you started from).
+            const activeP=d.participations.filter(p=>p.status!=='kicked');
+            const kickedP=d.participations.filter(p=>p.status==='kicked');
+            const linkCell=p=>p.linked_accounts_list.length?p.linked_accounts_list.map(a=>
                 `<span class="acct-line">${a.platform==='youtube'?esc(a.username||'—'):'@'+esc(a.username||'—')} <span class="badge ${a.status||'neutral'}" style="font-size:.58rem">${esc((a.status||'—').replace('_',' '))}</span></span>`
-              ).join('<br>'):'<span class="muted">&mdash;</span>'}</td>
+              ).join('<br>'):'<span class="muted">&mdash;</span>';
+            const row=p=>`<tr>
+              <td>${esc(p.campaign_name)}</td>
+              <td class="muted">${linkCell(p)}</td>
               <td><span class="badge ${p.status}">${p.status}</span></td>
               <td class="muted">${esc(p.status_note||'')}</td>
               <td><div class="actions">
                 ${p.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setPart(${p.id},'paused')">Pause</button>`:''}
-                ${p.status!=='active'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Activate</button>`:''}
-                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`:''}
-              </div></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Not in any campaign yet.</p>'}
+                ${p.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Resume</button>`:''}
+                ${p.status!=='kicked'?`<button class="btn btn-danger btn-sm" onclick="setPart(${p.id},'kicked')">Kick</button>`
+                                     :`<button class="btn btn-ghost btn-sm" onclick="setPart(${p.id},'active')">Reinstate</button>`}
+              </div></td></tr>`;
+            const table=rows=>`<div class="table-wrap"><table>
+              <thead><tr><th>Campaign</th><th>Linked Account(s)</th><th>Status</th><th>Note</th><th></th></tr></thead>
+              <tbody>${rows.map(row).join('')}</tbody></table></div>`;
+            return `
+          <div class="sub-h">Campaigns &amp; Which Account Is Linked (${activeP.length})</div>
+          ${activeP.length?table(activeP):'<p class="muted">Not in any campaign yet.</p>'}
+
+          <details style="margin:1rem 0">
+            <summary class="sub-h" style="display:inline-block;cursor:pointer">Removed (${kickedP.length})</summary>
+            <div style="margin-top:.6rem">${kickedP.length?table(kickedP):'<p class="muted">Not removed from anything.</p>'}</div>
+          </details>`;
+          })()}
 
           <div class="sub-h">Videos (${d.submissions.length})</div>
           ${d.submissions.length?`<div class="table-wrap"><table>
@@ -2310,8 +2345,6 @@
         ]);
         if(!CLIENTS.length) CLIENTS=clients;
         FIN_CAMPAIGNS=campaigns; FIN_WALLETS=overview.wallets;
-        document.getElementById('fin-margin-stat').innerHTML=
-          `<div class="stat"><div class="stat-val w">${money(overview.totals.view_margin_captured)}</div><div class="stat-lbl">Captured, All-Time</div></div>`;
         renderFinAlerts(overview.funding_alerts);
         renderFinCampaigns(campaigns);
         renderFinAgencyFee(campaigns);

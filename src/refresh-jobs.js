@@ -25,6 +25,7 @@ import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
 import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, pruneOldEvents } from './refresh-events.js';
 import { TRACKING_WINDOW_MS } from './clipstate.js';
+import { logAction } from './audit.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -550,6 +551,61 @@ export async function reapStalledJobs(db, { now = Date.now() } = {}) {
     }
   }
   return reaped;
+}
+
+// A clipper who joins but never connects anything is dead weight on the
+// roster -- inflates "joined" headcount with someone who will never post a
+// clip, and (until this) never surfaced as kicked, paused or anything else
+// that distinguishes them from someone genuinely working. One week is the
+// grace period; after that, pressing Join Campaign again is all it takes to
+// come back -- this is NOT the same as kicked, which blocks self-rejoining.
+export const JOIN_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Removes a participation outright once it has gone a full week with zero
+ * accounts ever linked to it.
+ *
+ * "Zero accounts linked" is read from participation_accounts (migration
+ * 012), not from social_accounts.status -- a connection that broke after
+ * being made (needs_reauth, revoked) leaves its participation_accounts row
+ * in place; only a genuine disconnect (admin action, or the clipper
+ * detaching to relink) or never having connected at all leaves nothing
+ * there. So someone whose token merely expired this week is never swept up
+ * by this, only someone who never actually connected anything.
+ *
+ * A straight DELETE, not a status change: this is meant to be as reversible
+ * as never having joined -- clicking Join Campaign again does a clean
+ * INSERT (src/routes/clipper.js), no admin action required, unlike a kick.
+ */
+export async function removeInactiveJoins(db, { now = Date.now(), gracePeriodMs = JOIN_GRACE_PERIOD_MS } = {}) {
+  const cutoff = now - gracePeriodMs;
+  const { results } = await db.prepare(
+    `SELECT p.id, p.clipper_id, p.campaign_id, cl.username, c.name AS campaign_name
+     FROM participations p
+     JOIN clippers cl ON cl.id = p.clipper_id
+     JOIN campaigns c ON c.id = p.campaign_id
+     WHERE p.status = 'active' AND p.joined_at <= ?
+       AND NOT EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)`
+  ).bind(cutoff).all();
+  const rows = results || [];
+  if (!rows.length) return [];
+
+  const removed = [];
+  for (const row of rows) {
+    // Guarded on status so a participation that changed between the SELECT
+    // and here (e.g. an admin kicked them in the same moment) is left alone.
+    const res = await db.prepare(`DELETE FROM participations WHERE id = ? AND status = 'active'`)
+      .bind(row.id).run();
+    if ((res.meta && res.meta.changes) > 0) {
+      removed.push(row.id);
+      await logAction(db, {
+        staffType: 'system', staffName: 'Automatic (inactivity)', action: 'participation_auto_removed',
+        targetType: 'clipper', targetId: row.clipper_id, targetLabel: row.username,
+        detail: `Removed from "${row.campaign_name}" — joined over a week ago, never connected an account.`
+      });
+    }
+  }
+  return removed;
 }
 
 /**
