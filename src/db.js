@@ -94,6 +94,27 @@ export function validateEmail(input) {
   return null;
 }
 
+export function normaliseDiscordId(input) {
+  return String(input == null ? '' : input).trim().replace(/\D/g, '');
+}
+
+/**
+ * Optional, unlike the checks above -- not every clipper uses Discord, so an
+ * empty value is fine. When something IS entered, it must be the numeric
+ * snowflake ("Copy User ID", Discord Settings -> Advanced -> Developer
+ * Mode), not a username: only the numeric ID can build a working
+ * profile/DM link (admin.html's discordLink()), and there is no way to
+ * distinguish a mistyped username from a real one to give a better error.
+ */
+export function validateDiscordId(input) {
+  const v = normaliseDiscordId(input);
+  if (!v) return null;
+  if (!/^\d{15,25}$/.test(v)) {
+    return 'That doesn\'t look like a Discord User ID -- it\'s a long number (17-19 digits), not your username. Turn on Developer Mode (Discord Settings > Advanced), then right-click your own name and choose "Copy User ID".';
+  }
+  return null;
+}
+
 export function getClipperByUsername(db, username) {
   // COLLATE NOCASE guards any row stored before normalisation existed.
   return db

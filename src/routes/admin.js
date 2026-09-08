@@ -6,6 +6,7 @@ import {
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
+  normaliseDiscordId, validateDiscordId,
   ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
@@ -165,7 +166,7 @@ export async function handleAdmin(request, env, url) {
     // an account elsewhere never made it stop showing up here).
     const { results: problemCandidates } = await env.DB.prepare(
       `SELECT a.id, a.platform, a.username, a.status, a.last_error_code, a.last_error_at, a.error_acknowledged_at,
-              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number
+              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number, cl.discord_id
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
        WHERE a.status = 'needs_reauth'
           OR (a.status = 'connected' AND a.last_error_code LIKE 'IMPORT!_%' ESCAPE '!')
@@ -380,7 +381,9 @@ export async function handleAdmin(request, env, url) {
         // moderator.js's roster), see migration 028's comment.
         upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null,
         // Same admin-only boundary, migration 030.
-        contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null
+        contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null,
+        // Fallback contact channel, migration 035 -- same boundary again.
+        discord_id: c.discord_id || null
       });
     }
     return json({ clippers: out });
@@ -538,7 +541,7 @@ export async function handleAdmin(request, env, url) {
         ...publicClipper(clipper),
         upi_id: clipper.upi_id || null, upi_account_name: clipper.upi_account_name || null,
         contact_number: clipper.contact_number || null, email: clipper.email || null,
-        legal_name: clipper.legal_name || null,
+        legal_name: clipper.legal_name || null, discord_id: clipper.discord_id || null,
         created_at: clipper.created_at
       },
       money: await clipperFinancials(env.DB, params.id),
@@ -561,7 +564,7 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'PATCH') {
     const {
       status, username, display_name, password, upi_id, upi_account_name,
-      contact_number, email, legal_name
+      contact_number, email, legal_name, discord_id
     } = await readJson(request);
     if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
     // Username stays lowercase no matter what was typed -- same rule as
@@ -612,6 +615,16 @@ export async function handleAdmin(request, env, url) {
     }
     if (legal_name != null) {
       await env.DB.prepare('UPDATE clippers SET legal_name = ? WHERE id = ?').bind(String(legal_name).trim(), params.id).run();
+    }
+    // Fallback contact channel (migration 035) -- same "admin can enter it
+    // on their behalf" reasoning as everything else in this block. Unlike
+    // the others, empty is a valid, non-error value (it's optional), so an
+    // explicit clear is allowed through here too.
+    if (discord_id != null) {
+      const invalid = validateDiscordId(discord_id);
+      if (invalid) return err(invalid);
+      await env.DB.prepare('UPDATE clippers SET discord_id = ? WHERE id = ?')
+        .bind(normaliseDiscordId(discord_id) || null, params.id).run();
     }
     return json({ ok: true });
   }

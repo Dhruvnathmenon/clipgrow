@@ -92,6 +92,7 @@ test('a clipper with no profile details on file sees null fields, not missing on
   assert.equal(clipper.email, null);
   assert.equal(clipper.contact_number, null);
   assert.equal(clipper.legal_name, null);
+  assert.equal(clipper.discord_id, null);
 });
 
 test('a clipper can set their own profile in one save', async () => {
@@ -124,6 +125,47 @@ test('legal name is optional and omitting it leaves an existing value untouched'
   await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ contactNumber: '9123456780' }) });
   const row = await env.DB.prepare('SELECT legal_name, contact_number FROM clippers WHERE id = 1').first();
   assert.equal(row.legal_name, 'Ravi Kumar Singh', 'not cleared just because this save omitted it');
+  assert.equal(row.contact_number, '9123456780');
+});
+
+/* ── Discord (migration 035): a fallback contact channel for when
+   WhatsApp isn't on file or doesn't get an answer. Optional, same
+   "omitting it keeps the old value" treatment as legal name above. */
+
+test('discord id is optional -- a full save with no discordId at all still succeeds', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile() });
+  assert.equal(res.status, 200);
+  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_id, null);
+});
+
+test('a clipper can save a real Discord user id alongside the rest of their profile', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ discordId: '305421934793015296' })
+  });
+  assert.equal(res.status, 200);
+  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_id, '305421934793015296');
+  const me = await (await clipperRequest(env, '/api/clipper/me')).json();
+  assert.equal(me.clipper.discord_id, '305421934793015296');
+});
+
+test('a Discord USERNAME (not the numeric id) is rejected -- only the id can build a working link', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ discordId: 'clipgrow_fan_92' })
+  });
+  assert.equal(res.status, 400);
+});
+
+test('discord id is optional and omitting it leaves an existing value untouched', async () => {
+  const env = seedEnv();
+  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordId: '305421934793015296' }) });
+  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ contactNumber: '9123456780' }) });
+  const row = await env.DB.prepare('SELECT discord_id, contact_number FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_id, '305421934793015296', 'not cleared just because this save omitted it');
   assert.equal(row.contact_number, '9123456780');
 });
 

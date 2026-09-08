@@ -6,7 +6,8 @@ import {
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
   unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
   normaliseUpiId, validateUpiId,
-  normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail
+  normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
+  normaliseDiscordId, validateDiscordId
 } from '../db.js';
 import { clipState, clipStateMessage, TRACKING_WINDOW_MS } from '../clipstate.js';
 import { explainEarning, explainEarningText } from '../earning-math.js';
@@ -100,7 +101,10 @@ export async function handleClipper(request, env, url) {
         upi_account_name: me.upi_account_name || null,
         email: me.email || null,
         contact_number: me.contact_number || null,
-        legal_name: me.legal_name || null
+        legal_name: me.legal_name || null,
+        // Fallback contact channel (migration 035) -- optional, for when
+        // WhatsApp isn't on file or doesn't get an answer.
+        discord_id: me.discord_id || null
       },
       money, streak, totals
     });
@@ -118,25 +122,31 @@ export async function handleClipper(request, env, url) {
   // right below: a disabled clipper can still be owed money from before
   // they were disabled and must still be reachable and payable.
   if (pathname === '/api/clipper/me/profile' && method === 'PATCH') {
-    const { email, contactNumber, upiId, accountName, legalName } = await readJson(request);
+    const { email, contactNumber, upiId, accountName, legalName, discordId } = await readJson(request);
     const emailInvalid = validateEmail(email);
     if (emailInvalid) return err(emailInvalid);
     const contactInvalid = validateContactNumber(contactNumber);
     if (contactInvalid) return err(contactInvalid);
     const upiInvalid = validateUpiId(upiId);
     if (upiInvalid) return err(upiInvalid);
+    // Optional, unlike the three above -- validateDiscordId only objects to
+    // a non-empty value that doesn't look like a real numeric User ID.
+    const discordInvalid = validateDiscordId(discordId);
+    if (discordInvalid) return err(discordInvalid);
     const name = String(accountName || '').trim();
     if (!name) return err('Enter the name on the UPI account');
     if (name.length > 100) return err('That name is too long');
     const legal = String(legalName || '').trim();
     if (legal.length > 100) return err('That name is too long');
+    const discord = normaliseDiscordId(discordId);
     await env.DB.prepare(
       `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?,
-         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
+         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END,
+         discord_id = CASE WHEN ? != '' THEN ? ELSE discord_id END
        WHERE id = ?`
     ).bind(
       normaliseEmail(email), normaliseContactNumber(contactNumber), normaliseUpiId(upiId), name,
-      legal, legal, clipperId
+      legal, legal, discord, discord, clipperId
     ).run();
     return json({ ok: true });
   }
