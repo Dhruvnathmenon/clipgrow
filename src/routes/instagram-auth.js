@@ -1,5 +1,5 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
-import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
+import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
 import {
@@ -162,12 +162,17 @@ export async function handleInstagramAuth(request, env, url) {
            status = 'connected', last_error_code = NULL, last_error_at = NULL WHERE id = ?`
         ).bind(profile.username, profile.account_type, longLived.access_token, expiresAt, accountId).run();
       } else {
+        // Carries whatever the admin set at approval time (migration 016) --
+        // paste-only from the first moment for someone approved specifically
+        // because they post campaign work on a shared/main account, rather
+        // than starting automatic and needing a separate manual toggle.
+        const autoImport = await approvedAutoImportIntent(env.DB, session.sub, campaignId, 'instagram');
         const res = await env.DB.prepare(
           `INSERT INTO social_accounts (clipper_id, platform, external_id, username, account_type, access_token,
-             token_expires_at, status, connected_at)
-           VALUES (?, 'instagram', ?, ?, ?, ?, ?, 'connected', ?)`
+             token_expires_at, status, connected_at, auto_import)
+           VALUES (?, 'instagram', ?, ?, ?, ?, ?, 'connected', ?, ?)`
         ).bind(session.sub, profile.id, profile.username, profile.account_type,
-               longLived.access_token, expiresAt, now()).run();
+               longLived.access_token, expiresAt, now(), autoImport).run();
         accountId = res.meta.last_row_id;
       }
 

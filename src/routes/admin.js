@@ -1014,7 +1014,7 @@ export async function handleAdmin(request, env, url) {
 
   params = matchPath('/api/admin/access-requests/:id', pathname);
   if (params && method === 'PATCH') {
-    const { status, note } = await readJson(request);
+    const { status, note, auto_import } = await readJson(request);
     const reqRow = await env.DB.prepare(
       `SELECT t.*, cl.username AS clipper_username FROM tester_requests t
        JOIN clippers cl ON cl.id = t.clipper_id WHERE t.id = ?`
@@ -1025,12 +1025,30 @@ export async function handleAdmin(request, env, url) {
     }
 
     const nextStatus = status || reqRow.status;
+    const nextAutoImport = auto_import != null ? (auto_import ? 1 : 0) : reqRow.auto_import;
     await env.DB.prepare(
-      'UPDATE tester_requests SET status = ?, note = ? WHERE id = ?'
+      'UPDATE tester_requests SET status = ?, note = ?, auto_import = ? WHERE id = ?'
     ).bind(
-      nextStatus, note != null ? note : reqRow.note,
+      nextStatus, note != null ? note : reqRow.note, nextAutoImport,
       params.id
     ).run();
+    // The pre-plan toggle (migration 016 -- carries the choice into the
+    // account created once the clipper connects) and the per-account
+    // toggle in the Connected Accounts table are the same lever, not two
+    // that can disagree depending on when you happen to flip it: if this
+    // clipper already connected for this campaign/platform, apply the new
+    // value to that real account right now too, instead of only affecting
+    // a future reconnect.
+    if (auto_import != null) {
+      await env.DB.prepare(
+        `UPDATE social_accounts SET auto_import = ?
+         WHERE id IN (
+           SELECT pa.account_id FROM participation_accounts pa
+           JOIN participations p ON p.id = pa.participation_id
+           WHERE p.clipper_id = ? AND p.campaign_id = ? AND pa.platform = ?
+         )`
+      ).bind(nextAutoImport, reqRow.clipper_id, reqRow.campaign_id, reqRow.platform).run();
+    }
     // Audit log: only an actual approval transition, not a re-save of an
     // already-confirmed row, and not a rejection -- left room for the day
     // approvals are ever delegated to a moderator, even though that's not

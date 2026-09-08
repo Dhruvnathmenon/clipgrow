@@ -517,15 +517,15 @@
           <div class="auth-step"><span class="badge budget_full">YouTube</span> Nothing to do on Google's side — the app is published, so any account can connect. Open the channel, check it is really theirs and fits the campaign, then <strong>Approve</strong>.</div>
         </div>
         <div class="table-wrap" style="margin-top:1.1rem"><table>
-          <thead><tr><th>Clipper</th><th>Platform</th><th>Account to check</th><th>Campaign</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="pending-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Account to check</th><th>Campaign</th><th>Requested</th><th>Tracking</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="pending-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
       <div class="panel">
         <h2 class="panel-title">Already handled</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Platform</th><th>Account</th><th>Campaign</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="testers-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Account</th><th>Campaign</th><th>Tracking</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="testers-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -2672,6 +2672,19 @@
     const platName=p=>p==='youtube'?'YouTube':'Instagram';
     const acctDisplay=r=>(r.platform==='youtube'?'':'@')+(r.identifier||r.ig_username||'');
 
+    // Pre-plans the auto-import choice at approval time (migration 016)
+    // instead of waiting for the clipper to connect and then remembering to
+    // flip the per-account toggle afterward -- for someone approved
+    // specifically because they'll post campaign work on a shared/main
+    // account that also carries unrelated videos. Editable before OR after
+    // Approve, and before OR after they actually connect: setTesterAutoImport
+    // applies to a real already-connected account immediately too
+    // (src/routes/admin.js), so this one control is never out of sync with
+    // what "Switch to paste-only" shows in the Connected Accounts table.
+    const trackingToggle=r=>`<button class="btn btn-ghost btn-sm" onclick="setTesterAutoImport(${r.id},${r.auto_import?'false':'true'})" title="${r.auto_import
+        ?'New posts will be picked up automatically once they connect'
+        :'Only clips they paste in manually will be tracked -- for an account that also posts unrelated videos'}">${r.auto_import?'Automatic':'Paste only'}</button>`;
+
     async function loadTesters(){
       try{
         const {requests}=await api('/api/admin/access-requests');
@@ -2695,18 +2708,20 @@
             ${r.already_granted>0?`<div class="muted" style="font-size:.68rem;margin-top:.2rem">Already granted on another campaign — nothing to do on the platform, just approve.</div>`:''}</td>
           <td class="muted">${esc(r.campaign_name||'—')}</td>
           <td class="muted">${when(r.requested_at)}</td>
+          <td>${trackingToggle(r)}</td>
           <td><span class="badge needs_reauth">waiting</span></td>
           <td class="actions">
             <button class="btn btn-sm" onclick="setTester(${r.id},'confirmed')">Approve</button>
             <button class="btn btn-danger btn-sm" onclick="rejectTester(${r.id})">Reject</button>
           </td>
-        </tr>`).join(''):'<tr><td colspan="7" class="empty">Nothing waiting — you\'re all caught up.</td></tr>';
+        </tr>`).join(''):'<tr><td colspan="8" class="empty">Nothing waiting — you\'re all caught up.</td></tr>';
 
         document.getElementById('testers-body').innerHTML=done.length?done.map(r=>`<tr>
           <td class="handle">${esc(r.clipper_display_name||r.clipper_username)}</td>
           <td><span class="badge ${platBadge(r.platform)}">${platName(r.platform)}</span></td>
           <td class="muted">${esc(acctDisplay(r))}</td>
           <td class="muted">${esc(r.campaign_name||'—')}</td>
+          <td>${r.status==='confirmed'?trackingToggle(r):'<span class="muted">—</span>'}</td>
           <td><span class="badge ${TESTER_BADGE[r.status]||''}">${r.status==='confirmed'?'approved':esc(r.status)}</span>
             ${r.is_connected>0?'<span class="badge connected" style="margin-left:.3rem">connected</span>':''}
             ${r.note?`<div class="muted" style="font-size:.7rem;margin-top:.2rem">${esc(r.note)}</div>`:''}</td>
@@ -2715,7 +2730,7 @@
             ${r.status==='confirmed'&&!r.is_connected?`<button class="btn btn-ghost btn-sm" onclick="rejectTester(${r.id})">Revoke</button>`:''}
             ${r.status==='confirmed'&&r.is_connected?'<span class="muted" style="font-size:.72rem">—</span>':''}
           </td>
-        </tr>`).join(''):'<tr><td colspan="6" class="empty">Nothing handled yet.</td></tr>';
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">Nothing handled yet.</td></tr>';
       }catch(e){ toast(e.message,true); }
     }
 
@@ -2728,6 +2743,16 @@
       try{
         await api('/api/admin/access-requests/'+id,{method:'PATCH',body:JSON.stringify({status})});
         toast(status==='confirmed'?'Approved — the clipper can connect now':'Updated');
+        loadTesters();
+      }catch(e){ toast(e.message,true); }
+    };
+    window.setTesterAutoImport=async function(id,autoImport){
+      try{
+        await api('/api/admin/access-requests/'+id,{method:'PATCH',body:JSON.stringify({auto_import:autoImport})});
+        // If they've already connected, this just updated their real
+        // account too (src/routes/admin.js) -- same toast either way, since
+        // from here there's no visible difference between the two cases.
+        toast(autoImport?'Set to automatic':'Set to paste only');
         loadTesters();
       }catch(e){ toast(e.message,true); }
     };

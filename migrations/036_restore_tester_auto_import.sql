@@ -1,0 +1,15 @@
+-- migration 016 added tester_requests.auto_import (the pre-plan "track only
+-- pasted links" intent, carried into the account created once a clipper
+-- connects). migration 025, written later to fix an unrelated UNIQUE
+-- constraint, had to rebuild this table -- SQLite's only way to change a
+-- UNIQUE clause -- and its CREATE TABLE / INSERT...SELECT copy list both
+-- omitted this column, silently dropping it for every existing row and
+-- leaving no way for it to exist on any row created since.
+--
+-- Never caught until now because nothing in the app ever actually read or
+-- wrote it -- the whole feature was dead on arrival. Caught immediately,
+-- the moment something finally did (src/db.js's approvedAutoImportIntent,
+-- instagram-auth.js/youtube-auth.js's account creation, admin.js's PATCH
+-- /api/admin/access-requests/:id), by test/sql-queries.test.mjs validating
+-- every query against the real schema.
+ALTER TABLE tester_requests ADD COLUMN auto_import INTEGER NOT NULL DEFAULT 1;

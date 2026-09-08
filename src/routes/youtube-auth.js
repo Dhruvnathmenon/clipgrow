@@ -1,5 +1,5 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
-import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash } from '../db.js';
+import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
 import {
@@ -151,12 +151,17 @@ export async function handleYoutubeAuth(request, env, url) {
         ).bind(channel.username, tokens.access_token, tokens.refresh_token,
                tokens.expires_at, meta, accountId).run();
       } else {
+        // Carries whatever the admin set at approval time (migration 016) --
+        // paste-only from the first moment for someone approved specifically
+        // because they post campaign work on a shared/main account, rather
+        // than starting automatic and needing a separate manual toggle.
+        const autoImport = await approvedAutoImportIntent(env.DB, session.sub, campaignId, 'youtube');
         const res = await env.DB.prepare(
           `INSERT INTO social_accounts (clipper_id, platform, external_id, username, account_type,
-             access_token, refresh_token, token_expires_at, meta_json, status, connected_at)
-           VALUES (?, 'youtube', ?, ?, 'channel', ?, ?, ?, ?, 'connected', ?)`
+             access_token, refresh_token, token_expires_at, meta_json, status, connected_at, auto_import)
+           VALUES (?, 'youtube', ?, ?, 'channel', ?, ?, ?, ?, 'connected', ?, ?)`
         ).bind(session.sub, channel.id, channel.username, tokens.access_token,
-               tokens.refresh_token, tokens.expires_at, meta, now()).run();
+               tokens.refresh_token, tokens.expires_at, meta, now(), autoImport).run();
         accountId = res.meta.last_row_id;
       }
 

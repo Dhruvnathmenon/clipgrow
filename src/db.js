@@ -192,6 +192,27 @@ export async function linkParticipationAccount(db, participationId, accountId, p
     .bind(participationId).run();
 }
 
+/**
+ * The auto-import intent an admin set at APPROVAL time (migration 016),
+ * so a brand-new account defaults to it the instant it's created --
+ * instead of always starting 'automatic' and needing a separate manual
+ * toggle after the fact for a clipper the admin already knows posts
+ * campaign work on a shared/main account. Read by instagram-auth.js and
+ * youtube-auth.js at the moment a new social_accounts row is inserted;
+ * an EXISTING account (a reconnect) is left exactly as it already is.
+ *
+ * Falls back to 1 (automatic) when there's no confirmed request to read --
+ * same default social_accounts.auto_import itself has always had.
+ */
+export async function approvedAutoImportIntent(db, clipperId, campaignId, platform) {
+  const row = await db.prepare(
+    `SELECT auto_import FROM tester_requests
+     WHERE clipper_id = ? AND campaign_id = ? AND platform = ? AND status = 'confirmed'
+     ORDER BY requested_at DESC LIMIT 1`
+  ).bind(clipperId, campaignId, platform).first();
+  return row ? row.auto_import : 1;
+}
+
 export async function unlinkParticipationAccount(db, participationId, platform) {
   await db.prepare('DELETE FROM participation_accounts WHERE participation_id = ? AND platform = ?')
     .bind(participationId, platform).run();
