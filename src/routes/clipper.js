@@ -718,6 +718,16 @@ export async function handleClipper(request, env, url) {
       await syncAccountClips(env.DB, env, account,
         [{ id: res.meta.last_row_id, ig_media_id: media.external_id, last_ok_sync_at: null }],
         { skipCooldown: true });
+      // syncAccountClips only ever writes `views` -- earning is computed
+      // separately, by walking the WHOLE campaign's budget queue in FCFS
+      // order (allocateCampaignEarnings), which only THIS call actually
+      // does. Without it, a pasted clip's real view count lands but its
+      // earning sits at its insert-time 0 until some unrelated action (a
+      // kick, a top-up, the next 6-hourly cron) happens to touch this
+      // campaign -- exactly the gap the single-clip refresh endpoint just
+      // above already closes for a re-sync, that this one, doing the same
+      // "sync one clip, read back earning" shape, had missed.
+      await reallocateCampaign(env.DB, campaign_id);
       const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?')
         .bind(res.meta.last_row_id).first();
       if (fresh) { liveViews = fresh.views; liveEarning = fresh.earning; }
