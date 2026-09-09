@@ -79,7 +79,7 @@ test('normaliseUpiId trims and strips internal whitespace', () => {
 
 const fullProfile = (overrides = {}) => ({
   email: 'ravi@example.com', contactNumber: '9876543210',
-  upiId: '9999999999@upi', accountName: 'Ravi Kumar', discordId: '305421934793015296', ...overrides
+  upiId: '9999999999@upi', accountName: 'Ravi Kumar', discordUsername: 'clipgrow_fan_92', ...overrides
 });
 
 test('a clipper with no profile details on file sees null fields, not missing ones', async () => {
@@ -92,7 +92,7 @@ test('a clipper with no profile details on file sees null fields, not missing on
   assert.equal(clipper.email, null);
   assert.equal(clipper.contact_number, null);
   assert.equal(clipper.legal_name, null);
-  assert.equal(clipper.discord_id, null);
+  assert.equal(clipper.discord_username, null);
 });
 
 test('a clipper can set their own profile in one save', async () => {
@@ -128,52 +128,53 @@ test('legal name is optional and omitting it leaves an existing value untouched'
   assert.equal(row.contact_number, '9123456780');
 });
 
-/* ── Discord (migration 035): a fallback contact channel for when
-   WhatsApp isn't on file or doesn't get an answer. Mandatory on the
-   clipper's own self-service save (every clipper needs one on file, not
-   just whoever happened to fill it in) -- but validateDiscordId ITSELF
-   still treats empty as valid, because admin.js's edit endpoint relies on
-   that to let the admin clear/leave it blank on a clipper's behalf. */
+/* ── Discord (migration 035, renamed to a username in 039): a fallback
+   contact channel for when WhatsApp isn't on file or doesn't get an
+   answer. Mandatory on the clipper's own self-service save (every clipper
+   needs one on file, not just whoever happened to fill it in) -- but
+   validateDiscordUsername ITSELF still treats empty as valid, because
+   admin.js's edit endpoint relies on that to let the admin clear/leave it
+   blank on a clipper's behalf. */
 
-test('discord id is now required -- a full save with no discordId at all is rejected', async () => {
+test('discord username is required -- a full save with none at all is rejected', async () => {
   const env = seedEnv();
-  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordId: '' }) });
+  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordUsername: '' }) });
   assert.equal(res.status, 400);
-  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, null, 'the whole save is rejected -- nothing else silently went through either');
+  const row = await env.DB.prepare('SELECT discord_username FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_username, null, 'the whole save is rejected -- nothing else silently went through either');
 });
 
-test('a clipper can save a real Discord user id alongside the rest of their profile', async () => {
+test('a clipper can save a real Discord username alongside the rest of their profile', async () => {
   const env = seedEnv();
   const res = await clipperRequest(env, '/api/clipper/me/profile', {
-    method: 'PATCH', body: fullProfile({ discordId: '305421934793015296' })
+    method: 'PATCH', body: fullProfile({ discordUsername: 'ClipGrow_Fan_92' })
   });
   assert.equal(res.status, 200);
-  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, '305421934793015296');
+  const row = await env.DB.prepare('SELECT discord_username FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_username, 'clipgrow_fan_92', 'normalised to lowercase');
   const me = await (await clipperRequest(env, '/api/clipper/me')).json();
-  assert.equal(me.clipper.discord_id, '305421934793015296');
+  assert.equal(me.clipper.discord_username, 'clipgrow_fan_92');
 });
 
-test('a Discord USERNAME (not the numeric id) is rejected -- only the id can build a working link', async () => {
+test('a malformed Discord username (spaces, too short) is rejected', async () => {
   const env = seedEnv();
   const res = await clipperRequest(env, '/api/clipper/me/profile', {
-    method: 'PATCH', body: fullProfile({ discordId: 'clipgrow_fan_92' })
+    method: 'PATCH', body: fullProfile({ discordUsername: 'has a space' })
   });
   assert.equal(res.status, 400);
 });
 
-test('unlike legal name, discord id must be resent on every save -- it is never silently carried forward', async () => {
+test('unlike legal name, discord username must be resent on every save -- it is never silently carried forward', async () => {
   const env = seedEnv();
-  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordId: '305421934793015296' }) });
+  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ discordUsername: 'clipgrow_fan_92' }) });
   // Re-saving without it (e.g. only fixing a phone number) must fail, not
-  // quietly keep the old Discord id the way legal_name's CASE WHEN does.
+  // quietly keep the old Discord username the way legal_name's CASE WHEN does.
   const res = await clipperRequest(env, '/api/clipper/me/profile', {
-    method: 'PATCH', body: fullProfile({ discordId: '', contactNumber: '9123456780' })
+    method: 'PATCH', body: fullProfile({ discordUsername: '', contactNumber: '9123456780' })
   });
   assert.equal(res.status, 400);
-  const row = await env.DB.prepare('SELECT discord_id, contact_number FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, '305421934793015296', 'unchanged -- the rejected save touched nothing');
+  const row = await env.DB.prepare('SELECT discord_username, contact_number FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_username, 'clipgrow_fan_92', 'unchanged -- the rejected save touched nothing');
   assert.equal(row.contact_number, '9876543210', 'unchanged too -- rejected as one atomic save, not partially applied');
 });
 

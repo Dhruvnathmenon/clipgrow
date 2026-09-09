@@ -6,7 +6,7 @@ import {
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
-  normaliseDiscordId, validateDiscordId,
+  normaliseDiscordUsername, validateDiscordUsername,
   ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
 import { reallocateCampaign, reallocateAll } from '../earnings.js';
@@ -167,7 +167,7 @@ export async function handleAdmin(request, env, url) {
     // an account elsewhere never made it stop showing up here).
     const { results: problemCandidates } = await env.DB.prepare(
       `SELECT a.id, a.platform, a.username, a.status, a.last_error_code, a.last_error_at, a.error_acknowledged_at,
-              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number, cl.discord_id
+              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number, cl.discord_username
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
        WHERE a.status = 'needs_reauth'
           OR (a.status = 'connected' AND a.last_error_code LIKE 'IMPORT!_%' ESCAPE '!')
@@ -392,8 +392,8 @@ export async function handleAdmin(request, env, url) {
         upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null,
         // Same admin-only boundary, migration 030.
         contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null,
-        // Fallback contact channel, migration 035 -- same boundary again.
-        discord_id: c.discord_id || null
+        // Fallback contact channel, migration 035/039 -- same boundary again.
+        discord_username: c.discord_username || null
       });
     }
     return json({ clippers: out });
@@ -551,7 +551,7 @@ export async function handleAdmin(request, env, url) {
         ...publicClipper(clipper),
         upi_id: clipper.upi_id || null, upi_account_name: clipper.upi_account_name || null,
         contact_number: clipper.contact_number || null, email: clipper.email || null,
-        legal_name: clipper.legal_name || null, discord_id: clipper.discord_id || null,
+        legal_name: clipper.legal_name || null, discord_username: clipper.discord_username || null,
         created_at: clipper.created_at
       },
       money: await clipperFinancials(env.DB, params.id),
@@ -574,7 +574,7 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'PATCH') {
     const {
       status, username, display_name, password, upi_id, upi_account_name,
-      contact_number, email, legal_name, discord_id
+      contact_number, email, legal_name, discord_username
     } = await readJson(request);
     if (status && !['active', 'disabled'].includes(status)) return err('Invalid status');
     // Username stays lowercase no matter what was typed -- same rule as
@@ -626,15 +626,15 @@ export async function handleAdmin(request, env, url) {
     if (legal_name != null) {
       await env.DB.prepare('UPDATE clippers SET legal_name = ? WHERE id = ?').bind(String(legal_name).trim(), params.id).run();
     }
-    // Fallback contact channel (migration 035) -- same "admin can enter it
-    // on their behalf" reasoning as everything else in this block. Unlike
+    // Fallback contact channel (migration 035/039) -- same "admin can enter
+    // it on their behalf" reasoning as everything else in this block. Unlike
     // the others, empty is a valid, non-error value (it's optional), so an
     // explicit clear is allowed through here too.
-    if (discord_id != null) {
-      const invalid = validateDiscordId(discord_id);
+    if (discord_username != null) {
+      const invalid = validateDiscordUsername(discord_username);
       if (invalid) return err(invalid);
-      await env.DB.prepare('UPDATE clippers SET discord_id = ? WHERE id = ?')
-        .bind(normaliseDiscordId(discord_id) || null, params.id).run();
+      await env.DB.prepare('UPDATE clippers SET discord_username = ? WHERE id = ?')
+        .bind(normaliseDiscordUsername(discord_username) || null, params.id).run();
     }
     return json({ ok: true });
   }
@@ -1719,22 +1719,22 @@ export async function handleAdmin(request, env, url) {
     const unresolvedOnly = url.searchParams.get('unresolved') === '1';
     const rows = await listErrors(env.DB, { unresolvedOnly });
     // Contact info is joined live, not stored on the row -- an updated
-    // WhatsApp number or Discord ID should always be the one the "message
-    // them" button actually uses. actor_label, by contrast, is denormalised
-    // at write time (see error-log.js) so it isn't affected by this.
+    // WhatsApp number or Discord username should always be the one the
+    // "message them" button actually uses. actor_label, by contrast, is
+    // denormalised at write time (see error-log.js) so it isn't affected.
     const clipperIds = [...new Set(rows.filter(r => r.actor_type === 'clipper' && r.actor_id).map(r => r.actor_id))];
     let contactById = {};
     if (clipperIds.length) {
       const ph = clipperIds.map(() => '?').join(',');
       const { results } = await env.DB.prepare(
-        `SELECT id, contact_number, discord_id FROM clippers WHERE id IN (${ph})`
+        `SELECT id, contact_number, discord_username FROM clippers WHERE id IN (${ph})`
       ).bind(...clipperIds).all();
       contactById = Object.fromEntries((results || []).map(r => [r.id, r]));
     }
     const errors = rows.map(r => ({
       ...r,
       contact_number: contactById[r.actor_id] ? contactById[r.actor_id].contact_number : null,
-      discord_id: contactById[r.actor_id] ? contactById[r.actor_id].discord_id : null
+      discord_username: contactById[r.actor_id] ? contactById[r.actor_id].discord_username : null
     }));
     return json({ errors });
   }

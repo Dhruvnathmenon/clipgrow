@@ -94,23 +94,26 @@ export function validateEmail(input) {
   return null;
 }
 
-export function normaliseDiscordId(input) {
-  return String(input == null ? '' : input).trim().replace(/\D/g, '');
+// Migration 039: switched from the numeric snowflake ID to the @username --
+// finding Developer Mode and right-clicking to copy an ID was too much
+// friction for clippers to actually do. Strips a leading "@" (people paste
+// it either way) and lowercases, since Discord's own unique @username is
+// always lowercase regardless of how someone types it.
+export function normaliseDiscordUsername(input) {
+  return String(input == null ? '' : input).trim().replace(/^@/, '').toLowerCase();
 }
 
 /**
- * Optional, unlike the checks above -- not every clipper uses Discord, so an
- * empty value is fine. When something IS entered, it must be the numeric
- * snowflake ("Copy User ID", Discord Settings -> Advanced -> Developer
- * Mode), not a username: only the numeric ID can build a working
- * profile/DM link (admin.html's discordLink()), and there is no way to
- * distinguish a mistyped username from a real one to give a better error.
+ * Optional here (empty is valid) -- admin.js's edit endpoint relies on that
+ * to let the admin clear/leave it blank on a clipper's behalf; the
+ * clipper's own self-service save enforces "required" itself, at the call
+ * site, same pattern as before the rename.
  */
-export function validateDiscordId(input) {
-  const v = normaliseDiscordId(input);
+export function validateDiscordUsername(input) {
+  const v = normaliseDiscordUsername(input);
   if (!v) return null;
-  if (!/^\d{15,25}$/.test(v)) {
-    return 'That doesn\'t look like a Discord User ID -- it\'s a long number (17-19 digits), not your username. Turn on Developer Mode (Discord Settings > Advanced), then right-click your own name and choose "Copy User ID".';
+  if (v.length < 2 || v.length > 32 || !/^[a-z0-9_.]+$/.test(v) || v.startsWith('.') || v.endsWith('.') || v.includes('..')) {
+    return 'That doesn\'t look like a Discord username -- 2-32 characters, lowercase letters/numbers/underscores/periods only. Find it under Discord Settings > My Account.';
   }
   return null;
 }

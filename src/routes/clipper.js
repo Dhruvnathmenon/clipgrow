@@ -7,7 +7,7 @@ import {
   unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
-  normaliseDiscordId, validateDiscordId
+  normaliseDiscordUsername, validateDiscordUsername
 } from '../db.js';
 import { clipState, clipStateMessage, TRACKING_WINDOW_MS } from '../clipstate.js';
 import { explainEarning, explainEarningText } from '../earning-math.js';
@@ -102,9 +102,9 @@ export async function handleClipper(request, env, url) {
         email: me.email || null,
         contact_number: me.contact_number || null,
         legal_name: me.legal_name || null,
-        // Fallback contact channel (migration 035) -- optional, for when
+        // Fallback contact channel (migration 035/039) -- optional, for when
         // WhatsApp isn't on file or doesn't get an answer.
-        discord_id: me.discord_id || null
+        discord_username: me.discord_username || null
       },
       money, streak, totals
     });
@@ -122,30 +122,30 @@ export async function handleClipper(request, env, url) {
   // right below: a disabled clipper can still be owed money from before
   // they were disabled and must still be reachable and payable.
   if (pathname === '/api/clipper/me/profile' && method === 'PATCH') {
-    const { email, contactNumber, upiId, accountName, legalName, discordId } = await readJson(request);
+    const { email, contactNumber, upiId, accountName, legalName, discordUsername } = await readJson(request);
     const emailInvalid = validateEmail(email);
     if (emailInvalid) return err(emailInvalid);
     const contactInvalid = validateContactNumber(contactNumber);
     if (contactInvalid) return err(contactInvalid);
     const upiInvalid = validateUpiId(upiId);
     if (upiInvalid) return err(upiInvalid);
-    // validateDiscordId itself still treats empty as valid -- admin.js's own
-    // edit endpoint relies on that to let the admin clear/leave it blank on
-    // a clipper's behalf. Here, on the clipper's own self-service save, it's
-    // mandatory: this is the fallback contact channel used when a WhatsApp
-    // message doesn't land, so every clipper needs one on file, not just
-    // whoever happened to fill it in.
-    const discordInvalid = validateDiscordId(discordId);
+    // validateDiscordUsername itself still treats empty as valid -- admin.js's
+    // own edit endpoint relies on that to let the admin clear/leave it blank
+    // on a clipper's behalf. Here, on the clipper's own self-service save,
+    // it's mandatory: this is the fallback contact channel used when a
+    // WhatsApp message doesn't land, so every clipper needs one on file, not
+    // just whoever happened to fill it in.
+    const discordInvalid = validateDiscordUsername(discordUsername);
     if (discordInvalid) return err(discordInvalid);
-    const discord = normaliseDiscordId(discordId);
-    if (!discord) return err('Enter your Discord User ID');
+    const discord = normaliseDiscordUsername(discordUsername);
+    if (!discord) return err('Enter your Discord username');
     const name = String(accountName || '').trim();
     if (!name) return err('Enter the name on the UPI account');
     if (name.length > 100) return err('That name is too long');
     const legal = String(legalName || '').trim();
     if (legal.length > 100) return err('That name is too long');
     await env.DB.prepare(
-      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_id = ?,
+      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_username = ?,
          legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
        WHERE id = ?`
     ).bind(

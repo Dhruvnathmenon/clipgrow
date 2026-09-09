@@ -15,7 +15,7 @@ const SESSION_SECRET = 'test-secret';
 function seedEnv() {
   const db = makeSqliteD1({
     clippers: [{ id: 1, username: 'sayed', display_name: 'Sayed', contact_number: '9876543210',
-                 discord_id: '305421934793015296', password_hash: 'h', password_salt: 's',
+                 discord_username: 'clipgrow_fan_92', password_hash: 'h', password_salt: 's',
                  status: 'active', created_at: NOW }]
   });
   return { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
@@ -40,7 +40,7 @@ test('GET joins a clipper error row with their current contact info', async () =
   const { errors } = await adminRequest(env, '/api/admin/error-log').then(r => r.json());
   assert.equal(errors.length, 1);
   assert.equal(errors[0].contact_number, '9876543210');
-  assert.equal(errors[0].discord_id, '305421934793015296');
+  assert.equal(errors[0].discord_username, 'clipgrow_fan_92');
 });
 
 test('GET never attaches contact info to a non-clipper row', async () => {
@@ -52,7 +52,7 @@ test('GET never attaches contact info to a non-clipper row', async () => {
 
   const { errors } = await adminRequest(env, '/api/admin/error-log').then(r => r.json());
   assert.equal(errors[0].contact_number, null);
-  assert.equal(errors[0].discord_id, null);
+  assert.equal(errors[0].discord_username, null);
 });
 
 test('GET ?unresolved=1 hides resolved rows', async () => {

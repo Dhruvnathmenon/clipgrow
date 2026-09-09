@@ -552,8 +552,8 @@
           <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" required placeholder="yourname@bank" /></div>
           <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" required placeholder="Exactly as it appears on the account" /></div>
           <div class="form-group"><label for="pd-legal">Legal Full Name <span class="note" style="display:inline">(optional)</span></label><input type="text" id="pd-legal" placeholder="As it appears on your ID" /></div>
-          <div class="form-group"><label for="pd-discord">Discord User ID</label><input type="text" id="pd-discord" required placeholder="e.g. 305421934793015296" inputmode="numeric" />
-            <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message doesn't land. This is the numeric ID, not your username — turn on Developer Mode (Discord Settings → Advanced), then right-click your own name anywhere and choose "Copy User ID".</p>
+          <div class="form-group"><label for="pd-discord">Discord Username</label><input type="text" id="pd-discord" required placeholder="e.g. yourname" autocapitalize="off" autocorrect="off" />
+            <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message doesn't land. Your @username, not your display name — find it under Discord Settings → My Account.</p>
           </div>
           <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
         </form>
@@ -662,7 +662,7 @@
       if(!d.clipper.email) missing.push('email');
       if(!d.clipper.contact_number) missing.push('contact number');
       if(!d.clipper.upi_id) missing.push('UPI ID');
-      if(!d.clipper.discord_id) missing.push('Discord User ID');
+      if(!d.clipper.discord_username) missing.push('Discord username');
       document.getElementById('details-banner').innerHTML=missing.length?alertBox('warn',
         'Fill in your details',
         `ClipGrow needs your ${missing.join(', ')} to reach you and pay you directly, without messaging you for it on every payout.`,
@@ -1391,7 +1391,7 @@
       document.getElementById('pd-upi').value=(ME&&ME.clipper.upi_id)||'';
       document.getElementById('pd-name').value=(ME&&ME.clipper.upi_account_name)||'';
       document.getElementById('pd-legal').value=(ME&&ME.clipper.legal_name)||'';
-      document.getElementById('pd-discord').value=(ME&&ME.clipper.discord_id)||'';
+      document.getElementById('pd-discord').value=(ME&&ME.clipper.discord_username)||'';
       document.getElementById('pd-error').style.display='none';
       document.getElementById('pd-back').classList.add('open');
       document.getElementById('pd-email').focus();
@@ -1403,18 +1403,18 @@
       const upiId=document.getElementById('pd-upi').value.trim();
       const accountName=document.getElementById('pd-name').value.trim();
       const legalName=document.getElementById('pd-legal').value.trim();
-      const discordId=document.getElementById('pd-discord').value.trim();
+      const discordUsername=document.getElementById('pd-discord').value.trim();
       const errorEl=document.getElementById('pd-error');
       const btn=document.getElementById('pd-submit');
       errorEl.style.display='none';
-      if(!email||!contactNumber||!upiId||!accountName||!discordId){ errorEl.textContent='Fill in email, contact number, UPI ID, the name on the account, and your Discord User ID.'; errorEl.style.display='block'; return; }
+      if(!email||!contactNumber||!upiId||!accountName||!discordUsername){ errorEl.textContent='Fill in email, contact number, UPI ID, the name on the account, and your Discord username.'; errorEl.style.display='block'; return; }
       btn.disabled=true; btn.textContent='Saving…';
       try{
-        await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify({email,contactNumber,upiId,accountName,legalName,discordId})});
+        await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify({email,contactNumber,upiId,accountName,legalName,discordUsername})});
         ME.clipper.email=email; ME.clipper.contact_number=contactNumber;
         ME.clipper.upi_id=upiId; ME.clipper.upi_account_name=accountName;
         if(legalName) ME.clipper.legal_name=legalName;
-        if(discordId) ME.clipper.discord_id=discordId;
+        if(discordUsername) ME.clipper.discord_username=discordUsername;
         document.getElementById('details-banner').innerHTML='';
         closePayoutModal();
         toast('Details saved');

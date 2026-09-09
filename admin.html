@@ -1452,20 +1452,22 @@
       return digits.length===10?'91'+digits:digits;
     }
 
-    // Discord has no wa.me-style link that pre-fills a DM's text -- there is
-    // no public URL parameter for it. The closest real equivalent: copy the
-    // personalised message to the clipboard, then open the clipper's profile
-    // (which only works from a numeric User ID, never a username) so the
-    // only thing left to do is paste and hit send.
-    window.messageOnDiscord=function(discordId,msg){
+    // Discord has no wa.me-style link that pre-fills a DM's text, and --
+    // since migration 039 switched from the numeric snowflake ID to the
+    // @username, which is far easier for a clipper to actually find and
+    // enter -- there is also no way to build a link straight to their DMs
+    // any more; only the numeric ID could ever do that. Closest real
+    // equivalent now: open Discord itself and copy the message, so it's
+    // "search their username, paste" instead of typing the message by hand.
+    window.messageOnDiscord=function(discordUsername,msg){
       // window.open MUST run synchronously inside the click handler, before
       // any await -- browsers only honour a popup as user-gesture-triggered
       // within the original call stack. Putting it after an awaited
       // clipboard write got it silently blocked.
-      window.open('https://discord.com/users/'+discordId,'_blank','noopener');
+      window.open('https://discord.com/channels/@me','_blank','noopener');
       if(msg){
         navigator.clipboard.writeText(msg).then(
-          ()=>toast('Message copied — paste it once Discord opens'),
+          ()=>toast(`Message copied — search "${discordUsername}" in Discord, then paste`),
           ()=>toast('Could not copy automatically — paste this yourself: '+msg,true)
         );
       }
@@ -1500,8 +1502,8 @@
         <div class="muted" style="font-size:.72rem;margin:.1rem 0 .55rem 1.5rem">${esc(fix)}
           ${wa?`· <a href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener" style="color:var(--neon)">Message via WhatsApp</a>`
               :'· no WhatsApp number on file'}
-          ${a.discord_id?`· <button class="btn btn-ghost btn-sm" onclick="messageOnDiscord('${a.discord_id}','${discordMsg}')">Message via Discord</button>`
-                        :'· no Discord ID on file'}
+          ${a.discord_username?`· <button class="btn btn-ghost btn-sm" onclick="messageOnDiscord('${esc(a.discord_username).replace(/'/g,'')}','${discordMsg}')">Message via Discord</button>`
+                        :'· no Discord username on file'}
           · <button class="btn btn-ghost btn-sm" onclick="acknowledgeAccountIssue(${a.id},'error')" style="margin-left:.2rem">Unflag</button>
         </div>`;
     }
@@ -2214,7 +2216,7 @@
         </td>
         <td class="actions">
           ${wa?`<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}">WhatsApp</a>`:''}
-          ${e.actor_type==='clipper'&&e.discord_id?`<button class="btn btn-ghost btn-sm" onclick="messageOnDiscord('${e.discord_id}','${discordMsg}')">Discord</button>`:''}
+          ${e.actor_type==='clipper'&&e.discord_username?`<button class="btn btn-ghost btn-sm" onclick="messageOnDiscord('${esc(e.discord_username).replace(/'/g,'')}','${discordMsg}')">Discord</button>`:''}
           ${e.resolved_at
             ?`<button class="btn btn-ghost btn-sm" onclick="resolveErrorLog(${e.id},false)">Reopen</button>`
             :`<button class="btn btn-sm" onclick="resolveErrorLog(${e.id},true)">Resolve</button>`}
@@ -2372,8 +2374,8 @@
             <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.email?esc(d.clipper.email):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">Email</div></div>
             <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.upi_id?esc(d.clipper.upi_id):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">UPI ID</div></div>
             <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.upi_account_name?esc(d.clipper.upi_account_name):'<span class="muted">not on file</span>'}</div><div class="stat-lbl">UPI Account Name</div></div>
-            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.discord_id
-              ?`${esc(d.clipper.discord_id)} <button class="btn btn-ghost btn-sm" style="margin-left:.3rem" onclick="messageOnDiscord('${d.clipper.discord_id}','')">Open</button>`
+            <div class="stat"><div class="stat-val" style="font-size:.95rem">${d.clipper.discord_username
+              ?`@${esc(d.clipper.discord_username)} <button class="btn btn-ghost btn-sm" style="margin-left:.3rem" onclick="messageOnDiscord('${esc(d.clipper.discord_username).replace(/'/g,'')}','')">Open</button>`
               :'<span class="muted">not on file</span>'}</div><div class="stat-lbl">Discord (backup contact)</div></div>
           </div>
 

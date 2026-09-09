@@ -13,7 +13,7 @@ import { handleModerator } from '../src/routes/moderator.js';
 import { createSessionCookie } from '../src/auth.js';
 import {
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
-  normaliseDiscordId, validateDiscordId
+  normaliseDiscordUsername, validateDiscordUsername
 } from '../src/db.js';
 
 const NOW = Date.now();
@@ -75,17 +75,19 @@ test('normaliseEmail trims and lowercases', () => {
   assert.equal(normaliseEmail('  Ravi@Example.COM '), 'ravi@example.com');
 });
 
-test('validateDiscordId accepts a real numeric snowflake and an empty value, rejects a username', () => {
-  assert.equal(validateDiscordId('305421934793015296'), null, 'a real 18-digit snowflake');
-  assert.equal(validateDiscordId(''), null, 'optional -- empty is not an error');
-  assert.equal(validateDiscordId(null), null, 'optional -- null is not an error');
-  assert.ok(validateDiscordId('clipgrow_fan_92'), 'a username, not the numeric id');
-  assert.ok(validateDiscordId('123'), 'too short to be a real snowflake');
+test('validateDiscordUsername accepts a real-shaped username and an empty value, rejects junk', () => {
+  assert.equal(validateDiscordUsername('clipgrow_fan_92'), null, 'a real-shaped username');
+  assert.equal(validateDiscordUsername(''), null, 'optional -- empty is not an error');
+  assert.equal(validateDiscordUsername(null), null, 'optional -- null is not an error');
+  assert.ok(validateDiscordUsername('a'), 'too short (Discord requires 2+ characters)');
+  assert.ok(validateDiscordUsername('has a space'), 'spaces are never valid in a Discord username');
+  assert.ok(validateDiscordUsername('.leadingdot'), "can't start with a period");
+  assert.ok(validateDiscordUsername('double..dot'), 'no two periods in a row');
 });
 
-test('normaliseDiscordId strips everything but digits', () => {
-  assert.equal(normaliseDiscordId(' 305421934793015296 '), '305421934793015296');
-  assert.equal(normaliseDiscordId('id:305421934793015296'), '305421934793015296');
+test('normaliseDiscordUsername strips a leading @ and lowercases', () => {
+  assert.equal(normaliseDiscordUsername(' @ClipGrow_Fan '), 'clipgrow_fan');
+  assert.equal(normaliseDiscordUsername('ClipGrow_Fan'), 'clipgrow_fan');
 });
 
 /* ── admin visibility + edit ── */
@@ -162,35 +164,35 @@ test('legal_name has no shape validator -- any non-empty trimmed text is accepte
   assert.equal(row.legal_name, 'Ravi Kumar Singh');
 });
 
-/* ── Discord (migration 035) ── */
+/* ── Discord (migration 035, renamed to a username in migration 039) ── */
 
-test('the admin roster and detail include the Discord id', async () => {
+test('the admin roster and detail include the Discord username', async () => {
   const env = seedEnv();
-  await env.DB.prepare("UPDATE clippers SET discord_id = '305421934793015296' WHERE id = 1").run();
+  await env.DB.prepare("UPDATE clippers SET discord_username = 'clipgrow_fan_92' WHERE id = 1").run();
   const { clippers } = await (await adminRequest(env, '/api/admin/clippers')).json();
-  assert.equal(clippers[0].discord_id, '305421934793015296');
+  assert.equal(clippers[0].discord_username, 'clipgrow_fan_92');
   const { clipper } = await (await adminRequest(env, '/api/admin/clippers/1')).json();
-  assert.equal(clipper.discord_id, '305421934793015296');
+  assert.equal(clipper.discord_username, 'clipgrow_fan_92');
 });
 
-test('the admin can set a Discord id through the same Edit action as everything else', async () => {
+test('the admin can set a Discord username through the same Edit action as everything else', async () => {
   const env = seedEnv();
   const res = await adminRequest(env, '/api/admin/clippers/1', {
-    method: 'PATCH', body: { discord_id: '305421934793015296' }
+    method: 'PATCH', body: { discord_username: 'ClipGrow_Fan_92' }
   });
   assert.equal(res.status, 200);
-  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, '305421934793015296');
+  const row = await env.DB.prepare('SELECT discord_username FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_username, 'clipgrow_fan_92', 'normalised to lowercase');
 });
 
-test('the admin edit rejects a Discord username the same way the clipper endpoint does', async () => {
+test('the admin edit rejects a malformed Discord username the same way the clipper endpoint does', async () => {
   const env = seedEnv();
   const res = await adminRequest(env, '/api/admin/clippers/1', {
-    method: 'PATCH', body: { discord_id: 'clipgrow_fan_92' }
+    method: 'PATCH', body: { discord_username: 'has a space' }
   });
   assert.equal(res.status, 400);
-  const row = await env.DB.prepare('SELECT discord_id FROM clippers WHERE id = 1').first();
-  assert.equal(row.discord_id, null);
+  const row = await env.DB.prepare('SELECT discord_username FROM clippers WHERE id = 1').first();
+  assert.equal(row.discord_username, null);
 });
 
 /* ── the actual privacy boundary ── */
@@ -198,18 +200,18 @@ test('the admin edit rejects a Discord username the same way the clipper endpoin
 test('a moderator can never see a clipper contact profile, in the roster or the detail view', async () => {
   const env = seedEnv();
   await env.DB.prepare(
-    "UPDATE clippers SET contact_number = '9876543210', email = 'ravi@example.com', legal_name = 'Ravi Kumar Singh', discord_id = '305421934793015296' WHERE id = 1"
+    "UPDATE clippers SET contact_number = '9876543210', email = 'ravi@example.com', legal_name = 'Ravi Kumar Singh', discord_username = 'clipgrow_fan_92' WHERE id = 1"
   ).run();
 
   const roster = await (await moderatorRequest(env, '/api/moderator/clippers')).json();
   assert.equal(roster.clippers[0].contact_number, undefined);
   assert.equal(roster.clippers[0].email, undefined);
   assert.equal(roster.clippers[0].legal_name, undefined);
-  assert.equal(roster.clippers[0].discord_id, undefined);
+  assert.equal(roster.clippers[0].discord_username, undefined);
 
   const detail = await (await moderatorRequest(env, '/api/moderator/clippers/1')).json();
   assert.equal(detail.clipper.contact_number, undefined);
   assert.equal(detail.clipper.email, undefined);
   assert.equal(detail.clipper.legal_name, undefined);
-  assert.equal(detail.clipper.discord_id, undefined);
+  assert.equal(detail.clipper.discord_username, undefined);
 });
