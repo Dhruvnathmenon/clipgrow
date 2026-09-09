@@ -374,9 +374,18 @@ export async function handleAdmin(request, env, url) {
       }
       const parts = await env.DB.prepare(
         "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'").bind(c.id).first();
+      // Same definition as a campaign's own "active_participants" (this
+      // file, campaigns GET) -- a real post, recently, not just "joined".
+      // Lets the roster sort someone who's gone quiet toward the bottom
+      // instead of leaving every clipper who ever posted mixed in at the top
+      // forever.
+      const recent = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM submissions
+          WHERE clipper_id = ? AND status = 'active' AND COALESCE(posted_at, created_at) >= ?`
+      ).bind(c.id, Date.now() - ACTIVE_WINDOW_MS).first();
       out.push({
         ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0,
-        accounts_mismatched: acc.mismatched || 0, campaigns: parts.n,
+        accounts_mismatched: acc.mismatched || 0, campaigns: parts.n, active_recently: recent.n > 0,
         quality: await clipperQuality(env.DB, c.id),
         // Admin-only -- deliberately not part of publicClipper() (shared with
         // moderator.js's roster), see migration 028's comment.
@@ -1255,6 +1264,12 @@ export async function handleAdmin(request, env, url) {
   // what was true AT THE MOMENT of acknowledgment (see migration 022), so a
   // bucket only stays suppressed while nothing has actually changed since.
   if (pathname === '/api/admin/accounts' && method === 'GET') {
+    // A revoked (removed) account has no ongoing value -- nobody needs to
+    // look at it again unless they specifically go looking. Excluded from
+    // the query entirely by default (not just hidden client-side) so the
+    // common case never pays to fetch/join rows nobody asked to see;
+    // ?removed=1 brings them back for the rare case someone does.
+    const includeRemoved = url.searchParams.get('removed') === '1';
     const { results } = await env.DB.prepare(
       `SELECT a.*, cl.display_name AS clipper_display_name, cl.username AS clipper_username,
          (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
@@ -1264,7 +1279,7 @@ export async function handleAdmin(request, env, url) {
               AND COALESCE(tr.identifier, tr.ig_username) != a.username
             LIMIT 1) AS mismatch_approved_as
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
-       WHERE cl.status != 'deleted'
+       WHERE cl.status != 'deleted' ${includeRemoved ? '' : "AND a.status != 'revoked'"}
        ORDER BY cl.username, a.platform`
     ).all();
 

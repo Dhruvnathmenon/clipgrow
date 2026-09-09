@@ -89,7 +89,12 @@ test('a revoked (removed) account is never counted as an open issue', async () =
   assert.equal(roster.clippers[0].accounts_unhealthy, 0);
   assert.equal(roster.clippers[0].accounts_mismatched, 0);
 
+  // Removed accounts have no ongoing value, so they're excluded from the
+  // query entirely unless specifically asked for.
   const buckets = await adminRequest(env, '/api/admin/accounts').then(r => r.json());
   assert.equal(buckets.issues.length, 0);
-  assert.equal(buckets.removed.length, 1);
+  assert.equal(buckets.removed.length, 0, 'not fetched by default -- nobody asked to see it');
+
+  const withRemoved = await adminRequest(env, '/api/admin/accounts?removed=1').then(r => r.json());
+  assert.equal(withRemoved.removed.length, 1, 'still reachable when explicitly requested');
 });

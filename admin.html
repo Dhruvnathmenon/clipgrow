@@ -286,11 +286,21 @@
           <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Quality</th><th>Earned</th><th>Settled</th><th>Pending</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="clippers-body"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
         </table></div>
+        <details style="margin-top:1rem" id="clippers-rest-wrap">
+          <summary class="sub-h" style="display:inline-block;cursor:pointer">Disabled, not connected, has an issue, or gone quiet <span id="clippers-rest-count" class="muted" style="font-weight:400"></span></summary>
+          <p class="note" style="margin:.4rem 0 .6rem">Sorted worst-first: disabled, then never connected an account, then a real open issue, then no new video in the last 7 days. Alphabetical within each.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Campaigns</th><th>Accounts</th><th>Quality</th><th>Earned</th><th>Settled</th><th>Pending</th><th>Paid</th><th>Left to Pay</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="clippers-rest-body"></tbody>
+          </table></div>
+        </details>
       </div>
       <div class="panel">
-        <h2 class="panel-title">Instagram &amp; YouTube Accounts</h2>
+        <h2 class="panel-title" style="cursor:pointer" onclick="toggleAccountsPanel()">Instagram &amp; YouTube Accounts <span id="accounts-chev" style="font-size:.75rem">▾</span></h2>
         <p class="note" style="margin-bottom:1rem">Every connected account, across every clipper. <strong>Issues</strong> is the only section that needs your attention — Unflag once you've checked it and it's fine; it comes back on its own if something actually changes.</p>
-        <div id="accounts-panel"><div class="empty">Loading…</div></div>
+        <div id="accounts-panel-wrap" style="display:none">
+          <div id="accounts-panel"><div class="empty">Loading…</div></div>
+        </div>
       </div>
       <div class="panel">
         <h2 class="panel-title" style="cursor:pointer" onclick="toggleDeletedClippers()">Deleted Clippers <span id="deleted-count" class="muted" style="font-weight:400;font-size:.8rem"></span> <span id="deleted-chev" style="font-size:.75rem">▾</span></h2>
@@ -1688,10 +1698,10 @@
       row.classList.add('open');
       const box=document.getElementById('cxb-'+id);
       try{
-        const [{participants},{submissions}]=await Promise.all([
-          api('/api/admin/campaigns/'+id+'/participants'),
-          api('/api/admin/campaigns/'+id)
-        ]);
+        // Videos are NOT fetched here -- deferred behind "Show Videos" below,
+        // so opening a campaign is one cheap request instead of two, and a
+        // campaign nobody's checking the video list for never pays for it.
+        const {participants}=await api('/api/admin/campaigns/'+id+'/participants');
         // Three buckets, not one flat list. Kicked used to sit in the same
         // table as everyone still on the roster with a one-click "Reinstate"
         // barely different from a pause -- now its own collapsed section,
@@ -1739,41 +1749,64 @@
             <div style="margin-top:.6rem">${kickedParticipants.length?partTable(kickedParticipants):'<p class="muted">Nobody has been removed from this campaign.</p>'}</div>
           </details>
 
-          <div class="sub-h">Videos (${submissions.length})</div>
-          ${submissions.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Added</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
-            <tbody>${submissions.map(s=>`<tr>
-              <td class="handle">${esc(s.username)}</td>
-              <td class="muted">${s.account_username?acctLink(s.platform,s.account_username,s.platform==='youtube'?esc(s.account_username):'@'+esc(s.account_username)):'—'}</td>
-              <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
-              <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
-              <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
-              <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
-                    :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
-                    :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
-                    :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
-                    :syncErrorBadge(s)}</td>
-              <td><div class="actions">
-                ${s.lock_reason==='paid'
-                  /* Settled and tied to a payment: the API refuses every one of
-                     these, and rightly so -- it is financial history. Reverse
-                     the payment from the Payments tab if it really must move. */
-                  ? '<span class="muted" style="font-size:.72rem">settled — reverse the payment to change it</span>'
-                  : s.locked_at
-                    /* Closed at zero with no payment (a below-minimum write-off).
-                       Unlock accepts this; Pause/Disqualify still do not. */
-                    ? `<button class="btn btn-ghost btn-sm" onclick="unlockClip(${s.id},'campaign')">Reopen</button>
-                       <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`
-                    : `${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
-                       ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
-                       ${s.status!=='disqualified'
-                         ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
-                         :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
-                       ${syncErrorAction(s)}
-                       <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`}
-              </div></td></tr>`).join('')}</tbody></table></div>`
-            :'<p class="muted">No videos submitted yet.</p>'}`;
+          <div class="sub-h">Videos</div>
+          <button class="btn btn-ghost btn-sm" id="cxv-btn-${id}" onclick="showCampaignVideos(${id})">Show Videos</button>
+          <div id="cxv-${id}"></div>`;
       }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
+    };
+
+    function videoRow(s){
+      return `<tr>
+        <td class="handle">${esc(s.username)}</td>
+        <td class="muted">${s.account_username?acctLink(s.platform,s.account_username,s.platform==='youtube'?esc(s.account_username):'@'+esc(s.account_username)):'—'}</td>
+        <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+        <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
+        <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
+        <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
+              :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
+              :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+              :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
+              :syncErrorBadge(s)}</td>
+        <td><div class="actions">
+          ${s.lock_reason==='paid'
+            /* Settled and tied to a payment: the API refuses every one of
+               these, and rightly so -- it is financial history. Reverse
+               the payment from the Payments tab if it really must move. */
+            ? '<span class="muted" style="font-size:.72rem">settled — reverse the payment to change it</span>'
+            : s.locked_at
+              /* Closed at zero with no payment (a below-minimum write-off).
+                 Unlock accepts this; Pause/Disqualify still do not. */
+              ? `<button class="btn btn-ghost btn-sm" onclick="unlockClip(${s.id},'campaign')">Reopen</button>
+                 <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`
+              : `${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
+                 ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
+                 ${s.status!=='disqualified'
+                   ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
+                   :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
+                 ${syncErrorAction(s)}
+                 <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`}
+        </div></td></tr>`;
+    }
+    // Deferred out of toggleCampaign entirely -- a campaign with hundreds of
+    // clips used to fetch and render every one of them the instant you
+    // opened the row, whether or not you actually wanted to see the video
+    // list. Now it's only ever fetched on this explicit click.
+    window.showCampaignVideos=async function(id){
+      const btn=document.getElementById('cxv-btn-'+id);
+      const wrap=document.getElementById('cxv-'+id);
+      if(!btn||!wrap) return;
+      btn.disabled=true; btn.textContent='Loading…';
+      try{
+        const {submissions}=await api('/api/admin/campaigns/'+id);
+        btn.style.display='none';
+        wrap.innerHTML=submissions.length?`<div class="table-wrap"><table>
+            <thead><tr><th>Clipper</th><th>Account</th><th>Video</th><th>Added</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>${submissions.map(videoRow).join('')}</tbody></table></div>`
+          :'<p class="muted">No videos submitted yet.</p>';
+      }catch(e){
+        btn.disabled=false; btn.textContent='Show Videos';
+        toast(e.message,true);
+      }
     };
 
     window.setPart=async function(id,status){
@@ -1859,8 +1892,36 @@
         `<div style="margin-top:.25rem;opacity:.75">* Paid includes bonuses, which are given on top of earnings and are not deducted from Left to Pay.</div>`;
       const tb=document.getElementById('clippers-body');
       if(!clippers.length){ tb.innerHTML='<tr><td colspan="11" class="empty">No clippers yet.</td></tr>'; return; }
-      tb.innerHTML=clippers.map(c=>`
-        <tr class="row-click" onclick="toggleClipper(${c.id})">
+      // Worst-first precedence, same reasoning as accountIssues()/the
+      // Accounts panel buckets: a clipper matching more than one of these
+      // sinks by their single worst reason, not their best one.
+      const byName=(a,b)=>(a.display_name||a.username).localeCompare(b.display_name||b.username);
+      const tiers={disabled:[],not_connected:[],not_working:[],dormant:[],active:[]};
+      for(const c of clippers){
+        if(c.status==='disabled') tiers.disabled.push(c);
+        else if(c.accounts===0) tiers.not_connected.push(c);
+        else if(c.accounts_unhealthy>0||c.accounts_mismatched>0) tiers.not_working.push(c);
+        else if(!c.active_recently) tiers.dormant.push(c);
+        else tiers.active.push(c);
+      }
+      for(const k in tiers) tiers[k].sort(byName);
+      const TIER_LABEL={
+        not_connected:'<span class="badge needs_reauth">not connected</span>',
+        not_working:'<span class="badge needs_reauth">issue</span>',
+        dormant:'<span class="badge" title="No new video in the last 7 days">quiet</span>'
+      };
+      tb.innerHTML=tiers.active.length?tiers.active.map(c=>clipperRow(c)).join('')
+        :'<tr><td colspan="11" class="empty">No active clippers right now.</td></tr>';
+      const rest=[...tiers.disabled,...tiers.not_connected,...tiers.not_working,...tiers.dormant];
+      const restEl=document.getElementById('clippers-rest-body');
+      const restWrap=document.getElementById('clippers-rest-wrap');
+      if(restWrap) restWrap.style.display=rest.length?'':'none';
+      if(restEl) restEl.innerHTML=rest.map(c=>clipperRow(c,TIER_LABEL[c.status==='disabled'?'':(c.accounts===0?'not_connected':c.accounts_unhealthy>0||c.accounts_mismatched>0?'not_working':'dormant')])).join('');
+      document.getElementById('clippers-rest-count').textContent=rest.length?`(${rest.length})`:'';
+      fillPaymentSelects();
+    }
+    function clipperRow(c,tierBadge){
+      return `<tr class="row-click" onclick="toggleClipper(${c.id})">
           <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
           <td>${num(c.campaigns)}</td>
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}${c.accounts_mismatched>0?` <span class="badge needs_reauth" title="Connected account doesn't match what was approved">⚠ mismatch</span>`:''}</td>
@@ -1870,15 +1931,14 @@
           <td>${money(c.money.pending)}</td>
           <td title="${c.money.bonuses?'Includes '+money(c.money.bonuses)+' in bonuses, which are NOT deducted from Left to Pay':'Settlements and advances'}">${money(c.money.paid)}${c.money.bonuses?' *':''}</td>
           <td class="gold">${money(c.money.owed)}${c.money.advanced?`<div class="muted" style="font-size:.68rem">after ${money(c.money.advanced)} advanced</div>`:''}</td>
-          <td><span class="badge ${c.status}">${c.status}</span>${c.upi_id?'':' <span class="badge needs_reauth" title="No UPI ID on file yet -- cannot be paid directly until they add one">no UPI</span>'}</td>
+          <td><span class="badge ${c.status}">${c.status}</span>${tierBadge?' '+tierBadge:''}${c.upi_id?'':' <span class="badge needs_reauth" title="No UPI ID on file yet -- cannot be paid directly until they add one">no UPI</span>'}</td>
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
             <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id})">Edit</button>
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
           </div></td>
-        </tr>`).join('');
-      fillPaymentSelects();
+        </tr>`;
     }
 
     /* ── Instagram/YouTube account health panel ──
@@ -1911,15 +1971,41 @@
         </tr>`).join('')}</tbody>
       </table></div>`;
     }
+    // Not fetched until the panel is actually opened -- Overview's own
+    // "Needs attention" banner already surfaces a real open issue, so
+    // nothing here is missed by staying collapsed on every other page load.
+    let accountsPanelLoaded=false;
+    window.toggleAccountsPanel=function(){
+      const wrap=document.getElementById('accounts-panel-wrap');
+      const chev=document.getElementById('accounts-chev');
+      const opening=wrap.style.display==='none';
+      wrap.style.display=opening?'':'none';
+      chev.textContent=opening?'▴':'▾';
+      if(opening&&!accountsPanelLoaded) loadAccountsPanel();
+    };
     async function loadAccountsPanel(){
+      accountsPanelLoaded=true;
       const buckets=await api('/api/admin/accounts');
       ACCOUNTS_PANEL=buckets;
       document.getElementById('accounts-panel').innerHTML=
         `<div class="sub-h">Issues (${buckets.issues.length})</div>${acctTable(buckets.issues,{showReasons:true})}`+
         `<div class="sub-h">Active (${buckets.active.length})</div>${acctTable(buckets.active)}`+
         `<div class="sub-h">Paused (${buckets.paused.length})</div>${acctTable(buckets.paused)}`+
-        `<div class="sub-h">Removed (${buckets.removed.length})</div>${acctTable(buckets.removed)}`;
+        // Removed accounts have no ongoing value -- never fetched by default
+        // (see the endpoint itself), and stay a click away here rather than
+        // rendered every time.
+        `<details style="margin-top:1rem"><summary class="sub-h" style="display:inline-block;cursor:pointer">Removed</summary>
+           <div id="accounts-removed" style="margin-top:.6rem"><button class="btn btn-ghost btn-sm" onclick="loadRemovedAccounts()">Show removed accounts</button></div>
+         </details>`;
     }
+    window.loadRemovedAccounts=async function(){
+      const el=document.getElementById('accounts-removed');
+      el.innerHTML='Loading…';
+      try{
+        const {removed}=await api('/api/admin/accounts?removed=1');
+        el.innerHTML=acctTable(removed);
+      }catch(e){ el.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
+    };
     window.acknowledgeAccountIssue=async function(id,type){
       try{
         await api('/api/admin/accounts/'+id+'/acknowledge',{method:'PATCH',body:JSON.stringify({type})});
@@ -2755,7 +2841,10 @@
         run('Overview',loadOverview,'health'),
         run('Campaigns',loadCampaigns,'campaigns-body'),
         run('Clippers',loadClippers,'clippers-body'),
-        run('Accounts',loadAccountsPanel,'accounts-panel'),
+        // Accounts panel is collapsed by default (toggleAccountsPanel) and
+        // loads itself on first expand -- Overview's own banner already
+        // surfaces a real open issue, so nothing is missed by not fetching
+        // this on every page load.
         run('Access requests',loadTesters,null),
         // The tab-count badge rides on every page load, same reasoning as
         // Access requests above -- you should see "3 need attention" without
