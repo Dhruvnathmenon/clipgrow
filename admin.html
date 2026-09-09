@@ -27,6 +27,11 @@
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-ghost { background:transparent; color:var(--muted-l); border:1px solid var(--border-s); }
     .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
+    /* A toggled-on filter/view button (e.g. the Authentication tab's Show:
+       Pending/Approved/Rejected/Removed row) -- .btn-ghost otherwise looks
+       identical whether .on is set or not, so a real toggle read as if
+       nothing happened when clicked. */
+    .btn-ghost.on { background:var(--glow-s); border-color:var(--neon); color:var(--neon); box-shadow:0 0 10px var(--glow-s); }
     .btn-danger { background:transparent; color:var(--red); border:1px solid var(--red); }
     .btn-danger:hover { background:var(--red); color:#fff; }
     .btn-warn { background:transparent; color:var(--gold); border:1px solid var(--gold); }
