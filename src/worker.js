@@ -12,6 +12,7 @@ import { handleGuide } from './routes/guides.js';
 import { handleMarketing } from './routes/marketing.js';
 import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
+import { renewInstagramTokens } from './token-renewal.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 import { logError, pruneErrorLog } from './error-log.js';
@@ -385,6 +386,20 @@ export default {
         if (pruned) console.log(`[cron sync] pruned ${pruned} error_log row(s) older than 7 days`);
       } catch (e) {
         console.error('[cron sync] error_log prune failed', e && e.message);
+      }
+
+      // Extend Instagram tokens that are nearing their 60-day expiry, BEFORE
+      // the refresh sweep spends this invocation's subrequest budget. Capped
+      // low so the two never collide. This is what stops the recurring
+      // "reconnect needed" waves -- a token only actually expires now if the
+      // clipper revoked it themselves.
+      try {
+        const t = await renewInstagramTokens(env.DB, env);
+        if (t.renewed.length || t.reauth.length || t.failed.length) {
+          console.log(`[cron sync] IG token renewal: ${t.renewed.length} extended, ${t.reauth.length} need reconnect, ${t.failed.length} retry next pass`);
+        }
+      } catch (e) {
+        console.error('[cron sync] IG token renewal failed', e && e.message);
       }
 
       // respectCooldown TRUE, unlike a human-triggered refresh. Without it an

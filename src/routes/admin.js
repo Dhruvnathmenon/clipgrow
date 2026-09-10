@@ -29,6 +29,7 @@ import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY, moderatorActivity
 } from '../reviews.js';
 import { TERMINAL_SYNC_ERRORS, clipState, clipStateMessage, daysSince } from '../clipstate.js';
+import { renewInstagramTokens } from '../token-renewal.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -1410,6 +1411,21 @@ export async function handleAdmin(request, env, url) {
   }
 
   // --------------------------------------------------------------- accounts
+  // Extend every Instagram token nearing expiry, right now, instead of waiting
+  // for the cron to work through them 5 at a time. The cron keeps them topped
+  // up on its own -- this is for the initial catch-up and for peace of mind.
+  if (pathname === '/api/admin/instagram/renew-tokens' && method === 'POST') {
+    // Wider window + higher cap than the cron: a deliberate front-load of
+    // everything within a month of expiry, in one go.
+    const t = await renewInstagramTokens(env.DB, env, { max: 40, withinMs: 30 * 24 * 60 * 60 * 1000 });
+    return json({
+      ok: true,
+      extended: t.renewed.length,
+      need_reconnect: t.reauth.length,
+      retry_later: t.failed.length
+    });
+  }
+
   // Switches an account between automatic tracking and paste-only. Used when a
   // clipper posts campaign work from their MAIN account, where auto-import
   // would otherwise sweep in their unrelated personal videos.

@@ -5,6 +5,18 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-10
+- **Instagram tokens now auto-renew — no more reconnect waves.** IG long-lived
+  tokens last 60 days but can be extended another 60 while still valid
+  (`graph.instagram.com/refresh_access_token`, already wired as
+  `ig.refreshLongLivedToken` — just never called). New `src/token-renewal.js`
+  `renewInstagramTokens()` runs on the cron: renews the ≤5 tokens closest to
+  expiry each pass (12-day window), so every connection refreshes ~every 48
+  days and never nears the wall. A token that genuinely can't be saved (clipper
+  revoked it in their IG settings, or it already lapsed) → `needs_reauth`,
+  which is now the ONLY reconnect case. Manual `POST /api/admin/instagram/
+  renew-tokens` (30-day window, cap 40) + a button on the Sync Health tab for
+  a one-off catch-up. Cannot rescue an already-expired token — the 2 current
+  `needs_reauth` accounts still need their clippers to reconnect once.
 - **Refresh chaining audit + SUBREQUEST_LIMIT fix.** Jobs 160-171 all
   completed cleanly (3-4 invocations, 0 skipped) — the chaining is healthy.
   One real bug: when a run hit Cloudflare's per-invocation subrequest cap, the

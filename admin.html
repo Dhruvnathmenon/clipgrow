@@ -603,6 +603,19 @@
     <!-- SYNC HEALTH -->
     <div class="view" id="v-synchealth">
       <div class="panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
+          <h2 class="panel-title" style="margin:0">Instagram connections</h2>
+          <button class="btn btn-ghost btn-sm" onclick="renewIgTokens(this)">Renew Instagram tokens now</button>
+        </div>
+        <p class="note" style="margin:.5rem 0 0">
+          Instagram tokens last 60 days. The system now extends each one automatically — on the
+          6-hourly cron, well before it can expire — so clippers no longer get "reconnect needed"
+          waves. A clipper only has to reconnect if they revoke access in their own Instagram
+          settings. Use the button for a one-off top-up of everything.
+        </p>
+        <div id="ig-renew-result" class="note" style="margin-top:.5rem"></div>
+      </div>
+      <div class="panel">
         <h2 class="panel-title">Videos not updating right now</h2>
         <p class="note" style="margin:.3rem 0 1rem">
           Every active video, inside its 7-day tracking window, whose view count is not moving —
@@ -2465,6 +2478,18 @@
           </div>`).join('');
       }catch(e){ el.innerHTML=`<div class="alert bad">${esc(e.message)}</div>`; }
     }
+    window.renewIgTokens=async function(btn){
+      btn.disabled=true; btn.textContent='Renewing…';
+      const out=document.getElementById('ig-renew-result');
+      try{
+        const r=await api('/api/admin/instagram/renew-tokens',{method:'POST'});
+        out.innerHTML=`<span style="color:var(--neon)">${r.extended} token(s) extended by 60 days.</span>`
+          +(r.need_reconnect?` <span style="color:var(--gold)">${r.need_reconnect} genuinely need the clipper to reconnect (revoked or already lapsed).</span>`:'')
+          +(r.retry_later?` ${r.retry_later} hit a temporary snag — the cron retries those.`:'');
+        loadSyncHealth();
+      }catch(e){ out.innerHTML=`<span style="color:var(--red)">${esc(e.message)}</span>`; }
+      finally{ btn.disabled=false; btn.textContent='Renew Instagram tokens now'; }
+    };
 
     /* ── Audit Log ── */
     let AUDIT_CURSOR=null;
