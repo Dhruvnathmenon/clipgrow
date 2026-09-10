@@ -602,6 +602,12 @@
     <!-- ERROR LOG -->
     <div class="view" id="v-errors">
       <div class="panel">
+        <details>
+          <summary style="cursor:pointer;color:var(--neon);font-weight:600;font-size:.95rem">Common errors &amp; how to fix them yourself</summary>
+          <div id="err-runbook" style="margin-top:.8rem"></div>
+        </details>
+      </div>
+      <div class="panel">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
           <h2 class="panel-title">Errors</h2>
           <div class="actions">
@@ -2276,7 +2282,66 @@
       document.getElementById('err-filter-all').classList.toggle('on',!openOnly);
       loadErrorLog();
     };
+    // Plain-English cause + fix for the errors that actually recur. `match` is
+    // tested against the logged message (and code). Keep this list short and
+    // real -- only patterns that have genuinely shown up. The same list powers
+    // the reference card at the top of this tab AND the inline hint on a row.
+    const KNOWN_FIXES=[
+      {
+        name:'"That connection link expired"',
+        match:/connection link expired|link expired|state (?:expired|mismatch|invalid)|EXPIRED_STATE/i,
+        cause:'The clipper opened the Instagram/YouTube Connect step, then took too long (or got distracted) before finishing on the platform’s side. The one-time connect link only stays valid for a few minutes.',
+        fix:'Tell the clipper to go back to their dashboard, click Connect again, and finish the whole flow in one go without switching apps or leaving it open. Nothing is broken — it just needs a fresh link.'
+      },
+      {
+        name:'"This authorization code has been used"',
+        match:/authorization code has been used|code has been used|invalid_grant|OAuthException/i,
+        cause:'The clipper landed back on the return page and it got submitted twice — usually a refresh, or tapping back then forward after connecting.',
+        fix:'Harmless. Ask them to start Connect once more and not refresh the page it sends them back to. If their account actually shows as connected on their dashboard, it already worked — ignore this one.'
+      },
+      {
+        name:'"D1_ERROR: internal error" / "internal error; reference ="',
+        match:/D1_ERROR|internal error; reference|Network connection lost|storage (?:error|limit)/i,
+        cause:'A momentary hiccup on Cloudflare’s database, not our code. Almost always clears by itself within a few seconds.',
+        fix:'Reload the page once. If the SAME page keeps failing for more than a minute or two, note which page it is (Clippers, Payouts, a specific campaign…) and send that to Claude — that means a query on that page needs trimming.'
+      },
+      {
+        name:'"needs reconnecting" / token expired on an account',
+        match:/reconnect|TOKEN_EXPIRED|TOKEN_REVOKED|needs_reauth|reauthor/i,
+        cause:'Instagram/Google expired or revoked the access token for that account. Only the clipper can re-grant it — there is no admin-side fix, and no button here does it for them.',
+        fix:'Message the clipper (WhatsApp/Discord buttons are on the Overview banner and on the account row). They open their dashboard and hit Reconnect on that campaign. Views resume from where they left off — nothing is lost.'
+      },
+      {
+        name:'A page is slow or times out',
+        match:/timeout|timed out|exceeded|too many|Worker exceeded/i,
+        cause:'A page asking the database for too much at once. The Clippers and Moderators rosters were the usual culprits.',
+        fix:'Reload once. If it persists on one specific page, tell Claude which page — the fix is to batch that page’s queries (same change already made to the rosters).'
+      },
+      {
+        name:'"already connected to another ClipGrow campaign"',
+        match:/already connected to (?:another|your)|ACCOUNT_IN_USE|in use/i,
+        cause:'One social account can only drive one LIVE campaign at a time. The clipper is trying to use an account that is still attached to a campaign that has not been marked Over.',
+        fix:'Either mark the old campaign Over (Campaigns tab → Mark Over) to free the account, or have the clipper connect a different account for the new campaign.'
+      }
+    ];
+    function knownFix(e){
+      const hay=`${e.message||''} ${e.code||''}`;
+      return KNOWN_FIXES.find(k=>k.match.test(hay))||null;
+    }
+    function renderRunbook(){
+      const el=document.getElementById('err-runbook');
+      if(!el) return;
+      el.innerHTML=KNOWN_FIXES.map(k=>`
+        <div style="border-left:2px solid var(--border-s);padding:.1rem 0 .1rem .8rem;margin-bottom:.9rem">
+          <div style="color:var(--white);font-weight:600;font-size:.85rem">${esc(k.name)}</div>
+          <div class="note" style="margin:.2rem 0"><strong style="color:var(--muted-l)">Why:</strong> ${esc(k.cause)}</div>
+          <div class="note"><strong style="color:var(--neon)">Do:</strong> ${esc(k.fix)}</div>
+        </div>`).join('')
+        +`<p class="note" style="margin-top:.4rem;opacity:.75">Anything not in this list, or the same error again right after you’ve tried the fix — that’s worth sending to Claude.</p>`;
+    }
+
     function errorRow(e){
+      const fix=knownFix(e);
       const who=e.actor_type==='clipper'?esc(e.actor_label||'Unknown clipper')
         :e.actor_type==='moderator'?`${esc(e.actor_label||'Unknown moderator')} <span class="muted" style="font-size:.7rem">(moderator)</span>`
         :e.actor_type==='client'?`${esc(e.actor_label||'Unknown client')} <span class="muted" style="font-size:.7rem">(client)</span>`
@@ -2292,6 +2357,7 @@
         <td>${who}</td>
         <td><span class="badge ${ERROR_SOURCE_BADGE[e.source]||'neutral'}">${esc(ERROR_SOURCE_LABEL[e.source]||e.source)}</span>${e.code?` <span class="muted" style="font-size:.68rem">${esc(e.code)}</span>`:''}</td>
         <td style="max-width:340px">${esc(e.message)}
+          ${fix?`<div class="note" style="margin-top:.35rem;color:var(--neon)"><strong>Fix:</strong> ${esc(fix.fix)}</div>`:''}
           ${e.detail?`<details style="margin-top:.25rem"><summary class="muted" style="font-size:.68rem;cursor:pointer">detail</summary><pre style="white-space:pre-wrap;font-size:.68rem;color:var(--muted-l);margin:.3rem 0 0">${esc(e.detail)}</pre></details>`:''}
         </td>
         <td class="actions">
@@ -2304,6 +2370,7 @@
       </tr>`;
     }
     async function loadErrorLog(){
+      renderRunbook();
       const {errors}=await api('/api/admin/error-log'+(ERROR_SHOW_ALL?'':'?unresolved=1'));
       setErrorCount(errors.filter(e=>!e.resolved_at).length);
       const body=document.getElementById('errors-body');

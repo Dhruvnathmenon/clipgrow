@@ -734,27 +734,63 @@ export async function clipperFinancials(db, clipperId) {
   const pending = row.pending || 0;
   const advanced = paidRow.advanced || 0;
 
+  return financialsShape(row, paidRow);
+}
+
+/** The exact object clipperFinancials returns, from a submissions-agg row and a
+ *  payments-agg row (either may be a partial/empty object). Factored out so the
+ *  per-clipper path and the whole-roster path below cannot drift. */
+function financialsShape(row, paidRow) {
+  const pending = (row && row.pending) || 0;
+  const advanced = (paidRow && paidRow.advanced) || 0;
   return {
-    // The billable/delivered figure -- how much campaign value this
-    // clipper has generated. An admin/finance question; never show this to
-    // the clipper as if it were their own money -- use clipper_earned.
-    earned: row.earned || 0,
-    // What the clipper has actually, genuinely earned: settled (paid) plus
-    // pending (owed), both already clipper_earning-based. This is the
-    // figure a clipper-facing screen must use.
-    clipper_earned: row.clipper_earned || 0,
-    settled: row.settled || 0,
+    earned: (row && row.earned) || 0,
+    clipper_earned: (row && row.clipper_earned) || 0,
+    settled: (row && row.settled) || 0,
     pending,
-    pending_clips: row.pending_clips || 0,
-    paid: paidRow.paid || 0,
+    pending_clips: (row && row.pending_clips) || 0,
+    paid: (paidRow && paidRow.paid) || 0,
     advanced,
-    bonuses: paidRow.bonuses || 0,
-    // What is still genuinely owed. An advance was paid against work not yet
-    // settled, so it comes off the top -- otherwise the same money is owed
-    // twice: once as an unsettled clip and again as a payment already sent.
-    // A bonus is extra and is deliberately NOT deducted. Floored at 0 so an
-    // over-advance shows as "nothing owed" rather than a negative balance;
-    // the surplus is visible as advanced > pending.
+    bonuses: (paidRow && paidRow.bonuses) || 0,
     owed: Math.max(0, pending - advanced)
   };
 }
+
+/**
+ * clipperFinancials for EVERY clipper in two queries instead of ~three per
+ * row. The roster ranks the whole list at once, so the per-clipper version was
+ * a fixed multiplier on page-load latency -- ~six queries times the roster
+ * size -- and, past a few dozen clippers, a real risk of tripping D1's
+ * per-request statement ceiling. Same "one grouped scan" fix already applied
+ * to allClipperStreaks. Returns Map<clipperId, sameShapeAsClipperFinancials>.
+ */
+export async function allClipperFinancials(db) {
+  const [{ results: subRows }, { results: payRows }] = await Promise.all([
+    db.prepare(
+      `SELECT clipper_id,
+         ${spendExpr()} AS earned,
+         ${spendClipperExpr()} AS clipper_earned,
+         COALESCE(SUM(CASE WHEN locked_at IS NOT NULL THEN COALESCE(locked_earning,0) ELSE 0 END), 0) AS settled,
+         ${pendingClipperExpr()} AS pending,
+         COALESCE(SUM(CASE WHEN locked_at IS NULL AND status = 'active' THEN 1 ELSE 0 END), 0) AS pending_clips
+       FROM submissions GROUP BY clipper_id`
+    ).all(),
+    db.prepare(
+      `SELECT clipper_id,
+         COALESCE(SUM(amount),0) AS paid,
+         COALESCE(SUM(CASE WHEN kind = 'advance' THEN amount - COALESCE(recovered_amount,0) ELSE 0 END),0) AS advanced,
+         COALESCE(SUM(CASE WHEN kind = 'bonus'   THEN amount ELSE 0 END),0) AS bonuses
+       FROM payments GROUP BY clipper_id`
+    ).all()
+  ]);
+  const subs = new Map((subRows || []).map(r => [r.clipper_id, r]));
+  const pays = new Map((payRows || []).map(r => [r.clipper_id, r]));
+  const out = new Map();
+  for (const id of new Set([...subs.keys(), ...pays.keys()])) {
+    out.set(id, financialsShape(subs.get(id), pays.get(id)));
+  }
+  return out;
+}
+
+/** The all-zero financials shape, for a clipper with no clips and no payments. */
+export const EMPTY_FINANCIALS = financialsShape(null, null);

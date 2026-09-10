@@ -107,6 +107,16 @@ export async function submitReview(db, { submissionId, verdict, feedback, review
   }
 }
 
+/** {tick, cross, skip, quality_pct} from a verdict->count map. Skip is
+ *  excluded from the ratio. Shared so the one-clipper and whole-roster paths
+ *  produce an identical shape. */
+function qualityShape(counts) {
+  const c = { tick: 0, cross: 0, skip: 0, ...counts };
+  const denom = c.tick + c.cross;
+  return { tick: c.tick, cross: c.cross, skip: c.skip,
+           quality_pct: denom ? Math.round((c.tick / denom) * 100) : null };
+}
+
 /** Lifetime tick/cross/skip for one clipper. Skip is excluded from the quality ratio. */
 export async function clipperQuality(db, clipperId) {
   const { results } = await db.prepare(
@@ -114,11 +124,36 @@ export async function clipperQuality(db, clipperId) {
      JOIN submissions s ON s.id = sr.submission_id
      WHERE s.clipper_id = ? GROUP BY sr.verdict`
   ).bind(clipperId).all();
-  const counts = { tick: 0, cross: 0, skip: 0 };
+  const counts = {};
   for (const r of results || []) counts[r.verdict] = r.n;
-  const denom = counts.tick + counts.cross;
-  return { ...counts, quality_pct: denom ? Math.round((counts.tick / denom) * 100) : null };
+  return qualityShape(counts);
 }
+
+/**
+ * clipperQuality for EVERY clipper in one query -- the roster was running this
+ * once per row. Returns Map<clipperId, {tick, cross, skip, quality_pct}>;
+ * a clipper with no reviews is simply absent (callers fall back to the
+ * all-zero shape).
+ */
+export async function allClipperQuality(db) {
+  const { results } = await db.prepare(
+    `SELECT s.clipper_id, sr.verdict, COUNT(*) AS n
+       FROM submission_reviews sr
+       JOIN submissions s ON s.id = sr.submission_id
+      GROUP BY s.clipper_id, sr.verdict`
+  ).all();
+  const byClipper = new Map();
+  for (const r of results || []) {
+    if (!byClipper.has(r.clipper_id)) byClipper.set(r.clipper_id, {});
+    byClipper.get(r.clipper_id)[r.verdict] = r.n;
+  }
+  const out = new Map();
+  for (const [id, counts] of byClipper) out.set(id, qualityShape(counts));
+  return out;
+}
+
+/** The zero-review shape, for a clipper absent from allClipperQuality(). */
+export const EMPTY_QUALITY = qualityShape({});
 
 /** Per-moderator (+ a synthetic admin row) lifetime and today totals, for management + ranking views. */
 export async function moderatorActivity(db) {

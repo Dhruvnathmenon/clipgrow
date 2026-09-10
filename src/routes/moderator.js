@@ -9,7 +9,7 @@ import {
 import { createRefreshJob, advanceJob, getJob, publicJob } from '../refresh-jobs.js';
 import { reallocateAll } from '../earnings.js';
 import {
-  reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality
+  reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
 } from '../reviews.js';
 import { logAction } from '../audit.js';
 
@@ -115,18 +115,21 @@ export async function handleModerator(request, env, url) {
     const { results } = await env.DB.prepare(
       "SELECT * FROM clippers WHERE status != 'deleted' ORDER BY created_at DESC"
     ).all();
-    const out = [];
-    for (const c of results || []) {
-      const acc = await env.DB.prepare('SELECT COUNT(*) AS n FROM social_accounts WHERE clipper_id = ?')
-        .bind(c.id).first();
-      const parts = await env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'"
-      ).bind(c.id).first();
-      out.push({
-        ...publicClipper(c), accounts: acc.n, campaigns: parts.n,
-        quality: await clipperQuality(env.DB, c.id)
-      });
-    }
+    // Whole-roster counts in three queries, not three per row -- the per-row
+    // loop was the source of the intermittent D1 "internal error" here.
+    const [quality, acctRows, partRows] = await Promise.all([
+      allClipperQuality(env.DB),
+      env.DB.prepare('SELECT clipper_id, COUNT(*) AS n FROM social_accounts GROUP BY clipper_id').all(),
+      env.DB.prepare("SELECT clipper_id, COUNT(*) AS n FROM participations WHERE status != 'kicked' GROUP BY clipper_id").all()
+    ]);
+    const accByClipper = new Map((acctRows.results || []).map(r => [r.clipper_id, r.n]));
+    const partByClipper = new Map((partRows.results || []).map(r => [r.clipper_id, r.n]));
+    const out = (results || []).map(c => ({
+      ...publicClipper(c),
+      accounts: accByClipper.get(c.id) || 0,
+      campaigns: partByClipper.get(c.id) || 0,
+      quality: quality.get(c.id) || EMPTY_QUALITY
+    }));
     return json({ clippers: out });
   }
 

@@ -2,7 +2,7 @@ import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } from '../auth.js';
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
-  campaignSpend, campaignWithSpend, clipperFinancials, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
+  campaignSpend, campaignWithSpend, clipperFinancials, allClipperFinancials, EMPTY_FINANCIALS, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
   disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
@@ -26,7 +26,7 @@ import { makeCallCounter } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { listErrors, resolveError } from '../error-log.js';
 import {
-  reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, moderatorActivity
+  reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY, moderatorActivity
 } from '../reviews.js';
 import { TERMINAL_SYNC_ERRORS } from '../clipstate.js';
 
@@ -428,15 +428,18 @@ export async function handleAdmin(request, env, url) {
         ? "SELECT * FROM clippers WHERE status = 'deleted' ORDER BY created_at DESC"
         : "SELECT * FROM clippers WHERE status != 'deleted' ORDER BY created_at DESC"
     ).all();
-    const out = [];
-    for (const c of results || []) {
-      const money = await clipperFinancials(env.DB, c.id);
-      // Same open-issue definition as the bucketed Issues panel (accountIssues()
-      // in db.js) -- this used to be its own raw SQL check with no idea the
-      // acknowledgment columns existed, so unflagging something below never
-      // cleared the badge shown here.
-      const { results: accts } = await env.DB.prepare(
-        `SELECT a.status, a.username, a.last_error_code, a.last_error_at,
+
+    // Whole-roster aggregates in a fixed handful of queries, not ~6 per row.
+    // The old per-clipper loop was the single biggest chunk of this page's
+    // load time and, past a few dozen clippers, a real risk of tripping D1's
+    // per-request statement limit (which is where the intermittent
+    // "internal error" on this endpoint was coming from).
+    const recentCut = Date.now() - ACTIVE_WINDOW_MS;
+    const [money, quality, acctRows, partRows, recentRows] = await Promise.all([
+      allClipperFinancials(env.DB),
+      allClipperQuality(env.DB),
+      env.DB.prepare(
+        `SELECT a.clipper_id, a.status, a.username, a.last_error_code, a.last_error_at,
                 a.mismatch_acknowledged_as, a.error_acknowledged_at,
                 (SELECT COALESCE(tr.identifier, tr.ig_username) FROM tester_requests tr
                    JOIN participation_accounts pa ON pa.account_id = a.id
@@ -444,28 +447,38 @@ export async function handleAdmin(request, env, url) {
                    WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
                      AND COALESCE(tr.identifier, tr.ig_username) != a.username
                    LIMIT 1) AS mismatch_approved_as
-         FROM social_accounts a WHERE clipper_id = ?`).bind(c.id).all();
-      const acc = { n: (accts || []).length, bad: 0, mismatched: 0 };
-      for (const a of accts || []) {
-        const { mismatchOpen, errorOpen } = accountIssues(a);
-        if (errorOpen) acc.bad++;
-        if (mismatchOpen) acc.mismatched++;
-      }
-      const parts = await env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM participations WHERE clipper_id = ? AND status != 'kicked'").bind(c.id).first();
-      // Same definition as a campaign's own "active_participants" (this
-      // file, campaigns GET) -- a real post, recently, not just "joined".
-      // Lets the roster sort someone who's gone quiet toward the bottom
-      // instead of leaving every clipper who ever posted mixed in at the top
-      // forever.
-      const recent = await env.DB.prepare(
-        `SELECT COUNT(*) AS n FROM submissions
-          WHERE clipper_id = ? AND status = 'active' AND COALESCE(posted_at, created_at) >= ?`
-      ).bind(c.id, Date.now() - ACTIVE_WINDOW_MS).first();
-      out.push({
-        ...publicClipper(c), money, accounts: acc.n, accounts_unhealthy: acc.bad || 0,
-        accounts_mismatched: acc.mismatched || 0, campaigns: parts.n, active_recently: recent.n > 0,
-        quality: await clipperQuality(env.DB, c.id),
+         FROM social_accounts a`).all(),
+      env.DB.prepare(
+        "SELECT clipper_id, COUNT(*) AS n FROM participations WHERE status != 'kicked' GROUP BY clipper_id").all(),
+      env.DB.prepare(
+        `SELECT clipper_id, COUNT(*) AS n FROM submissions
+          WHERE status = 'active' AND COALESCE(posted_at, created_at) >= ? GROUP BY clipper_id`
+      ).bind(recentCut).all()
+    ]);
+
+    // social_accounts -> per-clipper {n, bad, mismatched}, same accountIssues()
+    // open/acknowledged logic as the bucketed Issues panel.
+    const accByClipper = new Map();
+    for (const a of acctRows.results || []) {
+      const e = accByClipper.get(a.clipper_id) || { n: 0, bad: 0, mismatched: 0 };
+      e.n++;
+      const { mismatchOpen, errorOpen } = accountIssues(a);
+      if (errorOpen) e.bad++;
+      if (mismatchOpen) e.mismatched++;
+      accByClipper.set(a.clipper_id, e);
+    }
+    const partByClipper = new Map((partRows.results || []).map(r => [r.clipper_id, r.n]));
+    const recentByClipper = new Map((recentRows.results || []).map(r => [r.clipper_id, r.n]));
+
+    const out = (results || []).map(c => {
+      const acc = accByClipper.get(c.id) || { n: 0, bad: 0, mismatched: 0 };
+      return {
+        ...publicClipper(c),
+        money: money.get(c.id) || EMPTY_FINANCIALS,
+        accounts: acc.n, accounts_unhealthy: acc.bad, accounts_mismatched: acc.mismatched,
+        campaigns: partByClipper.get(c.id) || 0,
+        active_recently: (recentByClipper.get(c.id) || 0) > 0,
+        quality: quality.get(c.id) || EMPTY_QUALITY,
         // Admin-only -- deliberately not part of publicClipper() (shared with
         // moderator.js's roster), see migration 028's comment.
         upi_id: c.upi_id || null, upi_account_name: c.upi_account_name || null,
@@ -473,8 +486,8 @@ export async function handleAdmin(request, env, url) {
         contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null,
         // Fallback contact channel, migration 035/039 -- same boundary again.
         discord_username: c.discord_username || null
-      });
-    }
+      };
+    });
     return json({ clippers: out });
   }
 
@@ -1428,6 +1441,11 @@ export async function handleAdmin(request, env, url) {
     if (!before) return err('Account not found', 404);
 
     const result = await disconnectSocialAccount(env.DB, Number(params.id));
+    // Null when the row is already gone -- a double-click, or two tabs both
+    // disconnecting the same account. The first call did the work; the second
+    // has nothing to do. (This was a real "Cannot read properties of null"
+    // in the error log.)
+    if (!result) return json({ ok: true, already_disconnected: true });
     // Those pending clips were holding budget; it has to be re-spread across
     // whatever is still open in each affected campaign.
     for (const cid of result.campaigns) await reallocateCampaign(env.DB, cid);

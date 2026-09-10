@@ -5,6 +5,22 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-10
+- **Perf: killed the N+1 on the clipper rosters.** `/api/admin/clippers` was
+  ~6 D1 queries PER clipper in a sequential loop (financials x2, accounts,
+  participations, recency, quality); `/api/moderator/clippers` ~3 per row.
+  Past a few dozen clippers this was seconds of latency and enough to trip
+  D1's per-request statement ceiling (the intermittent "D1_ERROR: internal
+  error" on those endpoints). New `allClipperFinancials()` / `allClipperQuality()`
+  batch helpers (mirrors `allClipperStreaks`) — both endpoints are now a fixed
+  ~6 / ~3 queries regardless of roster size. `test/roster-batch-aggregates`
+  pins the batch output byte-identical to the per-clipper functions.
+- Fixed `Cannot read properties of null (reading 'campaigns')` on
+  `DELETE /api/admin/accounts/:id` — a double-click / two-tab race where
+  `disconnectSocialAccount` returns null the second time.
+- **Error Log tab**: a "Common errors & how to fix them yourself" reference
+  card (collapsible, always there), plus an inline **Fix:** line on any logged
+  row whose message matches a known pattern (expired connect link, reused auth
+  code, transient D1 error, token/reconnect, slow page, account-in-use).
 - **Flag Video tab**: paste an Instagram/YouTube link + reason → the matching
   tracked clip is invalidated immediately (same path as the clipper-page
   button). `POST /api/admin/submissions/invalidate-by-url`, matches by the
