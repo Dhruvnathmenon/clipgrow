@@ -240,6 +240,7 @@
       <button class="tab" data-v="testers" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
       <button class="tab" data-v="moderators" onclick="showView('moderators',this)">Moderators</button>
       <button class="tab" data-v="review" onclick="showView('review',this)">Video Review</button>
+      <button class="tab" data-v="flagvideo" onclick="showView('flagvideo',this)">Flag Video</button>
       <button class="tab" data-v="errors" onclick="showView('errors',this)">Error Log <span class="tab-count" id="error-count"></span></button>
       <button class="tab" data-v="auditlog" onclick="showView('auditlog',this)" style="margin-left:auto">Audit Log</button>
     </div>
@@ -573,6 +574,28 @@
       <div class="panel">
         <h2 class="panel-title">Reviewed</h2>
         <div id="admin-reviewed-list">Loading…</div>
+      </div>
+    </div>
+
+    <!-- FLAG VIDEO BY LINK -->
+    <div class="view" id="v-flagvideo">
+      <div class="panel">
+        <h2 class="panel-title">Flag a video by link</h2>
+        <p class="note" style="margin:.3rem 0 1rem">
+          Paste an Instagram or YouTube link a moderator sent over. If it is a video we track, it gets
+          flagged invalid straight away — earning zeroed, budget released, hidden from the client,
+          and it stays that way through anything the clipper does. Same as doing it from the clipper
+          page, without having to find the clip first. Restore it from that clipper's Videos list if it
+          turns out to be a mistake.
+        </p>
+        <label class="note" style="display:block;margin-bottom:.3rem">Video link</label>
+        <input id="fv-url" type="text" placeholder="https://www.instagram.com/reel/…  or  https://youtube.com/shorts/…"
+               style="width:100%;padding:.6rem .7rem;margin-bottom:.8rem;background:var(--card-h);border:1px solid var(--border-s);border-radius:6px;color:var(--white);font-size:.85rem" />
+        <label class="note" style="display:block;margin-bottom:.3rem">Reason (shown in the audit log)</label>
+        <input id="fv-reason" type="text" placeholder="e.g. off-brand — flagged by Ranjit"
+               style="width:100%;padding:.6rem .7rem;margin-bottom:.9rem;background:var(--card-h);border:1px solid var(--border-s);border-radius:6px;color:var(--white);font-size:.85rem" />
+        <button class="btn btn-danger" id="fv-btn" onclick="flagVideoByUrl()">Find &amp; flag</button>
+        <div id="fv-result" style="margin-top:1rem"></div>
       </div>
     </div>
 
@@ -1869,6 +1892,26 @@
     window.dismissClientFlag=async function(id){
       try{ await api('/api/admin/client-flags/'+id+'/dismiss',{method:'POST'}); toast('Flag dismissed'); loadAll(); }
       catch(e){ toast(e.message,true); }
+    };
+    // The paste-a-link shortcut (Flag Video tab).
+    window.flagVideoByUrl=async function(){
+      const url=document.getElementById('fv-url').value.trim();
+      const reason=document.getElementById('fv-reason').value.trim();
+      const out=document.getElementById('fv-result');
+      const btn=document.getElementById('fv-btn');
+      if(!url){ out.innerHTML='<div class="alert warn">Paste a video link first.</div>'; return; }
+      if(!reason){ out.innerHTML='<div class="alert warn">Add a reason — it goes in the audit log.</div>'; return; }
+      btn.disabled=true; btn.textContent='Working…'; out.innerHTML='';
+      try{
+        const r=await api('/api/admin/submissions/invalidate-by-url',{method:'POST',body:JSON.stringify({url,reason})});
+        out.innerHTML=`<div class="alert ok"><strong>Flagged.</strong> ${esc(r.clipper)}'s ${esc(r.platform)} clip on <strong>${esc(r.campaign)}</strong> — ${num(r.views)} views.
+          Earning zeroed, budget released, hidden from the client.
+          <div style="margin-top:.4rem"><a href="${esc(r.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">the video ↗</a></div></div>`;
+        document.getElementById('fv-url').value=''; document.getElementById('fv-reason').value='';
+        loadAll();
+      }catch(e){
+        out.innerHTML=`<div class="alert bad">${esc(e.message)}</div>`;
+      }finally{ btn.disabled=false; btn.textContent='Find & flag'; }
     };
     window.delSub=async function(id){
       if(!confirm('Delete this video permanently? Its earnings will be removed and the budget freed.')) return;

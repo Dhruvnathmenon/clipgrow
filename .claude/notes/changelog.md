@@ -5,6 +5,12 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-10
+- **Flag Video tab**: paste an Instagram/YouTube link + reason → the matching
+  tracked clip is invalidated immediately (same path as the clipper-page
+  button). `POST /api/admin/submissions/invalidate-by-url`, matches by the
+  video's own id (IG shortcode / YT video id) pulled from the link against the
+  stored `permalink`, tolerant of `?igsh=`, `youtu.be`, `watch?v=` etc. Shared
+  `invalidateSubmissionRow()` helper now backs both the by-id and by-URL routes.
 - **Manual clip invalidation** (`migration 040`): admin flags a clip invalid
   with a required typed reason — reuses the `disqualified` status (already
   zeroes earning + releases budget FCFS), adds `invalidated_at/by/reason`,

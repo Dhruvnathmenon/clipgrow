@@ -68,6 +68,65 @@ function normalisePlatforms(input) {
   return ([...new Set(list)].join(',')) || 'instagram';
 }
 
+/**
+ * Pulls the platform + the video's own id out of a pasted link, so an admin
+ * can flag a clip by URL without knowing which clipper posted it. The id is
+ * the Instagram shortcode (/reel/, /p/, /tv/) or the YouTube video id
+ * (/shorts/, youtu.be, watch?v=, /embed/, /v/) -- both of which are always
+ * present in the `permalink` we store, whatever URL form was pasted.
+ */
+export function videoKeyFromUrl(raw) {
+  const s = String(raw || '').trim();
+  let m = s.match(/instagram\.com\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/i);
+  if (m) return { platform: 'instagram', key: m[1] };
+  m = s.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/i)
+    || s.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/i)
+    || s.match(/youtube\.com\/watch\?(?:[^ ]*&)?v=([A-Za-z0-9_-]{6,})/i)
+    || s.match(/youtube\.com\/(?:embed|v)\/([A-Za-z0-9_-]{6,})/i);
+  if (m) return { platform: 'youtube', key: m[1] };
+  return null;
+}
+
+/**
+ * The core of flagging a clip invalid, shared by the by-id and by-URL routes.
+ * `sub` is a freshly-read submission row. Returns null on success, or
+ * `{ error, status }` describing why it could not be flagged. Reuses the
+ * `disqualified` status (which already zeroes earning and hands the clip's
+ * budget share back to the pool) and adds the who/why/when + audit trail.
+ */
+async function invalidateSubmissionRow(env, sub, reason) {
+  if (sub.locked_at && sub.payment_id) {
+    return { error: 'This clip has already been paid. Reverse that payment first if it needs to be ruled out.', status: 409 };
+  }
+  if (sub.locked_at) {
+    return { error: 'This clip is closed (settled at zero). Reopen it first, then flag it.', status: 409 };
+  }
+  if (sub.status === 'disqualified') return { error: 'This clip is already flagged invalid.', status: 409 };
+
+  const upd = await env.DB.prepare(
+    `UPDATE submissions
+        SET status = 'disqualified', invalidated_at = ?, invalidated_by = 'Admin', invalidated_reason = ?
+      WHERE id = ? AND locked_at IS NULL`
+  ).bind(now(), reason, sub.id).run();
+  if (!upd.meta.changes) {
+    return { error: 'This clip was locked in the moment between checking and flagging it. Refresh and try again.', status: 409 };
+  }
+  await env.DB.prepare(
+    "UPDATE client_clip_flags SET status = 'actioned', resolved_at = ?, resolved_by = 'Admin' WHERE submission_id = ? AND status = 'open'"
+  ).bind(now(), sub.id).run();
+  await reallocateCampaign(env.DB, sub.campaign_id);
+
+  const who = await env.DB.prepare(
+    'SELECT cl.username AS u, c.name AS n FROM clippers cl, campaigns c WHERE cl.id = ? AND c.id = ?'
+  ).bind(sub.clipper_id, sub.campaign_id).first();
+  await logAction(env.DB, {
+    staffType: 'admin', staffName: 'Admin', action: 'submission_invalidated',
+    targetType: 'submission', targetId: Number(sub.id),
+    targetLabel: who ? `${who.u} — ${who.n}` : null, detail: reason
+  });
+  return null;
+}
+
 export async function handleAdmin(request, env, url) {
   const { pathname } = url;
   const method = request.method;
@@ -1200,40 +1259,55 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'POST') {
     const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
     if (!sub) return err('Not found', 404);
-    if (sub.locked_at && sub.payment_id) {
-      return err('This clip has already been paid. Reverse that payment first if it needs to be ruled out.', 409);
-    }
-    if (sub.locked_at) {
-      return err('This clip is closed (settled at zero). Reopen it first, then flag it.', 409);
-    }
-    if (sub.status === 'disqualified') return err('This clip is already flagged invalid.', 409);
     const body = await readJson(request).catch(() => ({}));
     const reason = String(body && body.reason != null ? body.reason : '').trim().slice(0, 500);
     if (!reason) return err('Give a reason -- it is shown in the audit log and to anyone reviewing this later.');
-
-    const upd = await env.DB.prepare(
-      `UPDATE submissions
-          SET status = 'disqualified', invalidated_at = ?, invalidated_by = 'Admin', invalidated_reason = ?
-        WHERE id = ? AND locked_at IS NULL`
-    ).bind(now(), reason, params.id).run();
-    if (!upd.meta.changes) {
-      return err('This clip was locked in the moment between checking and flagging it. Refresh and try again.', 409);
-    }
-    // A clip that a client had flagged is now dealt with -- close their flag(s).
-    await env.DB.prepare(
-      "UPDATE client_clip_flags SET status = 'actioned', resolved_at = ?, resolved_by = 'Admin' WHERE submission_id = ? AND status = 'open'"
-    ).bind(now(), params.id).run();
-    await reallocateCampaign(env.DB, sub.campaign_id);
-
-    const who = await env.DB.prepare(
-      'SELECT cl.username AS u, c.name AS n FROM clippers cl, campaigns c WHERE cl.id = ? AND c.id = ?'
-    ).bind(sub.clipper_id, sub.campaign_id).first();
-    await logAction(env.DB, {
-      staffType: 'admin', staffName: 'Admin', action: 'submission_invalidated',
-      targetType: 'submission', targetId: Number(params.id),
-      targetLabel: who ? `${who.u} — ${who.n}` : null, detail: reason
-    });
+    const fail = await invalidateSubmissionRow(env, sub, reason);
+    if (fail) return err(fail.error, fail.status);
     return json({ ok: true });
+  }
+
+  // ---- Flag a clip invalid straight from a pasted link --------------------
+  // The shortcut: paste an Instagram or YouTube link a moderator sent over,
+  // and if it is a clip we track it gets flagged exactly as if it had been
+  // done from the clipper page. No need to hunt through accounts for it.
+  if (pathname === '/api/admin/submissions/invalidate-by-url' && method === 'POST') {
+    const body = await readJson(request).catch(() => ({}));
+    const reason = String(body && body.reason != null ? body.reason : '').trim().slice(0, 500);
+    if (!reason) return err('Give a reason -- it is shown in the audit log and to anyone reviewing this later.');
+    const parsed = videoKeyFromUrl(body && body.url);
+    if (!parsed) return err('That does not look like an Instagram or YouTube video link. Paste the direct link to the post/Reel/Short.');
+
+    const { results } = await env.DB.prepare(
+      `SELECT s.*, cl.username AS clipper_username, COALESCE(cl.display_name, cl.username) AS clipper_name,
+              c.name AS campaign_name
+         FROM submissions s
+         JOIN clippers cl ON cl.id = s.clipper_id
+         JOIN campaigns c ON c.id = s.campaign_id
+        WHERE s.platform = ? AND s.permalink LIKE ?`
+    ).bind(parsed.platform, `%${parsed.key}%`).all();
+
+    // LIKE can over-match (one id being a substring of another); confirm each
+    // candidate really carries this exact id in its own permalink.
+    const exact = (results || []).filter(r => {
+      const k = videoKeyFromUrl(r.permalink);
+      return k && k.key === parsed.key;
+    });
+    if (!exact.length) return err('No video in the system matches that link. It may not be a tracked clip, or it was auto-imported without a stored link.', 404);
+    if (exact.length > 1) return err(`That link matches ${exact.length} tracked videos. Flag them individually from the clipper page.`, 409);
+
+    const sub = exact[0];
+    const fail = await invalidateSubmissionRow(env, sub, reason);
+    if (fail) return err(fail.error, fail.status);
+    return json({
+      ok: true,
+      clipper: sub.clipper_name,
+      clipper_username: sub.clipper_username,
+      campaign: sub.campaign_name,
+      platform: sub.platform,
+      views: sub.views,
+      permalink: sub.permalink
+    });
   }
 
   // ---- Restore a wrongly-flagged clip -------------------------------------

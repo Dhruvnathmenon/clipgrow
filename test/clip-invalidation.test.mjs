@@ -131,6 +131,84 @@ test('revalidate refuses when the clip is not flagged', async () => {
   assert.equal(res.status, 409);
 });
 
+// ---- the paste-a-link shortcut ------------------------------------------
+
+function seedUrlEnv() {
+  return {
+    DB: makeSqliteD1({
+      clippers: [{ id: 1, username: 'c1', password_hash: 'h', password_salt: 's', status: 'active',
+                   display_name: 'Clipper One', created_at: NOW }],
+      campaigns: [{ id: 1, name: 'Camp', description: '', cpm: 50, budget: 5000, status: 'active',
+                    created_at: NOW, model: 'cpm', min_views: 100, allowed_platforms: 'instagram,youtube' }],
+      participations: [{ id: 1, clipper_id: 1, campaign_id: 1, status: 'active', joined_at: NOW }],
+      submissions: [
+        { id: 1, clipper_id: 1, campaign_id: 1, platform: 'instagram', ig_media_id: 'IGMEDIA1',
+          permalink: 'https://www.instagram.com/reel/DAbc_1-Xyz/', views: 30000, earning: 1500,
+          status: 'active', created_at: NOW - 3000, last_ok_sync_at: NOW },
+        { id: 2, clipper_id: 1, campaign_id: 1, platform: 'youtube', ig_media_id: 'YTVID123abc',
+          permalink: 'https://www.youtube.com/shorts/YTVID123abc', views: 10000, earning: 0,
+          status: 'active', created_at: NOW - 2000, last_ok_sync_at: NOW }
+      ]
+    }),
+    SESSION_SECRET: SESSION_SECRET, ADMIN_PASSWORD: 'x'
+  };
+}
+
+test('invalidate-by-url flags an Instagram clip from any link form', async () => {
+  for (const link of [
+    'https://www.instagram.com/reel/DAbc_1-Xyz/',
+    'instagram.com/reel/DAbc_1-Xyz',
+    'https://instagram.com/reel/DAbc_1-Xyz/?igsh=abc123'
+  ]) {
+    const env = seedUrlEnv();
+    const res = await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+      { method: 'POST', body: { url: link, reason: 'off-brand' } });
+    assert.equal(res.status, 200, link);
+    const body = await res.json();
+    assert.equal(body.clipper, 'Clipper One');
+    assert.equal(body.campaign, 'Camp');
+    assert.equal(env.DB._rows('submissions').find(r => r.id === 1).status, 'disqualified');
+  }
+});
+
+test('invalidate-by-url resolves every YouTube link shape to the same clip', async () => {
+  for (const link of [
+    'https://www.youtube.com/shorts/YTVID123abc',
+    'https://youtu.be/YTVID123abc',
+    'https://www.youtube.com/watch?v=YTVID123abc&feature=share'
+  ]) {
+    const env = seedUrlEnv();
+    const res = await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+      { method: 'POST', body: { url: link, reason: 'reused footage' } });
+    assert.equal(res.status, 200, link);
+    assert.equal(env.DB._rows('submissions').find(r => r.id === 2).status, 'disqualified');
+  }
+});
+
+test('invalidate-by-url needs a real video link and a reason', async () => {
+  const env = seedUrlEnv();
+  assert.equal((await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+    { method: 'POST', body: { url: 'https://example.com/x', reason: 'r' } })).status, 400);
+  assert.equal((await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+    { method: 'POST', body: { url: 'https://instagram.com/reel/DAbc_1-Xyz/' } })).status, 400);
+});
+
+test('invalidate-by-url returns 404 when no tracked clip matches the link', async () => {
+  const env = seedUrlEnv();
+  const res = await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+    { method: 'POST', body: { url: 'https://www.instagram.com/reel/NOTinSystem99/', reason: 'r' } });
+  assert.equal(res.status, 404);
+});
+
+test('invalidate-by-url is a no-op-with-409 on a clip already flagged', async () => {
+  const env = seedUrlEnv();
+  await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+    { method: 'POST', body: { url: 'https://www.instagram.com/reel/DAbc_1-Xyz/', reason: 'first' } });
+  const res = await adminRequest(env, '/api/admin/submissions/invalidate-by-url',
+    { method: 'POST', body: { url: 'https://www.instagram.com/reel/DAbc_1-Xyz/', reason: 'again' } });
+  assert.equal(res.status, 409);
+});
+
 test('revalidate does a live view re-check when the account is connected', async () => {
   const IG_USER_ID = 'ig-user-1';
   const env = seedEnv({
