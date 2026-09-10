@@ -5,6 +5,25 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-10
+- **Refresh chaining audit + SUBREQUEST_LIMIT fix.** Jobs 160-171 all
+  completed cleanly (3-4 invocations, 0 skipped) — the chaining is healthy.
+  One real bug: when a run hit Cloudflare's per-invocation subrequest cap, the
+  IG adapter returned `{ok:false, code:'SUBREQUEST_LIMIT'}` per clip and
+  `runViews` stamped that as a real `sync_error`, making "we didn't reach it
+  this pass" look like breakage. Now `runViews` returns `budgetHit` and
+  `runChunk` re-queues the item untouched (no sync_error, no failure count)
+  and hands off — which is what the chain is for. Same for a thrown
+  SUBREQUEST_LIMIT (YT batch / token refresh). Deploy cleared the 2 stale rows.
+- **Sync Health tab** (`GET /api/admin/sync-health`): every active clip inside
+  its 7-day window whose views aren't moving, grouped by reason (removed /
+  no-insights / reconnect / disconnected / transient / awaiting-first-sync),
+  each tagged **you fix this** / **clipper fixes this** / **clears itself**,
+  with a WhatsApp/Discord button (clipper's job) or a Flag-invalid button
+  (yours). Reconnect reality: only 2 accounts currently need it; Instagram's
+  60-day token life means a small recurring wave is normal.
+- **Error runbook now names who acts.** Each entry + each inline hint carries a
+  coloured "the clipper fixes this / you fix this / clears itself / send to
+  Claude" tag. Added MEDIA_NOT_FOUND, PRE_CONVERSION_MEDIA, SUBREQUEST_LIMIT.
 - **Perf: killed the N+1 on the clipper rosters.** `/api/admin/clippers` was
   ~6 D1 queries PER clipper in a sequential loop (financials x2, accounts,
   participations, recency, quality); `/api/moderator/clippers` ~3 per row.

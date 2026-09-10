@@ -28,7 +28,7 @@ import { listErrors, resolveError } from '../error-log.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY, moderatorActivity
 } from '../reviews.js';
-import { TERMINAL_SYNC_ERRORS } from '../clipstate.js';
+import { TERMINAL_SYNC_ERRORS, clipState, clipStateMessage, daysSince } from '../clipstate.js';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const CAMPAIGN_STATUSES = ['active', 'budget_full', 'completed'];
@@ -1918,6 +1918,69 @@ export async function handleAdmin(request, env, url) {
   // src/error-log.js's own header for what feeds this and what's
   // deliberately excluded (routine validation, and the two OAuth outcomes
   // that are normal flow, not a problem).
+  // Every clip that is NOT updating its views right now, grouped by the reason,
+  // with whose job it is to fix each. Answers "some videos aren't syncing --
+  // why, and what do I do about it" without opening clippers one by one.
+  if (pathname === '/api/admin/sync-health' && method === 'GET') {
+    // Active, unpaid, still inside the 7-day tracking window (past that the
+    // count is final by design and NOT syncing is correct, not a problem).
+    const { results } = await env.DB.prepare(
+      `SELECT s.id, s.platform, s.permalink, s.views, s.sync_error, s.created_at,
+              s.last_synced_at, s.last_ok_sync_at, s.eligible,
+              c.min_views,
+              cl.id AS clipper_id, COALESCE(cl.display_name, cl.username) AS clipper_name,
+              cl.contact_number, cl.discord_username,
+              c.name AS campaign_name,
+              a.status AS account_status, a.username AS account_username
+         FROM submissions s
+         JOIN clippers cl ON cl.id = s.clipper_id
+         JOIN campaigns c ON c.id = s.campaign_id
+         LEFT JOIN social_accounts a ON a.id = s.account_id
+        WHERE s.status = 'active' AND s.locked_at IS NULL
+          AND s.created_at > ?
+        ORDER BY s.created_at ASC`
+    ).bind(Date.now() - 7 * 24 * 60 * 60 * 1000).all();
+
+    // state -> {label, who, what}. `who`: who actually has to act.
+    const PLAN = {
+      removed:     { label: 'Post is gone from the platform', who: 'you',
+                     what: 'The clipper deleted, hid, or archived it. Ask them once — if it is genuinely gone, flag the video invalid (Flag Video tab or the clipper page). It cannot earn.' },
+      no_insights: { label: 'Posted before the account went Business/Creator', who: 'you',
+                     what: 'Instagram never publishes view counts for these. Permanent — flag the video invalid so it stops showing as a problem, and tell the clipper to only post campaign work from the Business account.' },
+      reconnect:   { label: 'Account connection needs re-authorising', who: 'clipper',
+                     what: 'Only the clipper can fix this. Message them to open their dashboard and hit Reconnect on that campaign. Nothing here does it for them.' },
+      disconnected:{ label: 'Account is disconnected', who: 'clipper',
+                     what: 'The clipper must reconnect (or connect a fresh account) from their dashboard. Views resume from where they left off.' },
+      unavailable: { label: 'Platform not answering for a while', who: 'nobody',
+                     what: 'Usually a rate limit or a platform blip. Clears on its own. Only worth a look if the exact same clips are still here after another cron cycle (6h).' },
+      issue:       { label: 'Last check did not go through', who: 'nobody',
+                     what: 'A one-off miss — the next automatic sweep (within 6h) almost always picks it up. No action.' },
+      verified:    { label: 'Waiting for its first view count', who: 'nobody',
+                     what: 'Brand new — the platform has not published stats yet, or the first cron sweep has not run. Give it a few hours.' }
+    };
+
+    const buckets = {};
+    for (const r of results || []) {
+      const st = clipState({ ...r, min_views: r.min_views });
+      const plan = PLAN[st];
+      if (!plan) continue;   // tracking / below_min / tracking_complete etc -- healthy or expected
+      // A brand-new 'verified' clip under a few hours old is not worth listing.
+      if (st === 'verified' && (Date.now() - (r.created_at || 0)) < 6 * 60 * 60 * 1000) continue;
+      (buckets[st] = buckets[st] || []).push({
+        submission_id: r.id, clipper_id: r.clipper_id, clipper_name: r.clipper_name,
+        campaign_name: r.campaign_name, platform: r.platform, permalink: r.permalink,
+        views: r.views, account_username: r.account_username,
+        contact_number: r.contact_number || null, discord_username: r.discord_username || null,
+        days_since_ok: daysSince(r.last_ok_sync_at),
+        message: clipStateMessage(st, { ...r, min_views: r.min_views })
+      });
+    }
+    const groups = Object.entries(buckets)
+      .map(([state, clips]) => ({ state, ...PLAN[state], count: clips.length, clips }))
+      .sort((a, b) => b.count - a.count);
+    return json({ groups, total: groups.reduce((n, g) => n + g.count, 0) });
+  }
+
   if (pathname === '/api/admin/error-log' && method === 'GET') {
     const unresolvedOnly = url.searchParams.get('unresolved') === '1';
     const rows = await listErrors(env.DB, { unresolvedOnly });

@@ -30,6 +30,7 @@ function makeDb({ job, submissions = [], accounts = [], lockedBy = {} } = {}) {
     if (/^UPDATE submissions SET views/.test(sql) || /^UPDATE submissions SET sync_error/.test(sql)) {
       const id=a[a.length-1]; const s=state.submissions.find(x=>x.id===id);
       if(!s||s.locked_at!=null) return { meta:{changes:0} };
+      if (/SET sync_error = \?/.test(sql)) { state.syncErrorWrites = state.syncErrorWrites || []; state.syncErrorWrites.push({ id, code: a[0] }); }
       return { meta:{changes:1} };
     }
     if (/^INSERT INTO ig_api_calls/.test(sql)) return { meta:{} };
@@ -145,6 +146,46 @@ test('a job already marked done is a no-op if a stray queue message redelivers i
   const r=await runChunk(db,{},1,{ adapters });
   assert.equal(r.alreadyFinished, true);
   assert.equal(db._state.job.clips_fetched, 42, 'stats untouched by the replay');
+});
+
+test('running out of Cloudflare subrequest budget re-queues the clip, does not brand it broken', async () => {
+  // The Instagram adapter catches "too many subrequests" per clip and returns
+  // {ok:false, code:'SUBREQUEST_LIMIT'} for the rest of the batch. That is the
+  // invocation running dry, not a clip fault -- the item must stay in the
+  // queue for the next invocation, with NO sync_error written and NO failure
+  // counted. (Two real production clips were stuck on a fake SUBREQUEST_LIMIT.)
+  const pending=[{t:'ig_view',a:1,s:1,m:'m1'},{t:'ig_view',a:1,s:2,m:'m2'}];
+  const db=makeDb({
+    job:{ pending_json: JSON.stringify(pending) },
+    accounts:[acct(1)],
+    submissions:[clipRow(1,1),clipRow(2,1)]
+  });
+  const outOfBudget={ instagram:{
+    fetchViews: async (a,ids)=>{ const m=new Map(); for(const id of ids) m.set(id,{ok:false,code:'SUBREQUEST_LIMIT'}); return m; },
+    listRecent: async()=>[] } };
+  const r=await runChunk(db,{},1,{ adapters: outOfBudget });
+
+  assert.equal(r.stats.failed, 0, 'nothing counted as failed');
+  assert.equal(r.remaining, 2, 'both items still queued for the next invocation');
+  assert.equal(r.done, false, 'job not finished -- it hands off');
+  assert.equal(r.enqueue, true, 'a continuation is enqueued');
+  assert.equal((db._state.syncErrorWrites || []).length, 0, 'no fake sync_error stamped on any clip');
+});
+
+test('a YouTube batch that throws SUBREQUEST_LIMIT also re-queues instead of failing the clips', async () => {
+  const pending=[{t:'yt_views',a:1,s:[1,2],m:['v1','v2']},{t:'yt_views',a:1,s:[3],m:['v3']}];
+  const db=makeDb({
+    job:{ pending_json: JSON.stringify(pending) },
+    // Fresh token so withFreshToken calls fn directly and the SUBREQUEST_LIMIT
+    // from fetchViews is what actually propagates (not a token-refresh failure).
+    accounts:[acct(1,{platform:'youtube', token_expires_at: Date.now()+3600000})],
+    submissions:[clipRow(1,1),clipRow(2,1),clipRow(3,1)]
+  });
+  const boom={ youtube:{ fetchViews: async()=>{ throw Object.assign(new Error('Too many subrequests'),{code:'SUBREQUEST_LIMIT'}); }, listRecent: async()=>[] } };
+  const r=await runChunk(db,{},1,{ adapters: boom });
+  assert.equal(r.stats.failed, 0);
+  assert.equal(r.remaining, 2, 'both items preserved');
+  assert.equal(r.done, false);
 });
 
 test('a YouTube batch that throws marks every clip in that batch failed, not just one', async () => {

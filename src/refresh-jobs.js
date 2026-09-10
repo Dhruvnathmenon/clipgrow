@@ -353,12 +353,22 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
         stats.imported += await runImport(db, env, account, counter, adapters);
       } else {
         const r = await runViews(db, env, account, item, counter, adapters, jobId);
+        // The invocation ran out of Cloudflare subrequest budget partway
+        // through this item. That is not a problem with the clip -- it just
+        // wasn't reached this pass. Leave the item in the queue untouched
+        // (no shift, no sync_error, no failure count) and stop here so the
+        // next invocation picks it up with a fresh budget. Exactly what the
+        // chaining exists for; the only bug was letting it look like breakage.
+        if (r.budgetHit) { blockedThisRound = true; break; }
         stats.fetched += r.ok;
         stats.failed += r.failed;
         stats.skipped += r.skipped;
         acctStats[acctKey].done += r.ok + r.failed + r.skipped;
       }
     } catch (e) {
+      // Same subrequest-budget case, but thrown (import leg, or a token
+      // refresh call) rather than returned. Re-queue untouched and hand off.
+      if (e && e.code === 'SUBREQUEST_LIMIT') { blockedThisRound = true; break; }
       // One item's failure never halts the chain -- same isolation principle
       // the per-clip sync already follows.
       stats.failed += countClips(item);
@@ -784,10 +794,18 @@ async function runViews(db, env, account, item, counter, adapters, jobId = null)
   // still means the whole account needs reconnecting, so it has to reach the
   // account row the same way a thrown one does.
   let authFailureCode = null;
+  // The Instagram adapter catches Cloudflare's "too many subrequests" per clip
+  // (fetchViews isolates every call) and hands back {ok:false,
+  // code:'SUBREQUEST_LIMIT'} for the rest of the batch. That is NOT a clip
+  // fault -- it means this invocation is out of budget. Report it up so the
+  // runner re-queues the item instead of stamping a fake error on the clip.
+  let budgetHit = false;
 
   for (let i = 0; i < ids.length; i++) {
     const r = results && results.get ? results.get(ids[i]) : null;
     const subId = subIds[i];
+
+    if (r && r.ok === false && r.code === 'SUBREQUEST_LIMIT') { budgetHit = true; continue; }
 
     if (r == null) {
       const changed = await writeGuarded(db,
@@ -838,7 +856,7 @@ async function runViews(db, env, account, item, counter, adapters, jobId = null)
     await markAccount(db, account.account_id || account.id, { status: 'needs_reauth', code: authFailureCode });
   }
 
-  return { ok, failed, skipped };
+  return { ok, failed, skipped, budgetHit };
 }
 
 async function writeGuarded(db, sql, args) {
