@@ -9,7 +9,7 @@ import {
   normaliseDiscordUsername, validateDiscordUsername,
   ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
-import { reallocateCampaign, reallocateAll } from '../earnings.js';
+import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
 import {
@@ -228,12 +228,32 @@ export async function handleAdmin(request, env, url) {
         ORDER BY updated_at ASC`
     ).bind(Date.now() - STALL_AFTER_MS).all();
 
+    // Clips a brand has reported on their own campaign. Only the ones still
+    // open AND still active -- once the admin invalidates the clip it stops
+    // being active and drops off this list on its own. Resolved from the
+    // clipper page (Mark Invalid) or dismissed as a false alarm.
+    const { results: clientFlags } = await env.DB.prepare(
+      `SELECT f.id, f.note, f.created_at,
+              s.id AS submission_id, s.permalink, s.views,
+              cl.id AS clipper_id, COALESCE(cl.display_name, cl.username) AS clipper_name,
+              c.name AS campaign_name,
+              COALESCE(cli.company_name, cli.username) AS client_name
+         FROM client_clip_flags f
+         JOIN submissions s ON s.id = f.submission_id AND s.status = 'active'
+         JOIN clippers cl ON cl.id = s.clipper_id
+         JOIN campaigns c ON c.id = f.campaign_id
+         JOIN clients cli ON cli.id = f.client_id
+        WHERE f.status = 'open'
+        ORDER BY f.created_at ASC`
+    ).all();
+
     return json({
       overview: { ...s, outstanding: await totalOutstanding(env.DB) },
       problem_accounts: problemAccounts || [],
       stuck_accounts: stuckAccounts || [],
       transient_errors: transientErrors || [],
-      stalled_jobs: stalledJobs || []
+      stalled_jobs: stalledJobs || [],
+      client_flags: clientFlags || []
     });
   }
 
@@ -831,7 +851,7 @@ export async function handleAdmin(request, env, url) {
       // once a clip is paid. Every one of those buttons was guaranteed to fail
       // after the first payout run, which is the error the founder walked into.
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.sync_error_acknowledged_as, s.created_at, s.last_synced_at, s.source, s.platform,
-              s.locked_at, s.locked_earning, s.lock_reason, s.payment_id,
+              s.locked_at, s.locked_earning, s.lock_reason, s.payment_id, s.invalidated_reason,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
@@ -950,12 +970,20 @@ export async function handleAdmin(request, env, url) {
       clear_inactive ? null : part.inactive_at,
       params.id
     ).run();
-    // Kicking freezes this clipper's unpaid clips at what they are worth right
-    // now, so later repricing cannot erode them. Reinstating clears the freeze
-    // and hands them back to normal pricing. Settled clips are untouched --
-    // their money is already locked.
+    // Kicking now RELEASES this clipper's unpaid earnings: those clips drop to
+    // zero and every rupee they were holding flows back into the campaign pool
+    // (src/earnings.js's 'kicked' branch). frozen_earning is still stamped --
+    // as a record of what they were worth at the moment of the kick, for any
+    // later payout dispute -- but the allocator no longer reads it. Settled
+    // clips are untouched: their money is already locked.
+    let releasedAmount = 0;
     if (status && status !== part.status) {
       if (status === 'kicked') {
+        const owed = await env.DB.prepare(
+          `SELECT COALESCE(SUM(clipper_earning), 0) AS n FROM submissions
+            WHERE clipper_id = ? AND campaign_id = ? AND locked_at IS NULL AND status = 'active'`
+        ).bind(part.clipper_id, part.campaign_id).first();
+        releasedAmount = owed.n || 0;
         await env.DB.prepare(
           `UPDATE submissions SET frozen_earning = earning
             WHERE clipper_id = ? AND campaign_id = ? AND locked_at IS NULL AND frozen_earning IS NULL`
@@ -978,7 +1006,10 @@ export async function handleAdmin(request, env, url) {
           staffType: 'admin', staffName: 'Admin',
           action: status === 'kicked' ? 'clipper_kicked' : 'participation_paused',
           targetType: 'participation', targetId: Number(params.id),
-          targetLabel: who ? `${who.clipper_username} — ${who.campaign_name}` : null
+          targetLabel: who ? `${who.clipper_username} — ${who.campaign_name}` : null,
+          detail: status === 'kicked' && releasedAmount > 0
+            ? `Released ₹${releasedAmount} in unpaid earnings back to the campaign budget`
+            : null
         });
       }
     }
@@ -991,7 +1022,7 @@ export async function handleAdmin(request, env, url) {
     const subs = await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM submissions WHERE clipper_id = ? AND campaign_id = ?')
       .bind(part.clipper_id, part.campaign_id).first();
-    if (subs.n > 0) return err(`This clipper has ${subs.n} video(s) in this campaign. Use Kick instead so their earnings are preserved.`, 409);
+    if (subs.n > 0) return err(`This clipper has ${subs.n} video(s) in this campaign. Use Kick instead, so their video history stays on record.`, 409);
     await env.DB.prepare('DELETE FROM participations WHERE id = ?').bind(params.id).run();
     return json({ ok: true });
   }
@@ -1132,17 +1163,18 @@ export async function handleAdmin(request, env, url) {
       if (sub.locked_at) {
         return err('This clip is closed (settled at zero). Reopen it first if you need to change its status.', 409);
       }
-      // 'paused' = temporarily not monetised (under review, off-guidelines).
-      // 'disqualified' = permanently rejected. Both earn nothing and hand their
-      // share of the budget back; only 'active' accrues.
+      // 'active' accrues, 'paused' = temporarily not monetised (under review).
+      // 'disqualified' is no longer set here -- it goes through /invalidate so a
+      // reason is always captured, and is cleared through /revalidate so the
+      // view count is re-checked on the way back. A clip that is already
+      // disqualified therefore can't be moved with a bare status PATCH.
       const { status } = await readJson(request);
-      // Was a bare 'Invalid status' with no guard against an unparseable body,
-      // so a malformed request and a genuinely wrong value produced the same
-      // uninformative message -- one of the two strings behind the founder's
-      // "invalid request" report.
-      if (status == null) return err("This needs a 'status' field. Accepted: active, paused, disqualified.");
-      if (!['active', 'paused', 'disqualified'].includes(status)) {
-        return err(`'${status}' is not a valid video status. Accepted: active, paused, disqualified.`);
+      if (status == null) return err("This needs a 'status' field. Accepted: active, paused.");
+      if (!['active', 'paused'].includes(status)) {
+        return err(`'${status}' is not a valid video status here. Accepted: active, paused. To flag a clip as invalid use Mark Invalid, to bring one back use Restore.`);
+      }
+      if (sub.status === 'disqualified') {
+        return err('This clip is flagged invalid. Use Restore to bring it back -- it re-checks the current view count and re-prices it.', 409);
       }
       // Same re-check at write time -- the row could have been locked (by a
       // payout, or the write-off sweep) in the gap since the read above.
@@ -1154,6 +1186,114 @@ export async function handleAdmin(request, env, url) {
       }
     }
     await reallocateCampaign(env.DB, sub.campaign_id);
+    return json({ ok: true });
+  }
+
+  // ---- Flag a clip as invalid (off-guideline, botted, wrong campaign) -------
+  // Reuses the `disqualified` status -- which already zeroes earning and
+  // releases the clip's budget share back to the campaign pool -- and stamps
+  // WHO/WHY/WHEN so it is accountable and survives a dispute. It stays invalid
+  // through anything the clipper does (reconnects, re-imports: every path
+  // dedupes on the platform media id and skips a clip it already has); only
+  // /revalidate below can bring it back.
+  params = matchPath('/api/admin/submissions/:id/invalidate', pathname);
+  if (params && method === 'POST') {
+    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub) return err('Not found', 404);
+    if (sub.locked_at && sub.payment_id) {
+      return err('This clip has already been paid. Reverse that payment first if it needs to be ruled out.', 409);
+    }
+    if (sub.locked_at) {
+      return err('This clip is closed (settled at zero). Reopen it first, then flag it.', 409);
+    }
+    if (sub.status === 'disqualified') return err('This clip is already flagged invalid.', 409);
+    const body = await readJson(request).catch(() => ({}));
+    const reason = String(body && body.reason != null ? body.reason : '').trim().slice(0, 500);
+    if (!reason) return err('Give a reason -- it is shown in the audit log and to anyone reviewing this later.');
+
+    const upd = await env.DB.prepare(
+      `UPDATE submissions
+          SET status = 'disqualified', invalidated_at = ?, invalidated_by = 'Admin', invalidated_reason = ?
+        WHERE id = ? AND locked_at IS NULL`
+    ).bind(now(), reason, params.id).run();
+    if (!upd.meta.changes) {
+      return err('This clip was locked in the moment between checking and flagging it. Refresh and try again.', 409);
+    }
+    // A clip that a client had flagged is now dealt with -- close their flag(s).
+    await env.DB.prepare(
+      "UPDATE client_clip_flags SET status = 'actioned', resolved_at = ?, resolved_by = 'Admin' WHERE submission_id = ? AND status = 'open'"
+    ).bind(now(), params.id).run();
+    await reallocateCampaign(env.DB, sub.campaign_id);
+
+    const who = await env.DB.prepare(
+      'SELECT cl.username AS u, c.name AS n FROM clippers cl, campaigns c WHERE cl.id = ? AND c.id = ?'
+    ).bind(sub.clipper_id, sub.campaign_id).first();
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'submission_invalidated',
+      targetType: 'submission', targetId: Number(params.id),
+      targetLabel: who ? `${who.u} — ${who.n}` : null, detail: reason
+    });
+    return json({ ok: true });
+  }
+
+  // ---- Restore a wrongly-flagged clip -------------------------------------
+  // Sets it active again, then re-fetches its CURRENT view count (it will have
+  // kept collecting views while flagged) and re-prices the campaign, so it
+  // consumes exactly what it is worth now -- not the stale number from when it
+  // was flagged. The live fetch is best-effort: a disconnected account or a
+  // closed tracking window just means we re-price on the stored count.
+  params = matchPath('/api/admin/submissions/:id/revalidate', pathname);
+  if (params && method === 'POST') {
+    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
+    if (!sub) return err('Not found', 404);
+    if (sub.status !== 'disqualified') return err('This clip is not flagged invalid.', 409);
+    if (sub.locked_at) return err('This clip is closed. Reopen it instead.', 409);
+
+    const upd = await env.DB.prepare(
+      `UPDATE submissions
+          SET status = 'active', invalidated_at = NULL, invalidated_by = NULL, invalidated_reason = NULL
+        WHERE id = ? AND locked_at IS NULL AND status = 'disqualified'`
+    ).bind(params.id).run();
+    if (!upd.meta.changes) return err('This clip changed state just now. Refresh and try again.', 409);
+
+    let synced = false;
+    try {
+      const account = sub.account_id
+        ? await env.DB.prepare("SELECT * FROM social_accounts WHERE id = ? AND status = 'connected'").bind(sub.account_id).first()
+        : null;
+      if (account && sub.ig_media_id) {
+        await syncAccountClips(env.DB, env, account,
+          [{ id: sub.id, ig_media_id: sub.ig_media_id, last_ok_sync_at: sub.last_ok_sync_at }],
+          { skipCooldown: true });
+        synced = true;
+      }
+    } catch { /* stored view count stands -- the next cron sweep will catch up */ }
+
+    await reallocateCampaign(env.DB, sub.campaign_id);
+    const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?').bind(params.id).first();
+
+    const who = await env.DB.prepare(
+      'SELECT cl.username AS u, c.name AS n FROM clippers cl, campaigns c WHERE cl.id = ? AND c.id = ?'
+    ).bind(sub.clipper_id, sub.campaign_id).first();
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'submission_revalidated',
+      targetType: 'submission', targetId: Number(params.id),
+      targetLabel: who ? `${who.u} — ${who.n}` : null,
+      detail: `Restored${synced ? ' with a live view re-check' : ' (view count not re-fetched -- account offline or window closed)'}`
+    });
+    return json({ ok: true, views: fresh ? fresh.views : sub.views, earning: fresh ? fresh.earning : 0, synced });
+  }
+
+  // Dismiss a client's clip flag as a false alarm -- the video is fine, the
+  // brand was mistaken. Clears it off the Overview banner. (Actioning a flag
+  // is not a route: invalidating the clip from the clipper page closes any
+  // open flag on it automatically.)
+  params = matchPath('/api/admin/client-flags/:id/dismiss', pathname);
+  if (params && method === 'POST') {
+    const upd = await env.DB.prepare(
+      "UPDATE client_clip_flags SET status = 'dismissed', resolved_at = ?, resolved_by = 'Admin' WHERE id = ? AND status = 'open'"
+    ).bind(now(), params.id).run();
+    if (!upd.meta.changes) return err('That flag is not open (already handled, or does not exist).', 409);
     return json({ ok: true });
   }
 
@@ -1197,62 +1337,33 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true, auto_import: body.auto_import });
   }
 
-  // Fully disconnects an account so a different one can be connected in its
-  // place: unlinks it from the participation, deletes its pending clips, and
-  // keeps whatever was already settled. See disconnectSocialAccount.
-  //
-  // resetAccess:true additionally reopens the tester_requests row for every
-  // campaign this account was driving, so the clipper's dashboard shows Step 1
-  // (enter a new handle) instead of skipping straight to Connect with a stale
-  // approval. Before this existed, doing that meant hand-writing SQL for each
-  // case -- this collapses it into the one action the disconnect dialog was
-  // already implying was possible.
+  // Disconnects an account. One action, one meaning: unlink it from the
+  // participation, delete its unpaid clips and release the budget they were
+  // holding back to each affected campaign, keep everything already settled
+  // (paid stays paid). The clipper's access approval is left intact, so they
+  // can simply reconnect the same account (or a fresh one) from their own
+  // dashboard and everything re-links -- the reconnect path in
+  // instagram-auth.js / youtube-auth.js revives or re-inserts the row and
+  // re-links the participation on its own. Use this for a stuck/mis-tracking
+  // account too: disconnect, have them reconnect, done.
   if (params && method === 'DELETE') {
     const before = await env.DB.prepare(
       `SELECT sa.clipper_id, cl.username AS clipper_username FROM social_accounts sa
        JOIN clippers cl ON cl.id = sa.clipper_id WHERE sa.id = ?`
     ).bind(params.id).first();
     if (!before) return err('Account not found', 404);
-    const { resetAccess } = await readJson(request).catch(() => ({}));
-
-    // Campaigns this account is actually linked to, from participation_accounts
-    // -- not from disconnectSocialAccount's returned `campaigns`, which is
-    // derived purely from submissions.campaign_id and comes back EMPTY for an
-    // account that never posted a clip yet. That's a real, common case (a
-    // freshly-connected clipper who hasn't submitted anything), and resetAccess
-    // silently doing nothing for it would be exactly the kind of stuck state
-    // this feature exists to eliminate. Read before disconnecting -- it deletes
-    // these rows.
-    const { results: linkedParts } = resetAccess
-      ? await env.DB.prepare(
-          `SELECT DISTINCT p.campaign_id FROM participation_accounts pa
-             JOIN participations p ON p.id = pa.participation_id
-             WHERE pa.account_id = ?`
-        ).bind(params.id).all()
-      : { results: [] };
 
     const result = await disconnectSocialAccount(env.DB, Number(params.id));
     // Those pending clips were holding budget; it has to be re-spread across
     // whatever is still open in each affected campaign.
     for (const cid of result.campaigns) await reallocateCampaign(env.DB, cid);
 
-    let reset_requests = 0;
-    const campaignIds = [...new Set([...(linkedParts || []).map(r => r.campaign_id), ...result.campaigns])];
-    if (resetAccess && campaignIds.length) {
-      const ph = campaignIds.map(() => '?').join(',');
-      const res = await env.DB.prepare(
-        `UPDATE tester_requests SET status = 'rejected',
-           note = 'Account disconnected -- resubmit a new handle.'
-         WHERE clipper_id = ? AND platform = ? AND campaign_id IN (${ph})`
-      ).bind(before.clipper_id, result.platform, ...campaignIds).run();
-      reset_requests = res.meta.changes || 0;
-    }
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'account_removed',
       targetType: 'social_account', targetId: Number(params.id),
       targetLabel: `${result.platform}:${result.username} (${before.clipper_username})`
     });
-    return json({ ok: true, ...result, reset_requests });
+    return json({ ok: true, ...result });
   }
 
   // All social accounts across every clipper, bucketed into Active / Paused /

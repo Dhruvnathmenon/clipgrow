@@ -48,8 +48,12 @@ export async function handleClient(request, env, url) {
 
   if (!pathname.startsWith('/api/client/')) return null;
 
-  // Observer only: nothing here may ever mutate state.
-  if (method !== 'GET') return err('This is a read-only account', 405);
+  // Observer only, with exactly ONE exception: a brand may flag a single clip
+  // in their own campaign as off-guideline. That raises an admin alert -- it
+  // does not touch the clip. Everything else here stays strictly read-only.
+  const isClipFlag = method === 'POST' &&
+    /^\/api\/client\/campaigns\/\d+\/clips\/\d+\/flag$/.test(pathname);
+  if (method !== 'GET' && !isClipFlag) return err('This is a read-only account', 405);
 
   const session = await requireClient(request, env);
   if (!session) return err('Unauthorized', 401);
@@ -58,6 +62,39 @@ export async function handleClient(request, env, url) {
   const me = await env.DB.prepare('SELECT * FROM clients WHERE id = ?').bind(clientId).first();
   if (!me) return json({ error: 'Account no longer exists' }, 401, { 'Set-Cookie': clearCookieHeader('cg_session') });
   if (me.status !== 'active') return err('This client account has been disabled. Contact ClipGrow.', 403);
+
+  // The one write a brand can make: report a clip on their own campaign. It
+  // creates an admin-side alert (Overview banner) and nothing more -- the clip
+  // is unchanged until the admin acts on it from the clipper page.
+  if (isClipFlag) {
+    const m = matchPath('/api/client/campaigns/:id/clips/:clipId/flag', pathname);
+    const campaignId = Number(m.id);
+    const clipId = Number(m.clipId);
+
+    const allowed = await grantedCampaignIds(env.DB, clientId);
+    if (!allowed.has(campaignId)) return err('Not found', 404);
+
+    const clip = await env.DB.prepare(
+      'SELECT id, campaign_id FROM submissions WHERE id = ?'
+    ).bind(clipId).first();
+    if (!clip || clip.campaign_id !== campaignId) return err('Not found', 404);
+
+    const body = await readJson(request).catch(() => ({}));
+    const note = (String(body && body.note != null ? body.note : '').trim().slice(0, 500)) || null;
+
+    // Idempotent -- a second click while a flag is still open is a no-op, not a
+    // duplicate row (also enforced by a partial unique index in migration 040).
+    const open = await env.DB.prepare(
+      "SELECT id FROM client_clip_flags WHERE submission_id = ? AND client_id = ? AND status = 'open'"
+    ).bind(clipId, clientId).first();
+    if (!open) {
+      await env.DB.prepare(
+        `INSERT INTO client_clip_flags (submission_id, campaign_id, client_id, note, status, created_at)
+         VALUES (?, ?, ?, ?, 'open', ?)`
+      ).bind(clipId, campaignId, clientId, note, Date.now()).run();
+    }
+    return json({ ok: true });
+  }
 
   if (pathname === '/api/client/me' && method === 'GET') {
     return json({
@@ -109,18 +146,24 @@ export async function handleClient(request, env, url) {
     const campaign = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(params.id).first();
     if (!campaign) return err('Not found', 404);
 
+    // status = 'active' only: a clip the admin has flagged invalid
+    // ('disqualified') is treated as never having existed as far as the brand
+    // is concerned -- it vanishes from this list, its views leave every roll-up
+    // and total below, and it stops counting against the budget.
     const { results: clipRows } = await env.DB.prepare(
       `SELECT s.id, s.permalink, s.views, s.status, s.sync_error, s.source, s.platform, s.eligible,
               s.created_at, s.posted_at, s.last_ok_sync_at, s.locked_at, s.lock_reason,
               s.thumbnail_key, s.thumbnail_url,
               cl.id AS clipper_id, cl.display_name, cl.username,
-              a.username AS account_username
+              a.username AS account_username,
+              (SELECT COUNT(*) FROM client_clip_flags f
+                 WHERE f.submission_id = s.id AND f.client_id = ? AND f.status = 'open') AS my_open_flag
        FROM submissions s
        JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
-       WHERE s.campaign_id = ?
+       WHERE s.campaign_id = ? AND s.status = 'active'
        ORDER BY s.views DESC, COALESCE(s.posted_at, s.created_at) DESC`
-    ).bind(params.id).all();
+    ).bind(clientId, params.id).all();
 
     const minViews = campaign.min_views || 0;
 
@@ -144,7 +187,9 @@ export async function handleClient(request, env, url) {
         posted_at: r.posted_at,
         synced_at: r.created_at,
         last_ok_sync_at: r.last_ok_sync_at,
-        source: r.source || 'manual'
+        source: r.source || 'manual',
+        // This brand has already reported this clip and it is awaiting review.
+        flagged: !!r.my_open_flag
       };
     });
 

@@ -1,9 +1,13 @@
-// A kicked clipper's earnings are meant to freeze at what they had accrued.
-// The allocator used to read that figure from `earning` -- its own previous
-// output -- which made repricing a one-way ratchet: a pass run while the budget
-// was short wrote the value down, and restoring the budget never brought it
-// back. frozen_earning is written once, at the moment of kicking, so repricing
-// is idempotent.
+// Kicking a clipper from a campaign RELEASES their unpaid earnings: those
+// clips drop to zero and every rupee they were holding flows back into the
+// campaign pool for everyone still clipping. A kick is a deliberate "we are
+// done with this clipper" call -- most often for botting or off-guideline
+// work -- so there is nothing to preserve. Already-settled (locked) clips are
+// the one exception: their money is real, paid history and is never touched.
+//
+// frozen_earning is still stamped at kick time (src/routes/admin.js) as a
+// record of what the clipper was worth in that moment, for a payout dispute --
+// the allocator just no longer reads it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,42 +31,7 @@ function sub(o = {}) {
 }
 const earningOf = (db, id) => db._state.submissions.find(s => s.id === id).earning;
 
-test('a kicked clipper survives a budget cut and restore with their frozen figure intact', async () => {
-  // Clip K is frozen at 3000. Earlier clips hold 7000 of the 10000 budget.
-  const db = makePayoutsDb({
-    campaigns: [campaign()],
-    submissions: [
-      sub({ id: 1, clipper_id: 2, created_at: 1, views: 70000, earning: 7000 }),
-      sub({ id: 2, clipper_id: 1, created_at: 2, views: 30000, earning: 3000, frozen_earning: 3000 })
-    ],
-    participations: [
-      { id: 1, clipper_id: 2, campaign_id: 1, status: 'active' },
-      { id: 2, clipper_id: 1, campaign_id: 1, status: 'kicked' }
-    ]
-  });
-
-  // Admin mistypes the budget as 8000. Only 1000 is left for the kicked clip.
-  db._state.campaigns[0].budget = 8000;
-  await reallocateCampaign(db, 1);
-  assert.equal(earningOf(db, 2), 1000, 'payable now is clamped by the smaller budget');
-
-  // Admin notices and restores the budget.
-  db._state.campaigns[0].budget = 10000;
-  await reallocateCampaign(db, 1);
-  assert.equal(earningOf(db, 2), 3000, 'the frozen figure must come back in full');
-});
-
-test('repricing a kicked clipper repeatedly never erodes the frozen figure', async () => {
-  const db = makePayoutsDb({
-    campaigns: [campaign()],
-    submissions: [sub({ id: 1, views: 30000, earning: 3000, frozen_earning: 3000 })],
-    participations: [{ id: 1, clipper_id: 1, campaign_id: 1, status: 'kicked' }]
-  });
-  for (let i = 0; i < 5; i++) await reallocateCampaign(db, 1);
-  assert.equal(earningOf(db, 1), 3000);
-});
-
-test('a kicked clip still consumes budget, so active clips cannot spend its money', async () => {
+test('kicking a clipper zeroes their unpaid clips and frees the budget for active ones', async () => {
   const db = makePayoutsDb({
     campaigns: [campaign({ budget: 5000 })],
     submissions: [
@@ -75,17 +44,53 @@ test('a kicked clip still consumes budget, so active clips cannot spend its mone
     ]
   });
   await reallocateCampaign(db, 1);
-  assert.equal(earningOf(db, 1), 3000, 'kicked clipper keeps their frozen money');
-  assert.equal(earningOf(db, 2), 2000, 'the active clip only gets what is genuinely left');
+  assert.equal(earningOf(db, 1), 0, 'the kicked clipper earns nothing');
+  assert.equal(earningOf(db, 2), 4000, 'the active clip gets the full budget the kicked one released');
 });
 
-test('falls back to current earning when no frozen figure was recorded', async () => {
-  // Participations kicked before this column existed have frozen_earning NULL.
+test('a kicked clipper still holds nothing even when the budget is huge', async () => {
   const db = makePayoutsDb({
-    campaigns: [campaign()],
-    submissions: [sub({ id: 1, views: 30000, earning: 3000, frozen_earning: null })],
+    campaigns: [campaign({ budget: 1000000 })],
+    submissions: [sub({ id: 1, views: 30000, earning: 3000, frozen_earning: 3000 })],
+    participations: [{ id: 1, clipper_id: 1, campaign_id: 1, status: 'kicked' }]
+  });
+  for (let i = 0; i < 3; i++) await reallocateCampaign(db, 1);
+  assert.equal(earningOf(db, 1), 0, 'repricing never revives a kicked clipper');
+});
+
+test('a kicked clipper\'s already-PAID clip is untouched -- paid stays paid', async () => {
+  const db = makePayoutsDb({
+    campaigns: [campaign({ budget: 10000 })],
+    submissions: [
+      // Locked/paid clip from the now-kicked clipper.
+      sub({ id: 1, clipper_id: 1, created_at: 1, views: 30000, earning: 3000,
+            locked_at: 123, locked_earning: 3000, lock_reason: 'paid', payment_id: 9 }),
+      // Their other, unpaid clip.
+      sub({ id: 2, clipper_id: 1, created_at: 2, views: 20000, earning: 2000, frozen_earning: 2000 }),
+      // An active clipper competing for what is left.
+      sub({ id: 3, clipper_id: 2, created_at: 3, views: 90000, earning: 0 })
+    ],
+    participations: [
+      { id: 1, clipper_id: 1, campaign_id: 1, status: 'kicked' },
+      { id: 2, clipper_id: 2, campaign_id: 1, status: 'active' }
+    ]
+  });
+  await reallocateCampaign(db, 1);
+  assert.equal(earningOf(db, 1), 3000, 'the paid clip keeps its locked earning');
+  assert.equal(earningOf(db, 2), 0, 'the unpaid clip is released');
+  assert.equal(earningOf(db, 3), 7000, 'the active clip gets everything except the 3000 already paid out');
+});
+
+test('reinstating a kicked clipper puts their clips back on normal pricing', async () => {
+  const db = makePayoutsDb({
+    campaigns: [campaign({ budget: 10000 })],
+    submissions: [sub({ id: 1, views: 30000, earning: 0, frozen_earning: 3000 })],
     participations: [{ id: 1, clipper_id: 1, campaign_id: 1, status: 'kicked' }]
   });
   await reallocateCampaign(db, 1);
-  assert.equal(earningOf(db, 1), 3000);
+  assert.equal(earningOf(db, 1), 0, 'nothing while kicked');
+
+  db._state.participations[0].status = 'active';
+  await reallocateCampaign(db, 1);
+  assert.equal(earningOf(db, 1), 3000, 'back to the real CPM value once reinstated');
 });

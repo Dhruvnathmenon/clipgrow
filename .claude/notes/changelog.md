@@ -4,6 +4,34 @@ High-level, dated. For exact detail read the actual commit
 (`git show <hash>`) rather than trusting this summary as complete — this
 exists to answer "have we already done X" quickly, not to replace git log.
 
+## 2026-09-10
+- **Manual clip invalidation** (`migration 040`): admin flags a clip invalid
+  with a required typed reason — reuses the `disqualified` status (already
+  zeroes earning + releases budget FCFS), adds `invalidated_at/by/reason`,
+  an audit-log entry, and holds through anything the clipper does (reconnect
+  / re-import already dedupe on media id). `POST .../invalidate` +
+  `POST .../revalidate` (revalidate does a best-effort live view re-fetch
+  then re-prices). `disqualified` removed from the plain status PATCH.
+  Buttons added to the clipper-detail Videos table (was campaign-only).
+- **Client-raised clip flags**: the client portal's one write — a brand
+  reports a clip on their own campaign (`POST /api/client/campaigns/:id/
+  clips/:clipId/flag`), which raises an alert on the admin Overview banner.
+  Resolved from the clipper page (invalidate auto-closes the flag) or
+  dismissed as a false alarm. Everything else in the client portal stays
+  read-only.
+- **Fixed client-dashboard leak**: `/api/client/campaigns/:id` had no status
+  filter, so a `disqualified` clip still showed to the brand with its views
+  counted. Now `status = 'active'` only.
+- **Kick now releases unpaid earnings**: kicking a clipper from a campaign
+  drops their unlocked clips to ₹0 and frees the budget back to the pool
+  (was: freeze at accrued value, keep consuming budget). Paid clips
+  untouched. `frozen_earning` still stamped as a dispute record, no longer
+  read by the allocator. Use Pause for an amicable stop that keeps the money.
+- **Disconnect simplified**: removed "Reset for New Account" — one Disconnect
+  action that unlinks, deletes unpaid clips, frees their budget, keeps
+  settled history, and leaves the access approval intact so the clipper can
+  reconnect and re-link themselves.
+
 ## 2026-08-27
 - Removed the clipper-triggered full refresh entirely; cron + per-clip
   refresh only now. Verified the cron was already healthy first rather

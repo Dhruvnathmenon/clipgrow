@@ -83,10 +83,10 @@ test('PATCH: refused on a clip closed at zero (no payment) too -- must reopen fi
   assert.equal(res.status, 409);
 });
 
-test('PATCH: a payment settling this exact clip between the read and the write must not be undone', async () => {
+test('invalidate: a payment settling this exact clip between the read and the write must not be undone', async () => {
   const env = seedEnv();
   injectConcurrentSettlement(env);
-  const res = await adminRequest(env, '/api/admin/submissions/1', { method: 'PATCH', body: { status: 'disqualified' } });
+  const res = await adminRequest(env, '/api/admin/submissions/1/invalidate', { method: 'POST', body: { reason: 'concurrency check' } });
   assert.equal(res.status, 409, 'the write-time guard must catch what the read-time check could not have seen');
 
   const row = env.DB._rows('submissions')[0];

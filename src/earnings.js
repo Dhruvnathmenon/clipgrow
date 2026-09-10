@@ -264,18 +264,20 @@ export async function allocateCampaignEarnings(db, campaignId) {
       // upload that is not a Short. Tracked and visible, but never earns.
       allocated = 0;
     } else if (sub.part_status === 'kicked') {
-      // Removed from the campaign: earnings freeze at what they had already
-      // accrued. The money is still owed, so it still consumes budget.
+      // Removed from the campaign. A kick is a deliberate "we are done with
+      // this clipper" call -- most often for botting or off-guideline work --
+      // so their UNPAID clips earn nothing and release every rupee they were
+      // holding back into the campaign pool for everyone still clipping.
+      // Already-settled clips are untouched: the locked_at branch above keeps
+      // their locked_earning and it is deducted off the top, so paid stays
+      // paid.
       //
-      // Read from frozen_earning, written once when the clipper was kicked.
-      // Using `earning` here made this a ratchet: it is the previous pass's
-      // OUTPUT, so a pass run while the budget was short wrote the value down,
-      // and restoring the budget could never bring it back. frozen_earning does
-      // not move, so repricing is idempotent -- the clamp below can shrink what
-      // is payable right now without destroying the underlying figure.
-      const frozen = sub.frozen_earning != null ? sub.frozen_earning : (sub.earning || 0);
-      allocated = Math.min(frozen, Math.max(0, remaining));
-      remaining -= allocated;
+      // For an amicable exit where money is still genuinely owed, Pause is the
+      // tool -- it stops new earning without wiping what is already accrued.
+      // frozen_earning is still written at kick time (src/routes/admin.js) as a
+      // record of what the clipper was worth in that moment, for payout
+      // disputes -- it is just no longer read here.
+      allocated = 0;
     } else if (sub.views < minViews) {
       // Under the campaign's minimum: tracked and shown, but earns nothing yet.
       allocated = 0;

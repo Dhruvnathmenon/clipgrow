@@ -107,6 +107,23 @@
     location.href='/client';
   };
 
+  // The one thing this dashboard can change: report a video. It does not touch
+  // the video -- it raises an alert for the ClipGrow team, who review it and
+  // either remove it or clear it.
+  window.flagClip=async function(clipId,btn){
+    if(!confirm('Report this video to ClipGrow?\n\nUse this if the content looks off-brand, misleading, or not genuine (e.g. fake views). The ClipGrow team will review it — nothing changes on your dashboard until they do.')) return;
+    const note=(prompt('Anything to add for the reviewer? (optional)')||'').trim();
+    btn.disabled=true; btn.textContent='Reporting…';
+    try{
+      const res=await fetch(`/api/client/campaigns/${current}/clips/${clipId}/flag`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note})
+      });
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(body.error||'Could not send the report');
+      btn.replaceWith(Object.assign(document.createElement('span'),{className:'badge warn',textContent:'reported'}));
+    }catch(e){ btn.disabled=false; btn.textContent='Report'; alert(e.message); }
+  };
+
   async function init(){
     try{
       const [{client},{campaigns}]=await Promise.all([api('/api/client/me'),api('/api/client/campaigns')]);
@@ -168,7 +185,7 @@
       <div class="panel">
         <h2 class="panel-title">Every video (${num(t.clips)})</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>Clipper</th><th>Platform</th><th>Video</th><th>Posted</th><th>Views</th><th>Status</th></tr></thead>
+          <thead><tr><th>Clipper</th><th>Platform</th><th>Video</th><th>Posted</th><th>Views</th><th>Status</th><th>Report</th></tr></thead>
           <tbody>${d.clips.length?d.clips.map(x=>`<tr>
             <td class="handle">${esc(x.clipper_name)}</td>
             <td><span class="badge ${x.platform==='youtube'?'warn':'neutral'}">${esc(x.platform_label||x.platform)}</span></td>
@@ -178,7 +195,10 @@
             <td class="handle">${num(x.views)}</td>
             <td><span class="badge ${BADGE[x.state]||'neutral'}">${LABEL[x.state]||esc(x.state)}</span>
               ${x.state_message?`<div class="note" style="margin-top:.25rem;max-width:280px">${esc(x.state_message)}</div>`:''}</td>
-          </tr>`).join(''):'<tr><td colspan="6" class="empty">No videos yet.</td></tr>'}</tbody>
+            <td>${x.flagged
+              ?'<span class="badge warn">reported</span>'
+              :`<button class="btn btn-ghost" style="padding:.3rem .6rem;font-size:.72rem" onclick="flagClip(${x.id},this)">Report</button>`}</td>
+          </tr>`).join(''):'<tr><td colspan="7" class="empty">No videos yet.</td></tr>'}</tbody>
         </table></div>
         <p class="note" style="margin-top:.8rem">Views are pulled directly from each clipper's connected Instagram account. ${t.clips_below_min?`${num(t.clips_below_min)} video(s) have not yet reached the ${num(c.min_views)}-view minimum.`:''}</p>
       </div>`;

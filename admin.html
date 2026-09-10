@@ -1509,7 +1509,7 @@
     }
 
     async function loadOverview(){
-      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],transient_errors:transient=[],stalled_jobs:stalledJobs=[]}=await api('/api/admin/overview');
+      const {overview:o,problem_accounts:problems=[],stuck_accounts:stuck=[],transient_errors:transient=[],stalled_jobs:stalledJobs=[],client_flags:clientFlags=[]}=await api('/api/admin/overview');
       document.getElementById('hero-views').innerHTML=
         `<div class="hero-stat"><div class="stat-val">${num(o.total_views)}</div><div class="stat-lbl">Total Views Generated</div></div>`;
       document.getElementById('overview').innerHTML=`
@@ -1528,6 +1528,18 @@
       // what would have surfaced the sync batch-isolation bug immediately
       // instead of it only being found by manually querying the database.
       const urgent=[];
+      // A brand has reported a clip on their own campaign. Open the clipper,
+      // watch the video, then Mark Invalid (which clears this) or Dismiss it as
+      // a false alarm. Stays here until one of those happens.
+      if(clientFlags.length) urgent.push(clientFlags.map(f=>
+        `<div class="trouble"><span class="badge disqualified">client flag</span>
+          <strong>${esc(f.client_name)}</strong> flagged <a href="${esc(f.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">a clip</a>
+          by <span class="muted">${esc(f.clipper_name)}</span> on <span class="muted">${esc(f.campaign_name)}</span> — ${num(f.views)} views
+          ${f.note?`<div class="muted" style="font-size:.72rem;margin:.15rem 0 .1rem">“${esc(f.note)}”</div>`:''}
+          <div style="margin-top:.3rem">
+            <button class="btn btn-ghost btn-sm" onclick="toggleClipper(${f.clipper_id})">Open clipper</button>
+            <button class="btn btn-ghost btn-sm" onclick="dismissClientFlag(${f.id})">Dismiss (false alarm)</button>
+          </div></div>`).join(''));
       // Named rather than counted. "3 accounts need reconnecting" means opening
       // every clipper to find which three; the handle and the clipper's name
       // mean going straight to the one that is broken.
@@ -1766,7 +1778,7 @@
         <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
         <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
               :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
-              :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+              :s.status==='disqualified'?`<span class="badge disqualified">invalid</span>${s.invalidated_reason?`<div class="muted" style="font-size:.7rem;margin-top:.2rem;max-width:220px">${esc(s.invalidated_reason)}</div>`:''}`
               :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
               :syncErrorBadge(s)}</td>
         <td><div class="actions">
@@ -1783,8 +1795,8 @@
               : `${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
                  ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
                  ${s.status!=='disqualified'
-                   ?`<button class="btn btn-danger btn-sm" onclick="setSub(${s.id},'disqualified')">Disqualify</button>`
-                   :`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Restore</button>`}
+                   ?`<button class="btn btn-danger btn-sm" onclick="invalidateClip(${s.id})">Mark Invalid</button>`
+                   :`<button class="btn btn-ghost btn-sm" onclick="revalidateClip(${s.id})">Restore</button>`}
                  ${syncErrorAction(s)}
                  <button class="btn btn-danger btn-sm" onclick="delSub(${s.id})">Delete</button>`}
         </div></td></tr>`;
@@ -1831,6 +1843,31 @@
     };
     window.setSub=async function(id,status){
       try{ await api('/api/admin/submissions/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Video updated'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    // Flag a clip invalid: zeroes its earning, frees its budget share, hides it
+    // from the client, and stays invalid through anything the clipper does.
+    // The reason is required -- it goes in the audit log and to whoever reviews
+    // this later ("botted views -- flagged by Mandvee", etc).
+    window.invalidateClip=async function(id){
+      const reason=prompt('Why is this video invalid? (shown in the audit log)');
+      if(reason==null||!reason.trim()) return;
+      try{ await api('/api/admin/submissions/'+id+'/invalidate',{method:'POST',body:JSON.stringify({reason:reason.trim()})});
+        toast('Video flagged invalid — budget released'); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    // Undo a wrong flag: re-activates the clip, re-fetches its current views,
+    // and re-prices the campaign so it consumes what it is worth now.
+    window.revalidateClip=async function(id){
+      if(!confirm('Restore this video?\n\nIt goes active again, its current view count is re-checked, and it re-enters the campaign budget at that number.')) return;
+      try{ const r=await api('/api/admin/submissions/'+id+'/revalidate',{method:'POST'});
+        toast(`Restored — ${num(r.views)} views${r.synced?'':' (from last known count)'}`); loadAll(); }
+      catch(e){ toast(e.message,true); }
+    };
+    // Client raised a flag we've decided is a false alarm -- clear it off the
+    // Overview banner. (Marking the clip invalid clears its flag on its own.)
+    window.dismissClientFlag=async function(id){
+      try{ await api('/api/admin/client-flags/'+id+'/dismiss',{method:'POST'}); toast('Flag dismissed'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
     window.delSub=async function(id){
@@ -2393,8 +2430,7 @@
               <td class="muted">${when(a.connected_at)}</td>
               <td class="muted">${when(a.expires_at)}</td>
               <td class="actions">
-                <button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}',false,${a.unpaid_clips||0},${a.unpaid_value||0})">Disconnect</button>
-                <button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}',true,${a.unpaid_clips||0},${a.unpaid_value||0})">Reset for New Account</button>
+                <button class="btn btn-danger btn-sm" onclick="revokeAccount(${a.id},'${a.platform==='youtube'?'YouTube':'Instagram'}','${esc(a.username).replace(/'/g,'')}',${a.unpaid_clips||0},${a.unpaid_value||0})">Disconnect</button>
               </td>
             </tr>`).join('')}</tbody></table></div>
             <p class="note" style="margin-top:.6rem"><strong>Automatic</strong> picks up every new video the account posts. <strong>Paste only</strong> tracks nothing on its own — the clipper submits each campaign video by pasting its link, which is still verified as genuinely theirs. Use paste-only when someone posts campaign work from a main account that also carries unrelated videos.</p>`:'<p class="muted">No accounts connected.</p>'}
@@ -2403,18 +2439,29 @@
 
           <div class="sub-h">Videos (${d.submissions.length})</div>
           ${d.submissions.length?`<div class="table-wrap"><table>
-            <thead><tr><th>Campaign</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
             <tbody>${d.submissions.map(s=>`<tr>
               <td class="muted">${esc(s.campaign_name)}</td>
               <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
               <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
               <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
                     :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`
-                    :s.status==='disqualified'?'<span class="badge disqualified">DQ</span>'
+                    :s.status==='disqualified'?`<span class="badge disqualified">invalid</span>${s.invalidated_reason?`<div class="muted" style="font-size:.7rem;margin-top:.2rem;max-width:220px">${esc(s.invalidated_reason)}</div>`:''}`
                     :s.status==='paused'?'<span class="badge needs_reauth">paused</span>'
                     :syncErrorBadge(s)}</td>
+              <td><div class="actions">${
+                s.lock_reason==='paid'
+                  ? '<span class="muted" style="font-size:.72rem">settled</span>'
+                  : s.locked_at
+                    ? '<span class="muted" style="font-size:.72rem">closed — reopen from the campaign table</span>'
+                    : `${s.status==='active'?`<button class="btn btn-warn btn-sm" onclick="setSub(${s.id},'paused')">Pause</button>`:''}
+                       ${s.status==='paused'?`<button class="btn btn-ghost btn-sm" onclick="setSub(${s.id},'active')">Resume</button>`:''}
+                       ${s.status!=='disqualified'
+                         ?`<button class="btn btn-danger btn-sm" onclick="invalidateClip(${s.id})">Mark Invalid</button>`
+                         :`<button class="btn btn-ghost btn-sm" onclick="revalidateClip(${s.id})">Restore</button>`}`
+              }</div></td>
             </tr>`).join('')}</tbody></table></div>
-            <p class="note" style="margin-top:.6rem">Manage pause/disqualify/delete from the campaign's own Videos table — this list is for visibility across all of this clipper's campaigns at once.</p>`:'<p class="muted">No videos submitted yet.</p>'}
+            <p class="note" style="margin-top:.6rem">Marking a video invalid zeroes its earning, frees its budget, hides it from the client, and holds through anything the clipper does. Restore re-checks the live view count. Reopen/delete of settled clips is still on the campaign's own Videos table.</p>`:'<p class="muted">No videos submitted yet.</p>'}
 
           <div class="sub-h">Payments (${d.payments.length}) — ${money(d.money.paid)} paid of ${money(d.money.earned)} earned</div>
           ${d.payments.length?`<div class="table-wrap"><table>
@@ -2498,25 +2545,21 @@
       }catch(e){ toast(e.message,true); }
     };
 
-    window.revokeAccount=async function(id,platform,handle,resetAccess,unpaidClips,unpaidValue){
+    window.revokeAccount=async function(id,platform,handle,unpaidClips,unpaidValue){
       const what=`${platform||'this'} account${handle?' '+handle:''}`;
       // Spell out exactly what is destroyed, with the count and the rupee
-      // value, before the admin confirms. This action is irreversible and the
-      // old dialog described it only in the abstract.
+      // value, before the admin confirms.
       const n=Number(unpaidClips||0), v=Number(unpaidValue||0);
       const loss=n>0
-        ? `This PERMANENTLY DELETES ${n} unpaid video(s) worth ${money(v)}. That earning disappears and the budget returns to the campaign. This cannot be undone.`
-        : `There are no unpaid videos on this account, so nothing will be deleted.`;
-      const msg=resetAccess
-        ? `Disconnect ${what} and reset for a new account?\n\n${loss}\n\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThis also reopens their access request, so the clipper's dashboard shows Step 1 (enter a new handle) instead of Connect. You'll still need to add the new account as a Meta Tester before Connect will work for them.\n\nTo remove someone WITHOUT losing their unpaid work, archive the clipper instead.`
-        : `Disconnect ${what}?\n\n${loss}\n\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThis does NOT reopen their access request — if they need to submit a different account, use "Reset for New Account" instead.\n\nTo remove someone WITHOUT losing their unpaid work, archive the clipper instead.`;
+        ? `This deletes ${n} unpaid video(s) worth ${money(v)} — that earning disappears and the budget returns to the campaign.`
+        : `There are no unpaid videos on this account, so nothing is deleted.`;
+      const msg=`Disconnect ${what}?\n\n${loss}\n\nAlready settled videos are kept exactly as they are — paid stays paid.\n\nThe clipper can reconnect this account (or a new one) themselves from their dashboard — their access approval is left intact, so everything re-links on reconnect.\n\nTo remove someone WITHOUT losing their unpaid work, archive the clipper instead.`;
       if(!confirm(msg)) return;
       try{
-        const r=await api('/api/admin/accounts/'+id,{method:'DELETE',body:JSON.stringify({resetAccess:!!resetAccess})});
+        const r=await api('/api/admin/accounts/'+id,{method:'DELETE'});
         const bits=[];
         if(r.deleted_pending) bits.push(`${r.deleted_pending} pending video(s) removed`);
         if(r.kept_settled) bits.push(`${r.kept_settled} settled video(s) kept`);
-        if(r.reset_requests) bits.push(`access reopened for ${r.reset_requests} campaign(s)`);
         toast(`Disconnected${bits.length?' — '+bits.join(', '):''}`);
         loadAll();
       }catch(e){ toast(e.message,true); }
