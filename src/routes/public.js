@@ -53,7 +53,17 @@ export async function handlePublic(request, env, url) {
       const full = { ...publicCampaign(c, spent), participants: parts.n };
       out.push(session ? full : publicListItem(full));
     }
-    return json({ campaigns: out });
+    // Every unauthenticated hit -- every marketing-homepage visitor, with no
+    // session cookie at all -- ran a fresh per-campaign SUM(views) scan with
+    // zero caching. Confirmed the direct cause of exceeding D1's free-tier
+    // daily row-read quota (2026-09-13 outage: "Internal server error" to
+    // every visitor, worker logs showed D1_ERROR: daily row read limit
+    // exceeded). /api/public/stats already caches for exactly this reason;
+    // this endpoint just never got the same treatment. Logged-in traffic
+    // (session present) still gets a live read -- a clipper mid-signup
+    // deciding which campaign to join needs the real number, not a stale one.
+    const headers = session ? {} : { 'Cache-Control': 'public, max-age=3600' };
+    return json({ campaigns: out }, 200, headers);
   }
 
   // Site-wide cumulative totals for the marketing page.
