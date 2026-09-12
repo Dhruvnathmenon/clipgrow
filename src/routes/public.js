@@ -1,5 +1,8 @@
 import { json, matchPath, err } from '../http.js';
-import { publicCampaign, campaignSpend, spendExpr } from '../db.js';
+import {
+  publicCampaign, campaignSpend, spendExpr,
+  RETIRED_VIEWS_EXPR, RETIRED_CLIPS_EXPR, RETIRED_VIEWS_BY_CLIPPER_EXPR, RETIRED_CLIPS_BY_CLIPPER_EXPR
+} from '../db.js';
 import { getSession } from '../auth.js';
 
 // Only the campaign list is genuinely public -- the homepage renders its
@@ -68,8 +71,14 @@ export async function handlePublic(request, env, url) {
   if (pathname === '/api/public/stats') {
     const row = await env.DB.prepare(
       `SELECT
-         (SELECT COALESCE(SUM(views), 0) FROM submissions WHERE status = 'active')      AS total_views,
-         (SELECT COUNT(*)               FROM submissions WHERE status = 'active')       AS total_clips,
+         -- Lifetime and never-decreasing on purpose: this is a "look how much
+         -- we've done" figure shown to visitors, not a live snapshot of
+         -- what's currently active. Every clip that ever tracked real views
+         -- counts, whatever later happened to it (paused, disqualified) --
+         -- and RETIRED_VIEWS_EXPR/RETIRED_CLIPS_EXPR add back what a since-
+         -- deleted row (disconnect, admin delete) would otherwise erase.
+         (SELECT COALESCE(SUM(views), 0) FROM submissions) + ${RETIRED_VIEWS_EXPR} AS total_views,
+         (SELECT COUNT(*)                FROM submissions) + ${RETIRED_CLIPS_EXPR} AS total_clips,
          (SELECT COALESCE(SUM(amount),0) FROM payments)                                 AS total_paid,
          (SELECT COUNT(DISTINCT clipper_id) FROM payments)                              AS clippers_paid,
          (SELECT COUNT(*)               FROM campaigns)                                 AS campaigns`
@@ -108,11 +117,21 @@ export async function handlePublic(request, env, url) {
   if (pathname === '/api/public/leaderboard') {
     const { results } = await env.DB.prepare(
       `SELECT cl.id, cl.username, cl.display_name,
-              COUNT(CASE WHEN s.status = 'active' THEN 1 END) AS video_count,
-              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) AS total_views,
+              -- A clipper's own lifetime video/view count is the same
+              -- "never goes down" figure as the site-wide one in
+              -- /api/public/stats -- the by-clipper retired_view_history
+              -- rows add back what a disconnect or admin delete removed
+              -- from THIS clipper's history specifically.
+              COUNT(CASE WHEN s.status = 'active' THEN 1 END) + ${RETIRED_CLIPS_BY_CLIPPER_EXPR} AS video_count,
+              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) + ${RETIRED_VIEWS_BY_CLIPPER_EXPR} AS total_views,
               ${spendExpr('s')} AS total_earnings
        FROM clippers cl
-       JOIN submissions s ON s.clipper_id = cl.id
+       -- LEFT, not JOIN: a clipper every one of whose clips has since been
+       -- deleted (disconnect, admin delete) would otherwise vanish from this
+       -- query entirely -- zero submission rows means zero JOINed rows means
+       -- the retired-views subqueries above never even run for them, losing
+       -- their whole history from the board instead of just its live half.
+       LEFT JOIN submissions s ON s.clipper_id = cl.id
        WHERE cl.status = 'active'
        GROUP BY cl.id
        -- Dropping the status filter from the JOIN is what lets a paid-then-

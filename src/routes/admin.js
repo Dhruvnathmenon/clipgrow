@@ -3,7 +3,7 @@ import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } fr
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, allClipperFinancials, EMPTY_FINANCIALS, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
-  disconnectSocialAccount, SPEND_EXPR, totalOutstanding, accountIssues,
+  disconnectSocialAccount, SPEND_EXPR, RETIRED_VIEWS_EXPR, totalOutstanding, accountIssues,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
   normaliseDiscordUsername, validateDiscordUsername,
@@ -175,8 +175,12 @@ export async function handleAdmin(request, env, url) {
         -- clip past its 7-day tracking window (clipstate.js's
         -- TRACKING_WINDOW_MS) has already stopped syncing, so its views
         -- column IS its final count -- this SUM needs no separate
-        -- bookkeeping to reflect that.
-        (SELECT COALESCE(SUM(views),0) FROM submissions) AS total_views,
+        -- bookkeeping to reflect that. A "status symbol" figure shown off
+        -- publicly (tracker.html) must never go down -- retired_view_history
+        -- is where a deleted submission's views land (disconnect freeing an
+        -- unpaid clip, or a manual admin delete) instead of just vanishing
+        -- from this sum. See migration 041.
+        (SELECT COALESCE(SUM(views),0) FROM submissions) + ${RETIRED_VIEWS_EXPR} AS total_views,
         (SELECT ${SPEND_EXPR} FROM submissions) AS total_earned,
         (SELECT COALESCE(SUM(amount),0) FROM payments) AS total_paid,
         -- outstanding is computed separately by totalOutstanding()
@@ -1253,6 +1257,18 @@ export async function handleAdmin(request, env, url) {
       ).bind(params.id).run();
       if (!del.meta.changes) {
         return err('This clip was paid in the moment between checking and deleting it. Reverse that payment instead, so the ledger stays correct.', 409);
+      }
+      // Same reasoning as disconnectSocialAccount's retired_view_history
+      // write: "Total Views Generated" is a lifetime, never-decreasing
+      // number, so a real clip's already-real views survive its row being
+      // deleted. Done as a follow-up write rather than in the same
+      // statement as the DELETE above, since that one is guarded on a
+      // race (the payment check) this one has already passed.
+      if (sub.views > 0) {
+        await env.DB.prepare(
+          `INSERT INTO retired_view_history (views, submission_count, reason, clipper_id, account_id, created_at)
+           VALUES (?, 1, 'admin_delete', ?, ?, ?)`
+        ).bind(sub.views, sub.clipper_id, sub.account_id, Date.now()).run();
       }
     } else {
       if (sub.locked_at) {

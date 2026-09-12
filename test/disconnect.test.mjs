@@ -15,7 +15,8 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     participation_accounts: participationAccounts.map(p => ({ ...p })),
     participations: participations.map(p => ({ ...p })),
     ig_api_calls: [],
-    submission_reviews: []
+    submission_reviews: [],
+    retired_view_history: []
   };
 
   function first(sql, args) {
@@ -26,7 +27,7 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
   }
 
   function all(sql, args) {
-    if (/^SELECT id, campaign_id, locked_at FROM submissions WHERE account_id = \?/.test(sql)) {
+    if (/^SELECT id, campaign_id, locked_at, views FROM submissions WHERE account_id = \?/.test(sql)) {
       return { results: state.submissions.filter(s => s.account_id === args[0]).map(s => ({ ...s })) };
     }
     throw new Error('fake-db: unhandled all(): ' + sql);
@@ -49,6 +50,11 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
     if (/^DELETE FROM submissions WHERE id IN/.test(sql)) {
       const ids = args;
       state.submissions = state.submissions.filter(s => !ids.includes(s.id));
+      return { meta: {} };
+    }
+    if (/^INSERT INTO retired_view_history/.test(sql)) {
+      const [views, submission_count, clipper_id, account_id, created_at] = args;
+      state.retired_view_history.push({ views, submission_count, reason: 'disconnect', clipper_id, account_id, created_at });
       return { meta: {} };
     }
     if (/^UPDATE social_accounts SET status='revoked'/.test(sql)) {
@@ -86,7 +92,7 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
 }
 
 const account = (o = {}) => ({ id: 3, clipper_id: 3, platform: 'youtube', username: '@testchannel', status: 'connected', access_token: 'tok', refresh_token: 'r', token_expires_at: 123, ...o });
-const sub = (o = {}) => ({ id: 1, account_id: 3, campaign_id: 3, locked_at: null, ...o });
+const sub = (o = {}) => ({ id: 1, account_id: 3, campaign_id: 3, locked_at: null, views: 0, ...o });
 
 test('disconnect: deletes pending clips but keeps every settled one', async () => {
   const db = makeDb({
@@ -102,6 +108,34 @@ test('disconnect: deletes pending clips but keeps every settled one', async () =
   assert.equal(r.deleted_pending, 2);
   assert.equal(r.kept_settled, 1);
   assert.deepEqual(db._state.submissions.map(s => s.id), [3], 'only the settled clip remains');
+});
+
+test('disconnect: a deleted pending clip\'s views are retired, not erased -- the lifetime total must never drop', async () => {
+  const db = makeDb({
+    accounts: [account()],
+    submissions: [
+      sub({ id: 1, locked_at: null, views: 1200 }),
+      sub({ id: 2, locked_at: null, views: 300 }),
+      sub({ id: 3, locked_at: 1786492800000, views: 5000 })   // settled -- row survives, views stay live
+    ]
+  });
+
+  await disconnectSocialAccount(db, 3);
+  assert.equal(db._state.retired_view_history.length, 1);
+  const r = db._state.retired_view_history[0];
+  assert.equal(r.views, 1500, 'the two deleted clips\' views, summed');
+  assert.equal(r.submission_count, 2);
+  assert.equal(r.clipper_id, 3);
+  assert.equal(r.reason, 'disconnect');
+});
+
+test('disconnect: no retired_view_history row is written when the deleted clips never had any views', async () => {
+  const db = makeDb({
+    accounts: [account()],
+    submissions: [sub({ id: 1, locked_at: null, views: 0 })]
+  });
+  await disconnectSocialAccount(db, 3);
+  assert.equal(db._state.retired_view_history.length, 0, 'nothing worth recording -- avoids a meaningless zero row');
 });
 
 test('disconnect: releases the participation link so a different account can be connected', async () => {

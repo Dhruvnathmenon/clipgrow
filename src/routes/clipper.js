@@ -5,6 +5,7 @@ import {
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
   unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
+  RETIRED_VIEWS_BY_CLIPPER_EXPR,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
   normaliseDiscordUsername, validateDiscordUsername
@@ -794,7 +795,10 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/directory' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT cl.id, cl.username, cl.display_name,
-              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) AS views,
+              -- Lifetime, never-decreasing -- same reasoning and the same
+              -- retired_view_history table as the public leaderboard
+              -- (src/routes/public.js), just internal-facing.
+              COALESCE(SUM(CASE WHEN s.status = 'active' THEN s.views ELSE 0 END),0) + ${RETIRED_VIEWS_BY_CLIPPER_EXPR} AS views,
               ${spendExpr('s')} AS earned
        FROM clippers cl
        LEFT JOIN submissions s ON s.clipper_id = cl.id

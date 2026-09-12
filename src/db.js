@@ -257,7 +257,7 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
   }
 
   const { results: subs } = await db.prepare(
-    'SELECT id, campaign_id, locked_at FROM submissions WHERE account_id = ?'
+    'SELECT id, campaign_id, locked_at, views FROM submissions WHERE account_id = ?'
   ).bind(accountId).all();
 
   const rows = subs || [];
@@ -299,6 +299,21 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
       // it was about no longer exists, so it goes with it.
       stmts.push(db.prepare(`DELETE FROM submission_reviews WHERE submission_id IN (${ph})`).bind(...pending.map(s => s.id)));
       stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
+
+      // "Total Views Generated" is a lifetime, never-decreasing number --
+      // these clips were real and their views really happened, they're only
+      // being deleted because the account they were posted from is being
+      // freed up (often so the SAME clipper can reconnect a new account).
+      // Without this, disconnecting quietly shrank a number shown off
+      // publicly. Same batch as the delete above, so the two can never
+      // drift apart.
+      const retiredViews = pending.reduce((sum, s) => sum + (s.views || 0), 0);
+      if (retiredViews > 0) {
+        stmts.push(db.prepare(
+          `INSERT INTO retired_view_history (views, submission_count, reason, clipper_id, account_id, created_at)
+           VALUES (?, ?, 'disconnect', ?, ?, ?)`
+        ).bind(retiredViews, pending.length, account.clipper_id, accountId, Date.now()));
+      }
     }
   }
 
@@ -496,6 +511,28 @@ export function spendExpr(alias = '') {
 export const SPEND_EXPR = spendExpr();
 
 /**
+ * "Total views generated" is a lifetime, never-decreasing figure shown off
+ * publicly (tracker.html, the marketing site's Story page, admin.html's hero
+ * stat) -- a plain SUM(views) FROM submissions quietly shrinks it the moment
+ * a row is deleted (an account disconnect freeing an unpaid clip, or a
+ * manual admin delete), even though those views genuinely happened. A
+ * deleted row's views land in retired_view_history (migration 041) instead
+ * of nowhere; add these expressions to any SUM(views) that is meant to read
+ * as history rather than "what's currently in the table".
+ *
+ * The *_BY_CLIPPER_EXPR variants are correlated subqueries expecting a `cl`
+ * alias on clippers in the surrounding query. The *_PARAM variants are for a
+ * query with no such alias (e.g. a plain `WHERE clipper_id = ?`) -- they
+ * take a `?` placeholder instead, bound alongside the query's own.
+ */
+export const RETIRED_VIEWS_EXPR = '(SELECT COALESCE(SUM(views),0) FROM retired_view_history)';
+export const RETIRED_CLIPS_EXPR = '(SELECT COALESCE(SUM(submission_count),0) FROM retired_view_history)';
+export const RETIRED_VIEWS_BY_CLIPPER_EXPR = '(SELECT COALESCE(SUM(views),0) FROM retired_view_history WHERE clipper_id = cl.id)';
+export const RETIRED_CLIPS_BY_CLIPPER_EXPR = '(SELECT COALESCE(SUM(submission_count),0) FROM retired_view_history WHERE clipper_id = cl.id)';
+export const RETIRED_VIEWS_BY_CLIPPER_EXPR_PARAM = '(SELECT COALESCE(SUM(views),0) FROM retired_view_history WHERE clipper_id = ?)';
+export const RETIRED_CLIPS_BY_CLIPPER_EXPR_PARAM = '(SELECT COALESCE(SUM(submission_count),0) FROM retired_view_history WHERE clipper_id = ?)';
+
+/**
  * The clipper's real total, historical -- what they've actually been paid
  * (settled) plus what they're currently owed (pending), never the billable
  * figure SPEND_EXPR gives. Same shape as spendExpr, with clipper_earning in
@@ -672,10 +709,15 @@ export async function allClipperStreaks(db) {
 }
 
 export async function clipperTotals(db, clipperId) {
+  // Lifetime, never-decreasing -- same retired_view_history reasoning as the
+  // public leaderboard and directory (RETIRED_VIEWS_EXPR's own comment):
+  // this is a clipper's own "how much have I done" figure on their
+  // dashboard, and a disconnect or admin delete must never shrink it.
   const row = await db.prepare(
-    `SELECT COUNT(*) AS clips, COALESCE(SUM(views),0) AS views
-     FROM submissions WHERE clipper_id = ? AND status = 'active'`
-  ).bind(clipperId).first();
+    `SELECT
+       (SELECT COUNT(*) FROM submissions WHERE clipper_id = ? AND status = 'active') + ${RETIRED_CLIPS_BY_CLIPPER_EXPR_PARAM} AS clips,
+       (SELECT COALESCE(SUM(views),0) FROM submissions WHERE clipper_id = ? AND status = 'active') + ${RETIRED_VIEWS_BY_CLIPPER_EXPR_PARAM} AS views`
+  ).bind(clipperId, clipperId, clipperId, clipperId).first();
   return { clips: row.clips || 0, views: row.views || 0 };
 }
 

@@ -5,6 +5,23 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-12
+- **"Total Views Generated" now genuinely never goes down** (migration 041,
+  `retired_view_history`). Reported directly: disconnecting one of Rexon's
+  accounts dropped the site-wide total, because disconnect deletes an
+  unpaid clip's row outright (correct -- it's tracking data, not money) and
+  the total was a live `SUM(views) FROM submissions`, so a deleted clip's
+  views just vanished from it. Now a deleted clip's views land in
+  `retired_view_history` in the same atomic write as the delete, and every
+  surface that advertises a lifetime total adds it back in: the admin
+  Overview hero stat, the public `/api/public/stats` (feeds the marketing
+  Story page) and `/api/public/leaderboard`, the internal clipper directory,
+  and each clipper's own `/api/clipper/me` totals. The public stats/
+  leaderboard also stopped excluding paused/disqualified clips from the
+  lifetime figure -- those views genuinely happened too. A clipper whose
+  every clip has since been deleted no longer vanishes from the leaderboard
+  entirely (JOIN -> LEFT JOIN). New `RETIRED_VIEWS_EXPR` family of shared
+  SQL fragments in `src/db.js`. 7 new tests (`retired-view-history.test.mjs`),
+  verified red against pre-change code.
 - **Views/video-count formatting fixed everywhere.** `toLocaleString('en-IN')`
   groups digits Indian-style (10,08,268) — correct for ₹ amounts, wrong for
   plain counts, which should read 1,008,268. Fixed the shared `num()` in
