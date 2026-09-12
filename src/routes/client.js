@@ -3,6 +3,7 @@ import { createSessionCookie, requireClient, verifyPassword, clearCookieHeader }
 import { getClipperByUsername, normalizeUsername, campaignSpend, publicCampaign } from '../db.js';
 import { clipState, clipStateMessage } from '../clipstate.js';
 import { platformLabel, campaignPlatforms } from '../platforms.js';
+import { campaignFinancials } from '../finance.js';
 
 // Read-only brand/client portal.
 //
@@ -23,6 +24,50 @@ async function grantedCampaignIds(db, clientId) {
     'SELECT campaign_id FROM client_campaigns WHERE client_id = ?'
   ).bind(clientId).all();
   return new Set((results || []).map(r => r.campaign_id));
+}
+
+/**
+ * What a client is allowed to know about their own money, and nothing more.
+ *
+ * campaignFinancials() (src/finance.js) is the agency's full internal picture
+ * -- it also carries the 20% management fee broken out on its own, the
+ * clipper-payout wallet split, view_margin, etc. None of that crosses this
+ * boundary; a client only ever sees ONE combined number for what they've
+ * sent (fee included, same total recordClientPayment expects back from
+ * them) and ONE for what they still owe for work already delivered.
+ *
+ * `paid`/`due`/`refund_due` come straight from campaignFinancials so this can
+ * never silently disagree with the agency's own Finance tab -- one
+ * definition of the campaign's money position, read by two different
+ * audiences. `payments_made`/`last_paid_at` are the one thing
+ * campaignFinancials doesn't already compute (it only needs sums, not a
+ * count or a date), so they're a small dedicated query here instead of
+ * reconstructing individual payment amounts from ledger_entries -- each
+ * client payment is split into TWO linked rows (clipper share + fee) with no
+ * shared id between them, so an amount read off either row alone would
+ * understate what was actually sent. Count and most-recent-date don't have
+ * that problem: every real payment writes exactly one 'client_payment' row.
+ */
+async function clientBilling(db, campaignId) {
+  const fin = await campaignFinancials(db, campaignId);
+  if (!fin || fin.is_internal) return null;
+
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS n, MAX(occurred_at) AS last_paid_at
+       FROM ledger_entries
+      WHERE campaign_id = ? AND category = 'client_payment' AND status = 'active'`
+  ).bind(campaignId).first();
+
+  return {
+    paid: fin.client_paid,
+    due: fin.shortfall,
+    // Only meaningful (and only ever shown) when positive -- most campaigns
+    // never have one, and a client seeing "Refund due: ₹0" forever would
+    // read as a standing promise rather than the rare event it is.
+    refund_due: fin.refund_due,
+    payments_made: row?.n || 0,
+    last_paid_at: row?.last_paid_at || null
+  };
 }
 
 export async function handleClient(request, env, url) {
@@ -214,6 +259,7 @@ export async function handleClient(request, env, url) {
         budget: pub.budget, spent: pub.spent, remaining: pub.remaining,
         created_at: pub.created_at, blueprint: pub.blueprint
       },
+      billing: await clientBilling(env.DB, campaign.id),
       by_platform: Object.values(clips.reduce((acc, c) => {
         if (!acc[c.platform]) acc[c.platform] = { platform: c.platform, label: c.platform_label, clips: 0, views: 0 };
         acc[c.platform].clips++;
