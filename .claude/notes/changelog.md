@@ -5,19 +5,20 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-12
-- **Client dashboard gets a Billing panel.** A client's own campaign page now
-  shows Paid So Far, Payment Due, Payments Made and (only when nonzero)
-  Refund Due, plus a "last payment received" date. Reuses
-  `campaignFinancials()` (finance.js, already the admin Finance tab's source
-  of truth) for `paid`/`due`/`refund_due` so the two can never disagree; a
-  new `clientBilling()` in `src/routes/client.js` is the one place deciding
-  what subset is client-safe. Never exposes the 20% management fee as its
-  own line, wallet names, or anything clipper-level -- "Paid" is the full
-  fee-inclusive amount the client actually sent (reconstructing this from
-  the ledger directly would have understated it, since a payment splits into
-  two linked rows internally); "Due" is delivered-work-not-yet-covered, the
-  same fee-inclusive total `recordClientPayment` expects back. An internal
-  (non-billed) campaign shows no billing box. 6 new tests
+- **Client dashboard gets a Billing panel** -- two figures, by request, kept
+  deliberately simple: **Paid So Far** (the full fee-inclusive amount the
+  client has actually sent -- reconstructing this straight off the
+  `client_payment` ledger category alone would understate it, since one real
+  payment splits into two linked rows internally with no shared id) and
+  **Left To Pay** (`campaign.budget - paid`, floored at 0 -- a plain
+  literal figure, not the accrual-based "what's owed for delivered work"
+  `campaignFinancials` also computes for the admin's own collections view).
+  `paid` reuses `campaignFinancials()` (finance.js, already the admin
+  Finance tab's source of truth) so it can never disagree with the agency's
+  own numbers; new `clientBilling()` in `src/routes/client.js` is the one
+  place deciding what's client-safe -- never the 20% management fee as its
+  own line, never a wallet name, never anything clipper-level. An internal
+  (non-billed) campaign shows no billing box. 7 tests
   (`client-billing.test.mjs`), verified red against pre-change code.
 - **"Total Views Generated" now genuinely never goes down** (migration 041,
   `retired_view_history`). Reported directly: disconnecting one of Rexon's

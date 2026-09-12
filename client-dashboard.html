@@ -176,11 +176,8 @@
         <h2 class="panel-title">Billing</h2>
         <div class="stats">
           <div class="stat"><div class="stat-val g">${money(d.billing.paid)}</div><div class="stat-lbl">Paid So Far</div></div>
-          <div class="stat"><div class="stat-val${d.billing.due>0?' warn':' g'}">${money(d.billing.due)}</div><div class="stat-lbl">Payment Due</div></div>
-          ${d.billing.refund_due>0?`<div class="stat"><div class="stat-val g">${money(d.billing.refund_due)}</div><div class="stat-lbl">Refund Due</div></div>`:''}
-          <div class="stat"><div class="stat-val">${num(d.billing.payments_made)}</div><div class="stat-lbl">Payments Made</div></div>
+          <div class="stat"><div class="stat-val">${money(d.billing.left)}</div><div class="stat-lbl">Left To Pay</div></div>
         </div>
-        <p class="note">${d.billing.last_paid_at?`Last payment received ${when(d.billing.last_paid_at)}.`:'No payment received yet.'}${d.billing.due>0?' The amount due covers work clippers have already delivered.':''}</p>
       </div>`:''}
 
       <div class="panel">

@@ -29,44 +29,28 @@ async function grantedCampaignIds(db, clientId) {
 /**
  * What a client is allowed to know about their own money, and nothing more.
  *
- * campaignFinancials() (src/finance.js) is the agency's full internal picture
- * -- it also carries the 20% management fee broken out on its own, the
- * clipper-payout wallet split, view_margin, etc. None of that crosses this
- * boundary; a client only ever sees ONE combined number for what they've
- * sent (fee included, same total recordClientPayment expects back from
- * them) and ONE for what they still owe for work already delivered.
+ * Deliberately simple, by request: two figures only.
+ *   paid  the full amount the client has actually sent (fee included, same
+ *         total recordClientPayment expects back from them) -- fin.client_paid
+ *         from campaignFinancials (src/finance.js), so this can never
+ *         silently disagree with the agency's own Finance tab.
+ *   left  campaign.budget - paid, floored at 0. A plain, literal "what's
+ *         left of the number you committed to", not the accrual-based
+ *         "what's owed for work already delivered" campaignFinancials also
+ *         has (fin.shortfall) -- that one is for the admin's own collections
+ *         view, not this.
  *
- * `paid`/`due`/`refund_due` come straight from campaignFinancials so this can
- * never silently disagree with the agency's own Finance tab -- one
- * definition of the campaign's money position, read by two different
- * audiences. `payments_made`/`last_paid_at` are the one thing
- * campaignFinancials doesn't already compute (it only needs sums, not a
- * count or a date), so they're a small dedicated query here instead of
- * reconstructing individual payment amounts from ledger_entries -- each
- * client payment is split into TWO linked rows (clipper share + fee) with no
- * shared id between them, so an amount read off either row alone would
- * understate what was actually sent. Count and most-recent-date don't have
- * that problem: every real payment writes exactly one 'client_payment' row.
+ * Never exposes the 20% management fee as its own line, wallet names, or
+ * anything clipper-level -- campaignFinancials carries all of that, this
+ * function is the one place deciding what subset crosses the boundary.
  */
 async function clientBilling(db, campaignId) {
   const fin = await campaignFinancials(db, campaignId);
   if (!fin || fin.is_internal) return null;
 
-  const row = await db.prepare(
-    `SELECT COUNT(*) AS n, MAX(occurred_at) AS last_paid_at
-       FROM ledger_entries
-      WHERE campaign_id = ? AND category = 'client_payment' AND status = 'active'`
-  ).bind(campaignId).first();
-
   return {
     paid: fin.client_paid,
-    due: fin.shortfall,
-    // Only meaningful (and only ever shown) when positive -- most campaigns
-    // never have one, and a client seeing "Refund due: ₹0" forever would
-    // read as a standing promise rather than the rare event it is.
-    refund_due: fin.refund_due,
-    payments_made: row?.n || 0,
-    last_paid_at: row?.last_paid_at || null
+    left: Math.max(0, fin.budget - fin.client_paid)
   };
 }
 
