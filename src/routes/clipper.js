@@ -10,6 +10,11 @@ import {
   normaliseDiscordUsername, validateDiscordUsername
 } from '../db.js';
 import { clipState, clipStateMessage, TRACKING_WINDOW_MS } from '../clipstate.js';
+// MEDIA_NOT_FOUND is the one sync_error that can genuinely stop being true
+// (a post made private then public again, a momentary platform glitch) --
+// see the resurrection branch below. PRE_CONVERSION_MEDIA never changes (an
+// account's conversion date is fixed history), so it gets no such path.
+const RESURRECTABLE_SYNC_ERROR = 'MEDIA_NOT_FOUND';
 import { explainEarning, explainEarningText } from '../earning-math.js';
 import { getAdapter, campaignPlatforms, configuredPlatforms, platformLabel, PLATFORMS } from '../platforms.js';
 import {
@@ -681,10 +686,52 @@ export async function handleClipper(request, env, url) {
     }
 
     const dup = await env.DB.prepare(
-      'SELECT id, clipper_id FROM submissions WHERE platform = ? AND ig_media_id = ?'
+      'SELECT id, clipper_id, campaign_id, status, sync_error FROM submissions WHERE platform = ? AND ig_media_id = ?'
     ).bind(platform, media.external_id).first();
     if (dup) {
-      return err(dup.clipper_id === clipperId ? 'You have already submitted this video' : 'This video has already been submitted', 409);
+      // Self-service resurrection: a clip ClipGrow marked "removed" because
+      // the platform returned MEDIA_NOT_FOUND (post made private, briefly
+      // unpublished, or a momentary platform glitch) can look permanently
+      // dead when it never actually was. Rather than the clipper having to
+      // message an admin to "please check this again," they can just paste
+      // the exact same link -- findByUrl above already proved Instagram can
+      // find it right now, on THIS account, so there is nothing left to
+      // verify. Scoped tight on purpose: same clipper (never lets someone
+      // claim another clipper's clip), same campaign it was already on, and
+      // status still 'active' (an admin's Mark Invalid is a different,
+      // deliberate call that this must never undo -- see invalidateSubmissionRow
+      // in admin.js, which is the only other writer of a submission's status
+      // besides this file).
+      const canResurrect = dup.clipper_id === clipperId && dup.campaign_id === campaign_id
+        && dup.status === 'active' && dup.sync_error === RESURRECTABLE_SYNC_ERROR;
+      if (!canResurrect) {
+        return err(dup.clipper_id === clipperId ? 'You have already submitted this video' : 'This video has already been submitted', 409);
+      }
+
+      const thumbSource = media.thumbnail_url || null;
+      const thumbKey = await captureThumbnail(env, media.external_id, thumbSource);
+      await env.DB.prepare(
+        `UPDATE submissions SET account_id = ?, sync_error = NULL, sync_error_acknowledged_as = NULL,
+           thumbnail_key = COALESCE(?, thumbnail_key), thumbnail_url = COALESCE(?, thumbnail_url)
+         WHERE id = ? AND clipper_id = ? AND status = 'active' AND locked_at IS NULL`
+      ).bind(account.id, thumbKey, thumbSource, dup.id, clipperId).run();
+
+      let liveViews = 0, liveEarning = 0;
+      try {
+        await syncAccountClips(env.DB, env, account,
+          [{ id: dup.id, ig_media_id: media.external_id, last_ok_sync_at: null }],
+          { skipCooldown: true });
+        await reallocateCampaign(env.DB, campaign_id);
+        const fresh = await env.DB.prepare('SELECT views, earning FROM submissions WHERE id = ?').bind(dup.id).first();
+        if (fresh) { liveViews = fresh.views; liveEarning = fresh.earning; }
+      } catch { /* falls back to whatever it already had -- next sync fills it in */ }
+
+      return json({
+        ok: true,
+        message: `This clip is back — resuming tracking (${liveViews.toLocaleString('en-IN')} views so far)`,
+        views: liveViews,
+        earning: liveEarning
+      });
     }
 
     // Best-effort preview capture; a missing image never blocks submission.

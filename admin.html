@@ -228,7 +228,6 @@
 
     <div id="hero-views"></div>
     <div class="stats" id="overview"></div>
-    <div id="health"></div>
 
     <div class="tabs">
       <button class="tab on" data-v="campaigns" onclick="showView('campaigns',this)">Campaigns</button>
@@ -602,6 +601,7 @@
 
     <!-- SYNC HEALTH -->
     <div class="view" id="v-synchealth">
+      <div id="health"></div>
       <div class="panel">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
           <h2 class="panel-title" style="margin:0">Instagram connections</h2>
@@ -804,7 +804,9 @@
     const NUM_FIELDS=['cpm','budget','min_views','max_payout'];
 
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
-    const num=n=>Number(n||0).toLocaleString('en-IN');
+    // Plain counts (views, videos, clippers, calls) get standard 3-digit
+    // grouping, not the ₹-style lakh/crore grouping 'en-IN' gives money().
+    const num=n=>Number(n||0).toLocaleString('en-US');
     const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
 
@@ -1554,8 +1556,13 @@
       const wa=waNumber(a.contact_number);
       const msg=`Hi ${a.clipper}, your ${platName(a.platform)} connection on ClipGrow needs reconnecting (${why}). Please open your ClipGrow dashboard and reconnect it -- nothing is lost, it picks up right where it left off.`;
       const discordMsg=msg.replace(/'/g,"\\'");
+      // How many of the clipper's clips this same broken connection is
+      // holding up -- one fact, not a second "N video(s) not syncing" line
+      // repeating it below. Only meaningful for a reconnect, not an import
+      // failure (an import issue doesn't stop existing clips from syncing).
+      const affected=(!importIssue&&a.clip_count>0)?` — affecting ${num(a.clip_count)} video${a.clip_count===1?'':'s'}`:'';
       return `<div class="trouble"><span class="badge ${platBadge(a.platform)}">${platName(a.platform)}</span>
-        <strong>${acctLink(a.platform,a.username,handle)}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}</div>
+        <strong>${acctLink(a.platform,a.username,handle)}</strong> <span class="muted">(${esc(a.clipper)})</span> — ${esc(why)}${affected}</div>
         <div class="muted" style="font-size:.72rem;margin:.1rem 0 .55rem 1.5rem">${esc(fix)}
           ${wa?`· <a href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener" style="color:var(--neon)">Message via WhatsApp</a>`
               :'· no WhatsApp number on file'}

@@ -115,7 +115,7 @@ export function clipStateMessage(state, s) {
         ? 'Closed: this clip did not reach the campaign minimum in time, so it was settled at zero.'
         : 'Paid and closed. Views after the lock date do not change the amount.';
     case 'removed':
-      return `This post is no longer on ${site}, so its views cannot be checked. ${staleNote}`;
+      return `This post is no longer on ${site}, so its views cannot be checked. ${staleNote} If this is a mistake, paste this same link again above to resume tracking.`;
     case 'no_insights':
       // No staleNote here on purpose -- appending "views last updated X days
       // ago" to a clip that can never update would read as if it is broken

@@ -227,17 +227,21 @@
 </footer>
 
 <script>
-  function fmt(n) { return Number(n).toLocaleString('en-IN'); }
+  function fmt(n) { return Number(n).toLocaleString('en-US'); }
   function rs(n) { return '₹' + Number(n).toLocaleString('en-IN'); }
 
+  // Views are a plain count, not currency -- group every 3 digits
+  // (1,007,352), not the Indian lakh/crore style (10,07,352) that
+  // 'en-IN' gives ₹ amounts.
   function animCount(el, target, prefix = '') {
     const current = parseInt(el.textContent.replace(/[^0-9]/g, '')) || 0;
     if (current === target) return;
+    const locale = prefix === '₹' ? 'en-IN' : 'en-US';
     const start = current, dur = 1000, startTime = performance.now();
     function step(now) {
       const p = Math.min((now - startTime) / dur, 1);
       const ease = 1 - Math.pow(1 - p, 3);
-      el.textContent = prefix + Math.round(start + (target - start) * ease).toLocaleString('en-IN');
+      el.textContent = prefix + Math.round(start + (target - start) * ease).toLocaleString(locale);
       if (p < 1) requestAnimationFrame(step);
     }
     requestAnimationFrame(step);

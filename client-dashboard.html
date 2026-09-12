@@ -78,7 +78,9 @@
 
 <script>
   const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
-  const num=n=>Number(n||0).toLocaleString('en-IN');
+  // Plain counts (views, videos, etc.) get standard 3-digit grouping, not
+  // the ₹-style lakh/crore grouping 'en-IN' gives money().
+  const num=n=>Number(n||0).toLocaleString('en-US');
   const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const when=ts=>ts?new Date(Number(ts)).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
 

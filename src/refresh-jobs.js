@@ -24,7 +24,7 @@ import { withAccount, markAccount } from './earnings.js';
 import { makeCallCounter, getBudget, CLIP_COOLDOWN_MS } from './rate-budget.js';
 import { VIEW_BATCH_SIZE } from './youtube.js';
 import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, pruneOldEvents } from './refresh-events.js';
-import { TRACKING_WINDOW_MS } from './clipstate.js';
+import { TRACKING_WINDOW_MS, TERMINAL_SYNC_ERRORS } from './clipstate.js';
 import { logAction } from './audit.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
@@ -109,10 +109,22 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
   // clip's view count is final, so there's nothing left to spend Instagram's
   // 200-calls/hour budget checking. Excluded here, at the source, rather than
   // filtered out after fetching -- it never even enters the queue.
+  //
+  // Same logic for a TERMINAL_SYNC_ERRORS clip (MEDIA_NOT_FOUND,
+  // PRE_CONVERSION_MEDIA): the platform has already given a permanent answer
+  // that another call can never change, so re-fetching it every cron pass was
+  // pure waste -- confirmed in production as clips retried for weeks straight
+  // with the same result. clipState() already reads these as a settled,
+  // explained fact ('removed' / 'no_insights'), not an open problem; this is
+  // that same fact applied to what gets queued, not just what gets displayed.
+  // A clipper CAN undo this for 'removed' specifically, by pasting the same
+  // link again (src/routes/clipper.js) -- that path clears sync_error itself,
+  // so this clip becomes due again the moment that happens.
   const { results } = await db.prepare(
     `SELECT id, ig_media_id, last_ok_sync_at FROM submissions
      WHERE account_id = ? AND status = 'active' AND locked_at IS NULL AND eligible != 0
        AND created_at > ?
+       AND (sync_error IS NULL OR sync_error NOT IN (${TERMINAL_SYNC_ERRORS.map(c => `'${c}'`).join(', ')}))
      ORDER BY id`
   ).bind(account.account_id, Date.now() - TRACKING_WINDOW_MS).all();
 

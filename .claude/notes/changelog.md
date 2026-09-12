@@ -4,6 +4,43 @@ High-level, dated. For exact detail read the actual commit
 (`git show <hash>`) rather than trusting this summary as complete — this
 exists to answer "have we already done X" quickly, not to replace git log.
 
+## 2026-09-12
+- **Views/video-count formatting fixed everywhere.** `toLocaleString('en-IN')`
+  groups digits Indian-style (10,08,268) — correct for ₹ amounts, wrong for
+  plain counts, which should read 1,008,268. Fixed the shared `num()` in
+  admin.html, dashboard.html, client-dashboard.html, and tracker.html's view
+  counters; `money()` (₹) is untouched and correctly stays `en-IN`.
+- **Stopped wastefully re-syncing dead clips, forever.** Confirmed in
+  production: 21 clips carrying `MEDIA_NOT_FOUND` (post genuinely gone) were
+  being re-fetched on every single cron pass with no possible different
+  outcome — `buildAccountItems` had no exclusion for a permanent
+  `TERMINAL_SYNC_ERRORS` result, only for the 7-day tracking window. Now
+  excluded at the query itself, same list clipstate.js already uses to badge
+  these as a settled fact ('removed' / 'no_insights') rather than an open
+  problem.
+- **Self-service resurrection for a false-positive "removed" clip.** A
+  platform 404 isn't always really gone (temporarily private, a momentary
+  glitch) — pasting the exact same link back into the existing "paste a link"
+  box now clears `MEDIA_NOT_FOUND` and resumes tracking on the SAME
+  submission row (no earnings history lost, no duplicate row), instead of the
+  flat "already submitted" 409. Scoped tight: same clipper, same campaign,
+  status still `active` — an admin's Mark Invalid can never be undone this
+  way, and it's `MEDIA_NOT_FOUND` only (`PRE_CONVERSION_MEDIA` is genuinely
+  permanent, resubmitting can't change an account's conversion date).
+- **Diagnosed, not what it looked like: the Overview "Needs attention" panel
+  the founder was staring at (an account's "connection expired" plus a
+  separate "16 video(s) not syncing" line) turned out to be zero deleted
+  videos** — verified against production data before writing any code: every
+  affected clip was `TOKEN_EXPIRED`/`PERMISSION_MISSING` on an account already
+  named as needing reconnection, i.e. the exact same fact restated per-clip.
+  Fixed the actual redundancy: an already-listed needs_reauth account's clips
+  no longer also appear in the separate stuck/transient lists or the bare
+  fallback count — the account's own line now carries its affected-clip count
+  directly ("connection expired — affecting 16 videos").
+- **"Needs attention" moved onto the Sync Health tab**, out of permanent
+  view on every tab, alongside the tools (Renew tokens, Flag invalid) that
+  actually act on what it reports.
+
 ## 2026-09-10
 - **Instagram tokens now auto-renew — no more reconnect waves.** IG long-lived
   tokens last 60 days but can be extended another 60 while still valid

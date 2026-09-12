@@ -87,9 +87,10 @@ function makeDb({ job, submissions = [], accounts = [], igCalls = [] } = {}) {
 
   function all(sql, a) {
     if (/SELECT id, ig_media_id, last_ok_sync_at FROM submissions/.test(sql)) {
+      const TERMINAL = ['MEDIA_NOT_FOUND', 'PRE_CONVERSION_MEDIA'];
       return { results: state.submissions.filter(s =>
         s.account_id === a[0] && s.status === 'active' && s.locked_at == null && s.eligible !== 0
-        && s.created_at > a[1]) };
+        && s.created_at > a[1] && !TERMINAL.includes(s.sync_error)) };
     }
     if (/SELECT ig_media_id FROM submissions WHERE platform/.test(sql)) {
       return { results: state.submissions.filter(s => s.account_id === a[1]).map(s => ({ ig_media_id: s.ig_media_id })) };

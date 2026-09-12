@@ -214,6 +214,13 @@ export async function handleAdmin(request, env, url) {
              -- clipstate.js already gives both their own explained, final state
              -- ('removed' / 'no_insights') on the clipper's own dashboard.
              AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             -- Same account-level exclusion as stuckAccounts below: a
+             -- needs_reauth account already names itself, with its own
+             -- clip_count, in problem_accounts. Without this, the bare
+             -- fallback count here ("N video(s) ... investigate") restated
+             -- the exact same clips as a second, unnamed problem the moment
+             -- stuckAccounts excluded them and dropped to zero rows.
+             AND account_id NOT IN (SELECT id FROM social_accounts WHERE status = 'needs_reauth')
              AND ${NOT_ACKNOWLEDGED_SQL}) AS submissions_stuck`
     ).bind(Date.now() - ACTIVE_WINDOW_MS, Date.now() - STUCK_AFTER_MS).first();
 
@@ -227,7 +234,16 @@ export async function handleAdmin(request, env, url) {
     // an account elsewhere never made it stop showing up here).
     const { results: problemCandidates } = await env.DB.prepare(
       `SELECT a.id, a.platform, a.username, a.status, a.last_error_code, a.last_error_at, a.error_acknowledged_at,
-              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number, cl.discord_username
+              COALESCE(cl.display_name, cl.username) AS clipper, cl.contact_number, cl.discord_username,
+              -- Folded in here so a needs_reauth account reads as ONE problem
+              -- with its blast radius attached, not one line for the account
+              -- plus a second, separate "N video(s) not syncing" line below
+              -- restating the exact same cause (every clip on a broken
+              -- connection fails the same way, so counting them twice said
+              -- nothing new). See the exclusion in stuckAccounts/
+              -- transientErrors below, which this replaces for these accounts.
+              (SELECT COUNT(*) FROM submissions s2
+                WHERE s2.account_id = a.id AND s2.status = 'active' AND s2.locked_at IS NULL) AS clip_count
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
        WHERE a.status = 'needs_reauth'
           OR (a.status = 'connected' AND a.last_error_code LIKE 'IMPORT!_%' ESCAPE '!')
@@ -252,6 +268,11 @@ export async function handleAdmin(request, env, url) {
              -- clipstate.js already gives both their own explained, final state
              -- ('removed' / 'no_insights') on the clipper's own dashboard.
              AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             -- An account already listed above as needing reconnection
+             -- accounts for every one of its own clips failing -- same cause,
+             -- already named with its own clip_count. Counting them again
+             -- here read as a second, unrelated problem.
+             AND COALESCE(a.status, '') != 'needs_reauth'
              AND ${NOT_ACKNOWLEDGED_SQL}
        GROUP BY s.account_id
        ORDER BY clips DESC`
@@ -273,6 +294,7 @@ export async function handleAdmin(request, env, url) {
        WHERE s.sync_error IS NOT NULL AND s.status = 'active' AND s.locked_at IS NULL
          AND COALESCE(s.last_ok_sync_at, s.created_at) >= ?
              AND sync_error NOT IN (${TERMINAL_SYNC_ERRORS_SQL})
+             AND COALESCE(a.status, '') != 'needs_reauth'
              AND ${NOT_ACKNOWLEDGED_SQL}
        GROUP BY s.account_id
        ORDER BY clips DESC`
