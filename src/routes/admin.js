@@ -3,7 +3,7 @@ import { createSessionCookie, requireAdmin, hashPassword, clearCookieHeader } fr
 import {
   now, publicClipper, publicAccount, publicCampaign, pickBlueprint,
   campaignSpend, campaignWithSpend, clipperFinancials, allClipperFinancials, EMPTY_FINANCIALS, getCampaignById, normalizeUsername, defaultDisplayName, slugify,
-  disconnectSocialAccount, SPEND_EXPR, RETIRED_VIEWS_EXPR, totalOutstanding, accountIssues,
+  disconnectSocialAccount, SPEND_EXPR, RETIRED_VIEWS_EXPR, totalOutstanding, accountIssues, MISMATCH_CONDITION,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
   normaliseDiscordUsername, validateDiscordUsername,
@@ -472,7 +472,7 @@ export async function handleAdmin(request, env, url) {
                    JOIN participation_accounts pa ON pa.account_id = a.id
                    JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
                    WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
-                     AND COALESCE(tr.identifier, tr.ig_username) != a.username
+                     AND ${MISMATCH_CONDITION}
                    LIMIT 1) AS mismatch_approved_as
          FROM social_accounts a`).all(),
       env.DB.prepare(
@@ -629,7 +629,7 @@ export async function handleAdmin(request, env, url) {
             JOIN participation_accounts pa ON pa.account_id = a.id
             JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
             WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
-              AND COALESCE(tr.identifier, tr.ig_username) != a.username
+              AND ${MISMATCH_CONDITION}
             LIMIT 1) AS mismatch_approved_as,
          -- Which campaign this account is actually plugged into right now, so
          -- the admin doesn't have to cross-reference the Campaigns section
@@ -1533,7 +1533,7 @@ export async function handleAdmin(request, env, url) {
             JOIN participation_accounts pa ON pa.account_id = a.id
             JOIN participations p ON p.id = pa.participation_id AND p.campaign_id = tr.campaign_id
             WHERE tr.clipper_id = a.clipper_id AND tr.platform = a.platform AND tr.status = 'confirmed'
-              AND COALESCE(tr.identifier, tr.ig_username) != a.username
+              AND ${MISMATCH_CONDITION}
             LIMIT 1) AS mismatch_approved_as
        FROM social_accounts a JOIN clippers cl ON cl.id = a.clipper_id
        WHERE cl.status != 'deleted' ${includeRemoved ? '' : "AND a.status != 'revoked'"}

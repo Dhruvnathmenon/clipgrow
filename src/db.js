@@ -365,6 +365,36 @@ export function findAccountClash(db, externalId, platform, campaignId) {
 }
 
 /**
+ * SQL fragment: true when the approved identifier (tester_requests, alias
+ * `tr`) and the actually-connected account (social_accounts, alias `a`)
+ * name genuinely different accounts.
+ *
+ * Instagram/YouTube handles are case-insensitive on the platform itself --
+ * "TracksYouMissed" (typed into the request form) and "tracksyoumissed"
+ * (whatever case the platform's own OAuth response happened to return) are
+ * the SAME account. Comparing them with a raw `!=` flagged that as a
+ * mismatch every time the two happened to differ only in case -- by far the
+ * most common false positive on the roster's "⚠ mismatch" badge, and pure
+ * noise: nothing was actually wrong. LOWER() fixes that; TRIM() and
+ * stripping a stray '@' absorb the rest of the harmless surface (a pasted
+ * "@handle", trailing whitespace) the same way, without weakening the
+ * check for an account that is genuinely different.
+ *
+ * Deliberately NOT typo-tolerant beyond that (no fuzzy/edit-distance
+ * matching) -- this flag exists to catch a clipper posting from an
+ * unvetted account, and a near-miss handle ("rajeksofficial" vs
+ * "rajeksoffical") is exactly the shape a real swap would take, not
+ * something safe to wave through automatically.
+ *
+ * Used identically at all three call sites that compute
+ * mismatch_approved_as (GET /api/admin/clippers, the clipper detail panel,
+ * GET /api/admin/accounts) so they can't drift apart again -- see
+ * accountIssues() below for why that mattered before.
+ */
+export const MISMATCH_CONDITION =
+  `LOWER(TRIM(REPLACE(COALESCE(tr.identifier, tr.ig_username), '@', ''))) != LOWER(TRIM(REPLACE(a.username, '@', '')))`;
+
+/**
  * Whether a connected account has a real OPEN problem right now, given raw
  * status/error/mismatch fields plus the two acknowledgment columns
  * (migration 023 -- see that migration's own header for why these are
@@ -380,8 +410,8 @@ export function findAccountClash(db, externalId, platform, campaignId) {
  *
  * `a` needs: username, status, last_error_code, last_error_at,
  * mismatch_approved_as (the tester_requests-derived identifier, computed by
- * the caller's own SQL -- it needs a JOIN this function doesn't have),
- * mismatch_acknowledged_as, error_acknowledged_at.
+ * the caller's own SQL using MISMATCH_CONDITION above -- it needs a JOIN
+ * this function doesn't have), mismatch_acknowledged_as, error_acknowledged_at.
  */
 export function accountIssues(a) {
   const mismatchOpen = !!a.mismatch_approved_as && a.username !== a.mismatch_acknowledged_as;

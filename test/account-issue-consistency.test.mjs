@@ -81,6 +81,35 @@ test('a genuinely new mismatch re-flags in both places even after an old one was
   assert.equal(buckets.issues.length, 1);
 });
 
+test('a case-only difference is not flagged -- "TracksYouMissed" and "tracksyoumissed" are the same account', async () => {
+  const env = seedEnv();
+  await env.DB.prepare("UPDATE social_accounts SET username = 'ApprovedAccount' WHERE id = 1").run();
+
+  const roster = await adminRequest(env, '/api/admin/clippers').then(r => r.json());
+  assert.equal(roster.clippers[0].accounts_mismatched, 0, 'a case difference alone is not a real mismatch');
+
+  const buckets = await adminRequest(env, '/api/admin/accounts').then(r => r.json());
+  assert.equal(buckets.issues.length, 0);
+});
+
+test('a stray "@" or surrounding whitespace on either side is not flagged', async () => {
+  const env = seedEnv();
+  await env.DB.prepare("UPDATE social_accounts SET username = 'approvedaccount' WHERE id = 1").run();
+  await env.DB.prepare("UPDATE tester_requests SET identifier = '@approvedaccount ', ig_username = '@approvedaccount ' WHERE id = 1").run();
+
+  const roster = await adminRequest(env, '/api/admin/clippers').then(r => r.json());
+  assert.equal(roster.clippers[0].accounts_mismatched, 0);
+});
+
+test('a genuinely different handle is still flagged even with mixed case on both sides', async () => {
+  const env = seedEnv();
+  await env.DB.prepare("UPDATE social_accounts SET username = 'WrongAccount' WHERE id = 1").run();
+  await env.DB.prepare("UPDATE tester_requests SET identifier = 'ApprovedAccount', ig_username = 'ApprovedAccount' WHERE id = 1").run();
+
+  const roster = await adminRequest(env, '/api/admin/clippers').then(r => r.json());
+  assert.equal(roster.clippers[0].accounts_mismatched, 1, 'a real mismatch must still be caught, case aside');
+});
+
 test('a revoked (removed) account is never counted as an open issue', async () => {
   const env = seedEnv();
   await env.DB.prepare("UPDATE social_accounts SET status = 'revoked', username = 'approvedaccount' WHERE id = 1").run();
