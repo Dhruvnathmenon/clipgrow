@@ -298,8 +298,20 @@
     .rank-cell.medal { font-size:1.15rem; }
     #pf-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
     #pf-back.open { display:flex; }
-    .pf { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:430px; box-shadow:0 20px 60px rgba(0,0,0,.7); overflow:hidden; }
-    .pf-inner { padding:1.5rem; }
+    /* .pf had no height cap, so a modal taller than the screen (this one, on
+       a phone, especially once the keyboard eats half the viewport) just got
+       clipped by overflow:hidden with no way to scroll to the rest of the
+       form or reach Save/Confirm in .pf-foot below it -- the exact "can't
+       scroll, can't confirm" report. Capping .pf's height to the viewport and
+       making only .pf-inner scroll internally fixes that while keeping
+       .pf-foot (Cancel/Save) always visible and reachable, never part of the
+       scrolling area. 100dvh (dynamic viewport height, tracks the visible
+       area as a mobile browser's address bar/keyboard show or hide) is
+       declared after the 100vh fallback so unsupported browsers keep the
+       valid vh value instead of the whole rule being dropped. */
+    .pf { background:var(--card); border:1px solid var(--border-s); border-radius:14px; width:100%; max-width:430px; box-shadow:0 20px 60px rgba(0,0,0,.7); overflow:hidden;
+          display:flex; flex-direction:column; max-height:calc(100vh - 2.4rem); max-height:calc(100dvh - 2.4rem); }
+    .pf-inner { padding:1.5rem; overflow-y:auto; -webkit-overflow-scrolling:touch; min-height:0; }
     .pf-head { display:flex; align-items:center; gap:.85rem; }
     .pf-av { width:48px; height:48px; border-radius:12px; background:var(--neon); color:#060E06; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:1.35rem; flex-shrink:0; }
     .pf-name { font-family:'Space Grotesk',sans-serif; font-weight:800; color:var(--white); font-size:1.1rem; }
@@ -551,7 +563,7 @@
           <div class="form-group"><label for="pd-contact">Contact Number</label><input type="tel" id="pd-contact" required placeholder="9876543210" /></div>
           <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" required placeholder="yourname@bank" /></div>
           <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" required placeholder="Exactly as it appears on the account" /></div>
-          <div class="form-group"><label for="pd-legal">Legal Full Name <span class="note" style="display:inline">(optional)</span></label><input type="text" id="pd-legal" placeholder="As it appears on your ID" /></div>
+          <div class="form-group"><label for="pd-legal">Legal Full Name</label><input type="text" id="pd-legal" required placeholder="As it appears on your ID" /></div>
           <div class="form-group"><label for="pd-discord">Discord Username</label><input type="text" id="pd-discord" required placeholder="e.g. yourname" autocapitalize="off" autocorrect="off" />
             <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message doesn't land. Your @username, not your display name — find it under Discord Settings → My Account.</p>
           </div>
@@ -664,6 +676,8 @@
       if(!d.clipper.email) missing.push('email');
       if(!d.clipper.contact_number) missing.push('contact number');
       if(!d.clipper.upi_id) missing.push('UPI ID');
+      if(!d.clipper.upi_account_name) missing.push('name on your UPI account');
+      if(!d.clipper.legal_name) missing.push('legal name');
       if(!d.clipper.discord_username) missing.push('Discord username');
       document.getElementById('details-banner').innerHTML=missing.length?alertBox('warn',
         'Fill in your details',
@@ -1409,14 +1423,14 @@
       const errorEl=document.getElementById('pd-error');
       const btn=document.getElementById('pd-submit');
       errorEl.style.display='none';
-      if(!email||!contactNumber||!upiId||!accountName||!discordUsername){ errorEl.textContent='Fill in email, contact number, UPI ID, the name on the account, and your Discord username.'; errorEl.style.display='block'; return; }
+      if(!email||!contactNumber||!upiId||!accountName||!legalName||!discordUsername){ errorEl.textContent='Fill in every field: email, contact number, UPI ID, the name on the account, your legal full name, and your Discord username.'; errorEl.style.display='block'; return; }
       btn.disabled=true; btn.textContent='Saving…';
       try{
         await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify({email,contactNumber,upiId,accountName,legalName,discordUsername})});
         ME.clipper.email=email; ME.clipper.contact_number=contactNumber;
         ME.clipper.upi_id=upiId; ME.clipper.upi_account_name=accountName;
-        if(legalName) ME.clipper.legal_name=legalName;
-        if(discordUsername) ME.clipper.discord_username=discordUsername;
+        ME.clipper.legal_name=legalName;
+        ME.clipper.discord_username=discordUsername;
         document.getElementById('details-banner').innerHTML='';
         closePayoutModal();
         toast('Details saved');

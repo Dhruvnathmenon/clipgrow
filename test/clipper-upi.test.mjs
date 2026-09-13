@@ -79,7 +79,8 @@ test('normaliseUpiId trims and strips internal whitespace', () => {
 
 const fullProfile = (overrides = {}) => ({
   email: 'ravi@example.com', contactNumber: '9876543210',
-  upiId: '9999999999@upi', accountName: 'Ravi Kumar', discordUsername: 'clipgrow_fan_92', ...overrides
+  upiId: '9999999999@upi', accountName: 'Ravi Kumar', legalName: 'Ravi Kumar Singh',
+  discordUsername: 'clipgrow_fan_92', ...overrides
 });
 
 test('a clipper with no profile details on file sees null fields, not missing ones', async () => {
@@ -118,14 +119,32 @@ test('a clipper can set their own profile in one save', async () => {
   assert.equal(me.clipper.legal_name, 'Ravi Kumar Singh');
 });
 
-test('legal name is optional and omitting it leaves an existing value untouched', async () => {
+// Legal name used to be optional here (an admin still needs to be able to
+// leave it blank on a clipper's behalf, which is why validateEmail/etc. have
+// no equivalent and the admin-side edit endpoint in admin.js is untouched --
+// see clipper-contact-profile.test.mjs). On the clipper's OWN self-service
+// save it's now mandatory: ClipGrow can't reliably pay or verify someone
+// with no legal name on file, same reasoning as Discord below.
+test('legal name is required -- a full save with none at all is rejected', async () => {
+  const env = seedEnv();
+  const res = await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ legalName: '' }) });
+  assert.equal(res.status, 400);
+  const row = await env.DB.prepare('SELECT legal_name FROM clippers WHERE id = 1').first();
+  assert.equal(row.legal_name, null, 'the whole save is rejected -- nothing else silently went through either');
+});
+
+test('legal name must be resent on every save -- it is never silently carried forward from before', async () => {
   const env = seedEnv();
   await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ legalName: 'Ravi Kumar Singh' }) });
-  // Re-save without a legal name (e.g. only fixing a typo'd phone number).
-  await clipperRequest(env, '/api/clipper/me/profile', { method: 'PATCH', body: fullProfile({ contactNumber: '9123456780' }) });
+  // Re-saving without it (e.g. only fixing a typo'd phone number) must fail,
+  // not quietly keep the old legal name.
+  const res = await clipperRequest(env, '/api/clipper/me/profile', {
+    method: 'PATCH', body: fullProfile({ legalName: '', contactNumber: '9123456780' })
+  });
+  assert.equal(res.status, 400);
   const row = await env.DB.prepare('SELECT legal_name, contact_number FROM clippers WHERE id = 1').first();
-  assert.equal(row.legal_name, 'Ravi Kumar Singh', 'not cleared just because this save omitted it');
-  assert.equal(row.contact_number, '9123456780');
+  assert.equal(row.legal_name, 'Ravi Kumar Singh', 'unchanged -- the rejected save touched nothing');
+  assert.equal(row.contact_number, '9876543210', 'unchanged too -- rejected as one atomic save, not partially applied');
 });
 
 /* ── Discord (migration 035, renamed to a username in 039): a fallback

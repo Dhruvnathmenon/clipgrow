@@ -118,11 +118,11 @@ export async function handleClipper(request, env, url) {
 
   // Self-service contact + payout profile: one consolidated save covering
   // everything the dashboard's "Fill in your details" prompt asks for --
-  // email, contact number and UPI details are all required together here
-  // (that's the whole point of the prompt), legal name is an optional extra
-  // folded into the same save rather than nagged about separately. This
-  // replaces the old UPI-only /api/clipper/me/upi endpoint -- one write
-  // path instead of two doing overlapping things.
+  // email, contact number, UPI details, legal name and Discord username are
+  // all required together here (that's the whole point of the prompt: a
+  // clipper we can't reach or can't pay is a clipper this save exists to
+  // prevent). This replaces the old UPI-only /api/clipper/me/upi endpoint --
+  // one write path instead of two doing overlapping things.
   //
   // Not gated by blockIfReadOnly, same reasoning as the password change
   // right below: a disabled clipper can still be owed money from before
@@ -148,7 +148,13 @@ export async function handleClipper(request, env, url) {
     const name = String(accountName || '').trim();
     if (!name) return err('Enter the name on the UPI account');
     if (name.length > 100) return err('That name is too long');
+    // Mandatory on the clipper's own self-service save, same reasoning as
+    // Discord above: ClipGrow can't reliably pay or verify someone with no
+    // legal name on file. (Still nullable on the admin-side edit endpoint --
+    // an admin filling in a clipper's profile on their behalf may not have
+    // it yet.)
     const legal = String(legalName || '').trim();
+    if (!legal) return err('Enter your legal full name');
     if (legal.length > 100) return err('That name is too long');
     await env.DB.prepare(
       `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_username = ?,
