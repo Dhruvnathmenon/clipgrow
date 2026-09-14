@@ -25,6 +25,7 @@ import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagra
 import { makeCallCounter } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { listErrors, resolveError } from '../error-log.js';
+import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY, moderatorActivity
 } from '../reviews.js';
@@ -2065,6 +2066,29 @@ export async function handleAdmin(request, env, url) {
     const ok = await resolveError(env.DB, params.id, { resolved: resolved !== false });
     if (!ok) return err('Not found, or already in that state', 404);
     return json({ ok: true });
+  }
+
+  // Self-tracked D1 usage against Workers Paid's monthly included
+  // allowance (src/d1-usage.js) -- built after the 2026-09-13 outage
+  // (D1's Free-tier daily quota exhausted with zero warning, commit
+  // 8443202) so an overage risk shows up here well before an unexpected
+  // bill would. Not Cloudflare's own GraphQL Analytics API -- see
+  // d1-usage.js's header for why self-tracking is exact and instant for
+  // exactly this dimension.
+  if (pathname === '/api/admin/platform-usage' && method === 'GET') {
+    return json(await platformUsageSnapshot(env.DB));
+  }
+
+  // The one admin-togglable "pause heavy background work" switch --
+  // gates createRefreshJob's global sweep (both the cron and an admin's
+  // own manual full-refresh trigger), nothing else. Deliberately a
+  // one-click human action, never automatic -- see the plan's own
+  // reasoning for why an auto-pause risks becoming its own outage.
+  if (pathname === '/api/admin/system-pause' && method === 'POST') {
+    const { paused, reason } = await readJson(request);
+    if (typeof paused !== 'boolean') return err('paused must be true or false');
+    await setPaused(env.DB, { paused, staffName: 'Admin', reason: reason || null });
+    return json({ ok: true, pause: await platformUsageSnapshot(env.DB).then(s => s.pause) });
   }
 
   // Diagnostic: shows every Instagram insights metric Meta will answer for one

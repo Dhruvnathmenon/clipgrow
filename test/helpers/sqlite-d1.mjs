@@ -17,7 +17,11 @@ export function makeSqliteD1(seed = {}) {
       bind: (...a) => { args = a.map(norm); return stmt; },
       async all() {
         const rows = db.prepare(sql).all(...args);
-        return { results: rows, meta: {} };
+        // SQLite has no native "rows read" concept -- row count is a
+        // deliberate, documented stand-in for real D1's meta.rows_read, so
+        // test/d1-usage.test.mjs can exercise wrapD1's real accumulation
+        // logic against this fake instead of only against a hand-rolled one.
+        return { results: rows, meta: { rows_read: rows.length } };
       },
       async first() {
         const row = db.prepare(sql).get(...args);
@@ -25,7 +29,8 @@ export function makeSqliteD1(seed = {}) {
       },
       async run() {
         const r = db.prepare(sql).run(...args);
-        return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
+        // Same stand-in as .all() above, mirrored for writes.
+        return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid), rows_read: 0, rows_written: r.changes } };
       },
       // Exposed so batch() can execute without re-binding.
       _exec: () => db.prepare(sql).run(...args)
@@ -49,7 +54,7 @@ export function makeSqliteD1(seed = {}) {
       try {
         const out = stmts.map(s => {
           const r = s._exec();
-          return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
+          return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid), rows_read: 0, rows_written: r.changes } };
         });
         db.exec('COMMIT');
         return out;

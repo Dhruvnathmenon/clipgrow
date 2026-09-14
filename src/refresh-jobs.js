@@ -26,6 +26,7 @@ import { VIEW_BATCH_SIZE } from './youtube.js';
 import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, pruneOldEvents } from './refresh-events.js';
 import { TRACKING_WINDOW_MS, TERMINAL_SYNC_ERRORS } from './clipstate.js';
 import { logAction } from './audit.js';
+import { isPaused } from './d1-usage.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -155,6 +156,17 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
  * race between the check and the insert.
  */
 export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy, respectCooldown = true }) {
+  // Heavy-sync pause (system_pause, src/d1-usage.js) only gates the GLOBAL
+  // sweep -- both the cron's automatic kick-off and an admin's own manual
+  // "full refresh" button, which share this exact call shape (kind:
+  // 'global'). A single clipper's own refresh is not "heavy" in the sense
+  // this switch exists for, so it stays ungated -- pausing is meant to
+  // protect the D1 budget from the largest recurring consumer, not to
+  // block a targeted, human-triggered action on one account.
+  if (kind === 'global' && await isPaused(db)) {
+    return { error: 'Heavy sync is paused. Resume it from the Platform Usage tab to run a refresh.', status: 409 };
+  }
+
   // Opportunistic, same idea as ig_api_calls' own pruning in rate-budget.js
   // -- every refresh kick-off is a fine place to sweep events old enough
   // that nobody is looking at their job's panel any more. Never allowed to

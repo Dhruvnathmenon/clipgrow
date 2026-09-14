@@ -241,6 +241,7 @@
       <button class="tab" data-v="review" onclick="showView('review',this)">Video Review</button>
       <button class="tab" data-v="flagvideo" onclick="showView('flagvideo',this)">Flag Video</button>
       <button class="tab" data-v="synchealth" onclick="showView('synchealth',this)">Sync Health <span class="tab-count" id="sync-count"></span></button>
+      <button class="tab" data-v="platformusage" onclick="showView('platformusage',this)">Platform Usage</button>
       <button class="tab" data-v="errors" onclick="showView('errors',this)">Error Log <span class="tab-count" id="error-count"></span></button>
       <button class="tab" data-v="auditlog" onclick="showView('auditlog',this)" style="margin-left:auto">Audit Log</button>
     </div>
@@ -602,6 +603,7 @@
     <!-- SYNC HEALTH -->
     <div class="view" id="v-synchealth">
       <div id="health"></div>
+      <div id="sync-pause-banner"></div>
       <div class="panel">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
           <h2 class="panel-title" style="margin:0">Instagram connections</h2>
@@ -623,6 +625,26 @@
           are meant to stop updating and are not shown here.
         </p>
         <div id="sync-health-body">Loading…</div>
+      </div>
+    </div>
+
+    <!-- PLATFORM USAGE -->
+    <div class="view" id="v-platformusage">
+      <div class="panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem">
+          <h2 class="panel-title" style="margin:0">D1 usage this month (Workers Paid)</h2>
+          <button class="btn btn-sm" id="pause-toggle-btn" onclick="togglePause()">Loading…</button>
+        </div>
+        <p class="note" style="margin:.5rem 0 1rem">
+          Self-tracked in this Worker as it happens — not Cloudflare's own analytics, which has its
+          own lag and rate limit. Workers Paid bills per row past a monthly allowance rather than
+          hard-failing the way the Free plan did on 2026-09-13 — so the figures below are monthly
+          totals against that allowance. "Today" is shown too, as an early-warning pace signal, not
+          a real Cloudflare cutoff. Pausing only stops the heavy 6-hourly refresh sync — everything
+          else (logins, dashboards, submitting clips, payouts) keeps working.
+        </p>
+        <div id="pause-banner"></div>
+        <div id="platform-usage-body">Loading…</div>
       </div>
     </div>
 
@@ -917,6 +939,7 @@
       if(name==='moderators') loadModerators();
       if(name==='review') loadReviewQueue();
       if(name==='synchealth') loadSyncHealth();
+      if(name==='platformusage') loadPlatformUsage();
       if(name==='errors') loadErrorLog();
       if(name==='auditlog') loadAuditLog();
     };
@@ -2451,6 +2474,12 @@
       nobody:'<span class="badge connected">clears itself — no action</span>'};
     async function loadSyncHealth(){
       const el=document.getElementById('sync-health-body');
+      // Fire-and-forget: an admin checking "why aren't views updating"
+      // should see the paused state right here, not just on the Platform
+      // Usage tab -- but a failure here must never block the main panel.
+      api('/api/admin/platform-usage').then(u=>{
+        document.getElementById('sync-pause-banner').innerHTML=pauseBannerHtml(u.pause,true);
+      }).catch(()=>{});
       try{
         const {groups,total}=await api('/api/admin/sync-health');
         const cnt=document.getElementById('sync-count');
@@ -2485,6 +2514,81 @@
           </div>`).join('');
       }catch(e){ el.innerHTML=`<div class="alert bad">${esc(e.message)}</div>`; }
     }
+    /* ── Platform Usage (src/d1-usage.js) ── */
+    // Severity coloring shared by the monthly gauges (against the real
+    // 70%/90% alert thresholds the backend fires on) and reused, with a
+    // different cutoff, for the daily pace indicator below.
+    function usageColor(pct){ return pct>=0.9?'var(--red)':pct>=0.7?'var(--gold)':'var(--neon)'; }
+
+    let PLATFORM_USAGE_PAUSED=false; // updated on every load, read by togglePause()
+
+    function pauseBannerHtml(pause,forSyncHealth){
+      if(!pause||!pause.paused) return '';
+      const when=pause.paused_at?new Date(pause.paused_at).toLocaleString('en-IN'):'';
+      const reason=pause.reason?` — "${esc(pause.reason)}"`:'';
+      return `<div class="alert warn" style="margin-bottom:1rem">
+        <strong>Heavy sync paused</strong>${forSyncHealth?' — this is why views aren\'t updating right now.':''}
+        Paused by ${esc(pause.paused_by||'an admin')}${when?' on '+when:''}${reason}.
+        ${forSyncHealth?'Resume it from the Platform Usage tab.':''}
+      </div>`;
+    }
+
+    window.togglePause=async function(){
+      const btn=document.getElementById('pause-toggle-btn');
+      const goingToPause=!PLATFORM_USAGE_PAUSED;
+      let reason=null;
+      if(goingToPause) reason=prompt('Optional: why are you pausing heavy sync? (shown in the Audit Log)')||null;
+      btn.disabled=true;
+      try{
+        await api('/api/admin/system-pause',{method:'POST',body:JSON.stringify({paused:goingToPause,reason})});
+        toast(goingToPause?'Heavy sync paused':'Heavy sync resumed');
+        loadPlatformUsage();
+      }catch(e){ toast(e.message,true); }
+      finally{ btn.disabled=false; }
+    };
+
+    async function loadPlatformUsage(){
+      const el=document.getElementById('platform-usage-body');
+      const btn=document.getElementById('pause-toggle-btn');
+      try{
+        const u=await api('/api/admin/platform-usage');
+        PLATFORM_USAGE_PAUSED=!!(u.pause&&u.pause.paused);
+        btn.textContent=PLATFORM_USAGE_PAUSED?'Resume heavy sync':'Pause heavy sync';
+        btn.className='btn btn-sm'+(PLATFORM_USAGE_PAUSED?'':' btn-danger');
+        document.getElementById('pause-banner').innerHTML=pauseBannerHtml(u.pause,false);
+
+        const gauge=(label,used,limit,pct)=>`
+          <div style="margin-bottom:1.1rem">
+            <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.35rem">
+              <strong style="color:var(--white)">${label}</strong>
+              <span class="muted">${num(used)} / ${num(limit)} this month (${(pct*100).toFixed(2)}%)</span>
+            </div>
+            <div class="progress" style="width:100%;height:8px">
+              <div class="progress-fill" style="width:${Math.min(100,pct*100)}%;background:${usageColor(pct)}"></div>
+            </div>
+          </div>`;
+
+        const dailyRow=(label,today,target)=>{
+          const pace=target>0?today/target:0;
+          return `<div style="display:flex;justify-content:space-between;font-size:.8rem;padding:.3rem 0;border-top:1px solid var(--border)">
+            <span class="muted">${label} today</span>
+            <span style="color:${pace>=3?'var(--red)':pace>=1.5?'var(--gold)':'var(--muted-l)'}">${num(today)} <span class="muted">(~${num(Math.round(target))}/day average pace)</span></span>
+          </div>`;
+        };
+
+        el.innerHTML =
+          gauge('Rows read', u.month_to_date.rows_read, u.limits.rowsRead, u.pct_read) +
+          gauge('Rows written', u.month_to_date.rows_written, u.limits.rowsWritten, u.pct_written) +
+          dailyRow('Rows read',u.today.rows_read,u.daily_pace_target.rows_read) +
+          dailyRow('Rows written',u.today.rows_written,u.daily_pace_target.rows_written) +
+          `<h3 style="margin:1.3rem 0 .6rem;font-size:.85rem;color:var(--muted)">Last 30 days</h3>
+           <div class="table-wrap"><table>
+             <thead><tr><th>Day</th><th>Rows read</th><th>Rows written</th></tr></thead>
+             <tbody>${u.history.length?u.history.map(h=>`<tr><td>${esc(h.day)}</td><td>${num(h.rows_read)}</td><td>${num(h.rows_written)}</td></tr>`).join(''):'<tr><td colspan="3" class="empty">No usage recorded yet.</td></tr>'}</tbody>
+           </table></div>`;
+      }catch(e){ el.innerHTML=`<div class="alert bad">${esc(e.message)}</div>`; }
+    }
+
     window.renewIgTokens=async function(btn){
       btn.disabled=true; btn.textContent='Renewing…';
       const out=document.getElementById('ig-renew-result');

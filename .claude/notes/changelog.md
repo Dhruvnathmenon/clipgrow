@@ -4,6 +4,65 @@ High-level, dated. For exact detail read the actual commit
 (`git show <hash>`) rather than trusting this summary as complete — this
 exists to answer "have we already done X" quickly, not to replace git log.
 
+## 2026-09-14
+- **Self-tracked D1 usage tracking + a manual "pause heavy sync" control**
+  (`src/d1-usage.js`, migration 042). Built after realizing the 2026-09-13
+  outage below was never actually documented here despite being fixed, and
+  because the account moved to Workers Paid the same day -- which changes
+  the risk from "hard daily failure" to "unexpected monthly overage
+  billing." Every D1 query result already carries exact
+  `meta.rows_read`/`rows_written` for free, in-process, zero lag -- `wrapD1()`
+  wraps the `DB` binding once at the top of each of `worker.js`'s three
+  entry points (`fetch`/`queue`/`scheduled`) and accumulates it, one flush
+  write per invocation rather than per query. Deliberately self-tracked,
+  not Cloudflare's GraphQL Analytics API -- no new token, no lag, no
+  separate rate limit, for a number that's already sitting in the response
+  object. New admin "Platform Usage" tab shows monthly totals against
+  Workers Paid's included allowance (25B rows read/mo, 50M written/mo) plus
+  a same-day pace figure as an early-warning signal (Paid bills monthly, so
+  there's no real daily wall to turn red at -- the daily figure is framed
+  explicitly as a pacing signal, not a Cloudflare cutoff). Crossing 70%/90%
+  of the monthly allowance logs to the existing Error Log tab (`logError`,
+  zero new UI needed), once per threshold per month.
+  A new one-click admin pause (`system_pause` table) gates ONLY the heavy
+  6-hourly refresh sync (both the cron and an admin's own manual "full
+  refresh" button share `createRefreshJob`'s `kind: 'global'` path, so one
+  check there covers both) -- every clipper/client/admin-facing feature
+  keeps working untouched, and a single clipper's own targeted refresh
+  stays ungated since it isn't "heavy." Deliberately never automatic, per
+  explicit direction: an auto-pause that misfires becomes its own outage.
+  The paused state shows on both the Platform Usage tab (with who paused it,
+  when, and why) and the Sync Health tab (so "why aren't views updating"
+  has an answer right where that question gets asked). 13 new tests
+  (`d1-usage.test.mjs`), verified red against pre-change code -- including
+  a `scheduled()` bug the plan caught before shipping: its early return
+  when a refresh is already in flight would have skipped the usage flush
+  entirely, undercounting a genuinely common path; fixed with `try/finally`
+  around the whole cron body instead of a flush "at the end."
+  Next up (separate, later work, not started here): pulling real CPU-time
+  and Workers-Logs-volume numbers from Cloudflare's own GraphQL Analytics
+  API (self-tracking can only guess at those two -- no runtime API exposes
+  real CPU time, and there's no in-process signal for Logs volume at all),
+  and eventually reworking `refresh-jobs.js`'s multi-invocation chaining
+  now that Paid's per-invocation CPU/subrequest budget is much larger.
+
+## 2026-09-13
+- **Site-wide "Internal server error" outage, root-caused and partially
+  fixed** (commit `8443202`). D1's Free-tier daily quota (5,000,000 rows
+  read/day) was exhausted -- confirmed via `wrangler tail` after fixing an
+  IPv6 connectivity issue in the dev sandbox
+  (`NODE_OPTIONS="--dns-result-order=ipv4first"`) -- because
+  `/api/public/campaigns` ran a fresh per-campaign `SUM(views)` scan on
+  every single anonymous homepage hit with zero caching, unlike its sibling
+  `/api/public/stats` which already cached for exactly this reason. Fixed
+  by giving `/api/public/campaigns` the same 1-hour edge cache for
+  anonymous visitors (logged-in callers still get a live read). This could
+  only prevent recurrence, not undo the day's already-exhausted quota --
+  that only cleared at UTC midnight or on a plan upgrade, whichever came
+  first. (This entry was written retroactively on 2026-09-14, alongside the
+  usage-tracking feature above that exists specifically so a gap like this
+  -- fixed but never written down -- doesn't happen again either.)
+
 ## 2026-09-12
 - **Client dashboard gets a Billing panel** -- two figures, by request, kept
   deliberately simple: **Paid So Far** (the full fee-inclusive amount the

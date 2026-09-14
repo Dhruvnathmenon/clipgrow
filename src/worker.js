@@ -16,6 +16,7 @@ import { renewInstagramTokens } from './token-renewal.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
 import { logError, pruneErrorLog } from './error-log.js';
+import { wrapD1, flushUsage } from './d1-usage.js';
 
 // A session only ever carries a role + a bare id (auth.js's signSession
 // payload) -- never a name -- so resolving a human-readable actor_label for
@@ -320,7 +321,16 @@ export default {
       return new Response(null, { status: 301, headers: { Location: url.toString() } });
     }
 
-    return harden(await route(request, env, url), url);
+    // Self-tracked D1 usage (src/d1-usage.js) -- wrapping env.DB once here
+    // instruments every downstream call site (routes/*.js, db.js, etc.)
+    // with zero other changes. Flushed fire-and-forget via ctx.waitUntil,
+    // same pattern this file already uses elsewhere, so it never delays
+    // the actual response.
+    const rawDB = env.DB;
+    const wrapped = wrapD1(rawDB);
+    const response = await route(request, { ...env, DB: wrapped }, url);
+    ctx.waitUntil(flushUsage(rawDB, wrapped._usage()));
+    return harden(response, url);
   },
 
   // Continuation consumer for chained refresh jobs.
@@ -335,11 +345,18 @@ export default {
   // automatically, and because the job's remaining work is persisted in
   // pending_json, the retry re-does nothing that already succeeded.
   async queue(batch, env, ctx) {
+    // Wrapped once outside the loop -- max_batch_size is 1 (see the
+    // comment above), so this only ever runs once per invocation either
+    // way, but wrapping here rather than per-message keeps one usage
+    // total per invocation, matching fetch/scheduled.
+    const rawDB = env.DB;
+    const wrapped = wrapD1(rawDB);
+    const wrappedEnv = { ...env, DB: wrapped };
     for (const message of batch.messages) {
       const jobId = message.body && message.body.jobId;
       if (!jobId) { message.ack(); continue; }
       try {
-        const r = await advanceJob(env.DB, env, jobId, { onFinish: () => reallocateAll(env.DB) });
+        const r = await advanceJob(wrapped, wrappedEnv, jobId, { onFinish: () => reallocateAll(wrapped) });
         if (r.error) console.error(`[refresh-queue] job ${jobId}: ${r.error}`);
         message.ack();
       } catch (e) {
@@ -347,6 +364,9 @@ export default {
         message.retry();
       }
     }
+    // Plain awaited call, not waitUntil -- nothing else is waiting on a
+    // response from this invocation either way.
+    await flushUsage(rawDB, wrapped._usage());
   },
 
   async scheduled(event, env, ctx) {
@@ -359,64 +379,80 @@ export default {
     // single transient error here is normal and expected, a clip still
     // failing 12+ hours later is not.
     ctx.waitUntil((async () => {
-      // Clear out any job that died mid-run BEFORE trying to create one. Its
-      // row still counts as active for the unique index, so without this a
-      // single lost invocation blocks every future sync permanently.
+      const rawDB = env.DB;
+      const wrapped = wrapD1(rawDB);
+      const wrappedEnv = { ...env, DB: wrapped };
+      // try/finally, not just a flush at the end: the early `return` below
+      // (a refresh already in flight) would otherwise skip tracking every
+      // D1 read/write the reaper/cleanup/token-renewal steps above it just
+      // did -- a real gap, not a hypothetical one, since that path is
+      // common (any cron tick that lands while a previous one is still
+      // chaining). finally runs on that return AND on an uncaught throw.
       try {
-        const reaped = await reapStalledJobs(env.DB);
-        if (reaped.length) console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
-      } catch (e) {
-        console.error('[cron sync] reaper failed', e && e.message);
-      }
-
-      // A joined-but-never-connected participation a week or older is
-      // flagged inactive (not removed) -- see removeInactiveJoins's own
-      // comment for why this is safe to run unattended every cron cycle.
-      try {
-        const flagged = await removeInactiveJoins(env.DB);
-        if (flagged.length) console.log(`[cron sync] flagged inactive join(s): ${flagged.join(', ')}`);
-      } catch (e) {
-        console.error('[cron sync] inactive-join cleanup failed', e && e.message);
-      }
-
-      // error_log has no archive -- a row past 7 days is just gone (the
-      // founder's own call). Same retention-sweep shape as refresh_events.
-      try {
-        const pruned = await pruneErrorLog(env.DB);
-        if (pruned) console.log(`[cron sync] pruned ${pruned} error_log row(s) older than 7 days`);
-      } catch (e) {
-        console.error('[cron sync] error_log prune failed', e && e.message);
-      }
-
-      // Extend Instagram tokens that are nearing their 60-day expiry, BEFORE
-      // the refresh sweep spends this invocation's subrequest budget. Capped
-      // low so the two never collide. This is what stops the recurring
-      // "reconnect needed" waves -- a token only actually expires now if the
-      // clipper revoked it themselves.
-      try {
-        const t = await renewInstagramTokens(env.DB, env);
-        if (t.renewed.length || t.reauth.length || t.failed.length) {
-          console.log(`[cron sync] IG token renewal: ${t.renewed.length} extended, ${t.reauth.length} need reconnect, ${t.failed.length} retry next pass`);
+        // Clear out any job that died mid-run BEFORE trying to create one. Its
+        // row still counts as active for the unique index, so without this a
+        // single lost invocation blocks every future sync permanently.
+        try {
+          const reaped = await reapStalledJobs(wrapped);
+          if (reaped.length) console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
+        } catch (e) {
+          console.error('[cron sync] reaper failed', e && e.message);
         }
-      } catch (e) {
-        console.error('[cron sync] IG token renewal failed', e && e.message);
-      }
 
-      // respectCooldown TRUE, unlike a human-triggered refresh. Without it an
-      // account with 60 clips would need 240 calls/hour from routine syncing
-      // alone -- past Instagram's own 200/hour ceiling before anyone even
-      // asks for a refresh. The cron is upkeep; humans get the full sweep.
-      const created = await createRefreshJob(env.DB, {
-        kind: 'global', triggeredBy: 'cron', respectCooldown: true
-      });
-      if (created.error) {
-        // A global refresh is already in flight (admin-triggered, or a slow
-        // previous cron). Skipping is correct -- it is already doing this work.
-        console.log(`[cron sync] skipped: ${created.error}`);
-        return;
+        // A joined-but-never-connected participation a week or older is
+        // flagged inactive (not removed) -- see removeInactiveJoins's own
+        // comment for why this is safe to run unattended every cron cycle.
+        try {
+          const flagged = await removeInactiveJoins(wrapped);
+          if (flagged.length) console.log(`[cron sync] flagged inactive join(s): ${flagged.join(', ')}`);
+        } catch (e) {
+          console.error('[cron sync] inactive-join cleanup failed', e && e.message);
+        }
+
+        // error_log has no archive -- a row past 7 days is just gone (the
+        // founder's own call). Same retention-sweep shape as refresh_events.
+        try {
+          const pruned = await pruneErrorLog(wrapped);
+          if (pruned) console.log(`[cron sync] pruned ${pruned} error_log row(s) older than 7 days`);
+        } catch (e) {
+          console.error('[cron sync] error_log prune failed', e && e.message);
+        }
+
+        // Extend Instagram tokens that are nearing their 60-day expiry, BEFORE
+        // the refresh sweep spends this invocation's subrequest budget. Capped
+        // low so the two never collide. This is what stops the recurring
+        // "reconnect needed" waves -- a token only actually expires now if the
+        // clipper revoked it themselves.
+        try {
+          const t = await renewInstagramTokens(wrapped, wrappedEnv);
+          if (t.renewed.length || t.reauth.length || t.failed.length) {
+            console.log(`[cron sync] IG token renewal: ${t.renewed.length} extended, ${t.reauth.length} need reconnect, ${t.failed.length} retry next pass`);
+          }
+        } catch (e) {
+          console.error('[cron sync] IG token renewal failed', e && e.message);
+        }
+
+        // respectCooldown TRUE, unlike a human-triggered refresh. Without it an
+        // account with 60 clips would need 240 calls/hour from routine syncing
+        // alone -- past Instagram's own 200/hour ceiling before anyone even
+        // asks for a refresh. The cron is upkeep; humans get the full sweep.
+        // createRefreshJob() itself checks the admin's heavy-sync pause switch
+        // (system_pause, src/d1-usage.js) and returns the same shape of
+        // "skipped" result as the existing in-flight-conflict case below.
+        const created = await createRefreshJob(wrapped, {
+          kind: 'global', triggeredBy: 'cron', respectCooldown: true
+        });
+        if (created.error) {
+          // A global refresh is already in flight (admin-triggered, or a slow
+          // previous cron) OR heavy sync is paused. Skipping is correct either way.
+          console.log(`[cron sync] skipped: ${created.error}`);
+          return;
+        }
+        const r = await advanceJob(wrapped, wrappedEnv, created.job_id, { onFinish: () => reallocateAll(wrapped) });
+        console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} calls, ${r.remaining} remaining`);
+      } finally {
+        await flushUsage(rawDB, wrapped._usage());
       }
-      const r = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
-      console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} calls, ${r.remaining} remaining`);
     })());
   }
 };
