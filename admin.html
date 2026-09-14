@@ -2006,16 +2006,30 @@
     // it: budget increases by exactly what's entered, and the client's
     // real total payment is that plus the fee (src/finance.js's
     // topUpCampaignBudget).
+    //
+    // Never assumes the client has paid -- confirmed the hard way on the
+    // HeySchool campaign (2026-09), where a top-up that was really just an
+    // agency-side budget expansion got recorded as a real client payment,
+    // inflating "client paid" and fee revenue by money nobody had sent.
+    // This asks every time; Cancel (the safer default) records no payment
+    // at all, only the budget increase -- record the real payment later,
+    // from the Payments tab, once the client actually pays.
     window.topUpCampaign=async function(id,name){
       const amountStr=prompt(`Top up "${name}" — amount to ADD to the campaign budget (a 20% fee is charged on top of this, not out of it):`);
       if(amountStr==null) return;
       const amount=Number(amountStr);
       if(!Number.isFinite(amount)||amount<=0){ toast('Enter a positive amount',true); return; }
-      const method=prompt('Payment method (optional):','')||undefined;
-      const reference=prompt('Reference / transaction id (optional):','')||undefined;
+      const clientPaid=confirm(`Has the client already paid for this top-up?\n\nOK — yes, they've paid. Record it now as a real payment.\nCancel — no, this is just expanding the budget. Nothing will be recorded as paid; do that later from the Payments tab once they actually pay.`);
+      let method, reference;
+      if(clientPaid){
+        method=prompt('Payment method (optional):','')||undefined;
+        reference=prompt('Reference / transaction id (optional):','')||undefined;
+      }
       try{
-        const r=await api('/api/admin/campaigns/'+id+'/top-up',{method:'POST',body:JSON.stringify({amount,method,reference})});
-        toast(`Budget +${money(r.budget_increase)} · fee +${money(r.fee)} · client owes ${money(r.total)}`);
+        const r=await api('/api/admin/campaigns/'+id+'/top-up',{method:'POST',body:JSON.stringify({amount,method,reference,client_paid:clientPaid})});
+        toast(clientPaid
+          ? `Budget +${money(r.budget_increase)} · fee +${money(r.fee)} · client paid ${money(r.total)}`
+          : `Budget +${money(r.budget_increase)} — not recorded as paid. Client will owe ${money(r.total)} once they pay.`);
         loadAll();
       }catch(e){ toast(e.message,true); }
     };

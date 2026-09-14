@@ -854,9 +854,13 @@ export async function handleAdmin(request, env, url) {
     return json({ ok: true, id, slug }, 201);
   }
 
-  // A client top-up, exactly like the Payments tab's client-payment form --
-  // same 20%-fee split -- plus it raises this campaign's budget by the pool
-  // share in the same atomic write (src/finance.js's topUpCampaignBudget).
+  // Raises this campaign's budget (src/finance.js's topUpCampaignBudget).
+  // Only records a client-payment/management-fee ledger entry when the
+  // caller explicitly says the client has already paid (clientPaid: true)
+  // -- defaults to false, since expanding the budget is an agency decision
+  // that happens ahead of, not because of, money actually arriving. See
+  // topUpCampaignBudget's own doc comment for the HeySchool incident this
+  // default exists to prevent from recurring.
   // If the campaign had auto-completed from running dry, the next
   // allocation pass reopens it automatically.
   params = matchPath('/api/admin/campaigns/:id/top-up', pathname);
@@ -865,6 +869,7 @@ export async function handleAdmin(request, env, url) {
     const r = await topUpCampaignBudget(env.DB, {
       campaignId: Number(params.id), amount: body.amount,
       feePercent: body.fee_percent != null ? Number(body.fee_percent) : 20,
+      clientPaid: body.client_paid === true,
       method: body.method, reference: body.reference, note: body.note,
       occurredAt: body.occurred_at || null, createdBy: 'admin'
     });

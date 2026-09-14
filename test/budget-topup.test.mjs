@@ -14,8 +14,21 @@ import { makeSqliteD1 } from './helpers/sqlite-d1.mjs';
 import { allocateCampaignEarnings } from '../src/earnings.js';
 import { payableClips, settlePayment } from '../src/payouts.js';
 import { topUpCampaignBudget, walletOfKind, listEntries } from '../src/finance.js';
+import { handleAdmin } from '../src/routes/admin.js';
+import { createSessionCookie } from '../src/auth.js';
 
 const NOW = Date.now();
+const SESSION_SECRET = 'test-secret';
+
+async function adminRequest(env, path, { method = 'GET', body } = {}) {
+  const cookie = await createSessionCookie('admin', 'admin', env.SESSION_SECRET);
+  const request = new Request(`https://clipgrow.in${path}`, {
+    method,
+    headers: { Cookie: cookie.split(';')[0], 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  return handleAdmin(request, env, new URL(request.url));
+}
 
 function seed() {
   return makeSqliteD1({
@@ -57,13 +70,14 @@ test('a clip whose billable amount floors to zero clipper_earning is not selecta
   assert.equal(clips[0].selectable, false);
 });
 
-test('topUpCampaignBudget: budget increases by exactly what was entered, fee is an EXTRA 20% on top', async () => {
+test('topUpCampaignBudget: budget increases by exactly what was entered, fee is an EXTRA 20% on top -- when the client HAS paid', async () => {
   const db = seed();
   // 733 does not divide cleanly by 5 -- a case where independently-rounded
   // math could disagree by a rupee.
   const before = (await db.prepare('SELECT budget FROM campaigns WHERE id = 1').first()).budget;
-  const r = await topUpCampaignBudget(db, { campaignId: 1, amount: 733, feePercent: 20 });
+  const r = await topUpCampaignBudget(db, { campaignId: 1, amount: 733, feePercent: 20, clientPaid: true });
   assert.equal(r.ok, true);
+  assert.equal(r.client_paid, true);
   assert.equal(r.budget_increase, 733, 'exactly what was entered -- never a fraction carved out of it');
   assert.equal(r.fee, 147, 'round(733 * 20 / 100) -- an addition, not a slice');
   assert.equal(r.total, 880, 'what the client actually owes: budget increase + fee, not the other way round');
@@ -76,6 +90,76 @@ test('topUpCampaignBudget: budget increases by exactly what was entered, fee is 
   const fee = entries.find(e => e.category === 'management_fee');
   assert.equal(pool.amount, 733);
   assert.equal(fee.amount, 147);
+});
+
+// The HeySchool incident (2026-09): a top-up that was really just an agency
+// -side budget expansion got recorded as if the client had already paid,
+// inflating "client paid" and fee revenue by money nobody had sent. Fixed
+// by defaulting clientPaid to false -- a top-up must never assume payment
+// happened just because the budget went up.
+test('topUpCampaignBudget defaults to NOT recording a payment -- budget increases, but no ledger entries at all', async () => {
+  const db = seed();
+  const before = (await db.prepare('SELECT budget FROM campaigns WHERE id = 1').first()).budget;
+  const r = await topUpCampaignBudget(db, { campaignId: 1, amount: 733, feePercent: 20 }); // clientPaid omitted
+  assert.equal(r.ok, true);
+  assert.equal(r.client_paid, false);
+  assert.equal(r.budget_increase, 733, 'the budget expansion itself still happens');
+  assert.equal(r.fee, 147, 'still computed and returned -- what the client WILL owe once they pay, not a claim they have');
+  assert.equal(r.total, 880);
+
+  const after = (await db.prepare('SELECT budget FROM campaigns WHERE id = 1').first()).budget;
+  assert.equal(after - before, 733, 'budget still increases by the full amount');
+
+  const entries = await listEntries(db, { campaignId: 1 });
+  assert.equal(entries.length, 0, 'no client_payment, no management_fee -- nothing was actually paid');
+});
+
+test('topUpCampaignBudget: passing clientPaid explicitly as false is identical to omitting it', async () => {
+  const db = seed();
+  const r = await topUpCampaignBudget(db, { campaignId: 1, amount: 500, clientPaid: false });
+  assert.equal(r.client_paid, false);
+  const entries = await listEntries(db, { campaignId: 1 });
+  assert.equal(entries.length, 0);
+});
+
+/* ── the admin endpoint threads client_paid through the same way ── */
+
+test('POST /api/admin/campaigns/:id/top-up with no client_paid field records nothing paid, same as the direct call', async () => {
+  const db = seed();
+  const env = { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
+  const res = await adminRequest(env, '/api/admin/campaigns/1/top-up', { method: 'POST', body: { amount: 733 } });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.client_paid, false);
+
+  const entries = await listEntries(db, { campaignId: 1 });
+  assert.equal(entries.length, 0, 'the endpoint must not assume payment just because a top-up was requested');
+});
+
+test('POST /api/admin/campaigns/:id/top-up with client_paid: true records the real payment', async () => {
+  const db = seed();
+  const env = { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
+  const res = await adminRequest(env, '/api/admin/campaigns/1/top-up', {
+    method: 'POST', body: { amount: 733, client_paid: true }
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.client_paid, true);
+
+  const entries = await listEntries(db, { campaignId: 1 });
+  assert.equal(entries.find(e => e.category === 'client_payment').amount, 733);
+  assert.equal(entries.find(e => e.category === 'management_fee').amount, 147);
+});
+
+test('POST /api/admin/campaigns/:id/top-up: a truthy-but-not-boolean client_paid (e.g. a stray string) is treated as false, not coerced true', async () => {
+  const db = seed();
+  const env = { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
+  const res = await adminRequest(env, '/api/admin/campaigns/1/top-up', {
+    method: 'POST', body: { amount: 500, client_paid: 'true' } // a string, not the boolean true
+  });
+  const body = await res.json();
+  assert.equal(body.client_paid, false, 'only the literal boolean true counts as confirmed payment');
+  assert.equal((await listEntries(db, { campaignId: 1 })).length, 0);
 });
 
 test('topUpCampaignBudget: all three writes land in one atomic batch', async () => {

@@ -158,9 +158,28 @@ export async function recordClientPayment(db, {
  * slice taken from it. `campaigns.budget` increases by exactly `amount`,
  * the same literal value used for the ledger's pool-share entry -- one
  * variable, not two independently-derived ones, so they can never drift.
+ *
+ * clientPaid defaults to false -- deliberately. Raising a campaign's
+ * budget is an agency decision made ahead of, not because of, money
+ * actually landing; the client_payment/management_fee ledger entries mean
+ * "this money genuinely came in," so they must never be written on the
+ * assumption that it did. Confirmed the hard way on the HeySchool campaign
+ * (2026-09), where a ₹10,000 budget expansion the client had not yet paid
+ * for was recorded as if they had -- inflating "client paid" and agency
+ * fee revenue by money nobody had sent. Fixed there by voiding the two
+ * wrongly-created ledger entries (never delete a ledger row -- see
+ * voidEntry) while leaving the budget increase itself untouched, since
+ * that part was real and intended. When clientPaid is false, this
+ * function ONLY raises campaigns.budget -- no ledger entries at all, and
+ * the returned fee/total are what the client WILL owe once they actually
+ * pay, not a claim that they already have. campaignFinancials' existing
+ * shortfall math then correctly shows this as owed the moment clips start
+ * earning into the new headroom. When the client does pay later, record
+ * it the normal way (recordClientPayment, the Payments tab) -- no second
+ * budget increase needed since this one already happened.
  */
 export async function topUpCampaignBudget(db, {
-  campaignId, amount, feePercent = 20,
+  campaignId, amount, feePercent = 20, clientPaid = false,
   method = null, reference = null, note = null, occurredAt = null, createdBy = 'admin'
 }) {
   if (!campaignId) return { error: 'A campaign is required.', status: 400 };
@@ -171,13 +190,25 @@ export async function topUpCampaignBudget(db, {
   if (!Number.isFinite(budgetIncrease) || budgetIncrease <= 0) {
     return { error: 'Amount must be a positive number.', status: 400 };
   }
+
+  // An extra 20% ON TOP of the budget increase, not carved out of it.
+  // Computed either way -- even when nothing was paid, the admin still
+  // sees what the client will owe once they do.
+  const fee = Math.round((budgetIncrease * feePercent) / 100);
+  const total = budgetIncrease + fee;
+
+  if (!clientPaid) {
+    await db.prepare('UPDATE campaigns SET budget = budget + ? WHERE id = ?').bind(budgetIncrease, campaignId).run();
+    return {
+      ok: true, budget_increase: budgetIncrease, fee, total, client_paid: false,
+      pool_share: budgetIncrease, pool_entry: null, fee_entry: null
+    };
+  }
+
   const agency = await walletOfKind(db, 'agency');
   const clipgrow = await walletOfKind(db, 'clipgrow');
   if (!agency || !clipgrow) return { error: 'Wallets are not set up.', status: 500 };
 
-  // An extra 20% ON TOP of the budget increase, not carved out of it.
-  const fee = Math.round((budgetIncrease * feePercent) / 100);
-  const total = budgetIncrease + fee;
   const at = occurredAt || Date.now();
   const common = { campaign_id: campaignId, method, reference, occurred_at: at, created_by: createdBy };
 
@@ -208,7 +239,7 @@ export async function topUpCampaignBudget(db, {
   const [poolEntryId, feeEntryId] = results.map(r => r.meta.last_row_id);
 
   return {
-    ok: true, budget_increase: budgetIncrease, fee, total,
+    ok: true, budget_increase: budgetIncrease, fee, total, client_paid: true,
     pool_share: budgetIncrease, // kept for API-shape compatibility with recordClientPayment's response
     pool_entry: poolEntryId, fee_entry: fee > 0 ? feeEntryId : null
   };
