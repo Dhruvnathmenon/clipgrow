@@ -53,9 +53,17 @@
     .stat-today { font-size:.68rem; color:var(--muted-l); margin-top:.15rem; }
 
     .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.4rem; overflow-x:auto; }
-    .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.84rem; cursor:pointer; white-space:nowrap; }
+    .tab { padding:.7rem 1.1rem; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted-l); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.84rem; cursor:grab; white-space:nowrap; }
     .tab:hover { color:var(--white); }
     .tab.on { color:var(--neon); border-bottom-color:var(--neon); }
+    /* Drag-to-reorder (admin's own tab order, saved per-browser in
+       localStorage -- see initTabDragReorder()). .dragging marks the tab
+       actually being picked up; .drag-before/.drag-after mark whichever
+       neighbour the drop would land next to, so the insertion point is
+       visible before you let go, not just after. */
+    .tab.dragging { opacity:.35; cursor:grabbing; }
+    .tab.drag-before { box-shadow:inset 2px 0 0 0 var(--neon); }
+    .tab.drag-after { box-shadow:inset -2px 0 0 0 var(--neon); }
     .view { display:none; } .view.on { display:block; }
 
     .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:1.3rem; }
@@ -229,21 +237,21 @@
     <div id="hero-views"></div>
     <div class="stats" id="overview"></div>
 
-    <div class="tabs">
-      <button class="tab on" data-v="campaigns" onclick="showView('campaigns',this)">Campaigns</button>
-      <button class="tab" data-v="clippers" onclick="showView('clippers',this)">Clippers</button>
-      <button class="tab" data-v="payouts" onclick="showView('payouts',this)">Payouts</button>
-      <button class="tab" data-v="payments" onclick="showView('payments',this)">Payments</button>
-      <button class="tab" data-v="finance" onclick="showView('finance',this)">Finance</button>
-      <button class="tab" data-v="clients" onclick="showView('clients',this)">Clients</button>
-      <button class="tab" data-v="testers" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
-      <button class="tab" data-v="moderators" onclick="showView('moderators',this)">Moderators</button>
-      <button class="tab" data-v="review" onclick="showView('review',this)">Video Review</button>
-      <button class="tab" data-v="flagvideo" onclick="showView('flagvideo',this)">Flag Video</button>
-      <button class="tab" data-v="synchealth" onclick="showView('synchealth',this)">Sync Health <span class="tab-count" id="sync-count"></span></button>
-      <button class="tab" data-v="platformusage" onclick="showView('platformusage',this)">Platform Usage</button>
-      <button class="tab" data-v="errors" onclick="showView('errors',this)">Error Log <span class="tab-count" id="error-count"></span></button>
-      <button class="tab" data-v="auditlog" onclick="showView('auditlog',this)" style="margin-left:auto">Audit Log</button>
+    <div class="tabs" id="admin-tabs">
+      <button class="tab on" data-v="campaigns" draggable="true" onclick="showView('campaigns',this)">Campaigns</button>
+      <button class="tab" data-v="clippers" draggable="true" onclick="showView('clippers',this)">Clippers</button>
+      <button class="tab" data-v="payouts" draggable="true" onclick="showView('payouts',this)">Payouts</button>
+      <button class="tab" data-v="payments" draggable="true" onclick="showView('payments',this)">Payments</button>
+      <button class="tab" data-v="finance" draggable="true" onclick="showView('finance',this)">Finance</button>
+      <button class="tab" data-v="clients" draggable="true" onclick="showView('clients',this)">Clients</button>
+      <button class="tab" data-v="testers" draggable="true" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
+      <button class="tab" data-v="moderators" draggable="true" onclick="showView('moderators',this)">Moderators</button>
+      <button class="tab" data-v="review" draggable="true" onclick="showView('review',this)">Video Review</button>
+      <button class="tab" data-v="flagvideo" draggable="true" onclick="showView('flagvideo',this)">Flag Video</button>
+      <button class="tab" data-v="synchealth" draggable="true" onclick="showView('synchealth',this)">Sync Health <span class="tab-count" id="sync-count"></span></button>
+      <button class="tab" data-v="platformusage" draggable="true" onclick="showView('platformusage',this)">Platform Usage</button>
+      <button class="tab" data-v="errors" draggable="true" onclick="showView('errors',this)">Error Log <span class="tab-count" id="error-count"></span></button>
+      <button class="tab" data-v="auditlog" draggable="true" onclick="showView('auditlog',this)">Audit Log</button>
     </div>
 
     <!-- CAMPAIGNS -->
@@ -3381,6 +3389,68 @@
       try{ await api('/api/admin/access-requests/'+id,{method:'PATCH',body:JSON.stringify({status:'rejected',note})}); toast('Rejected'); loadTesters(); }
       catch(e){ toast(e.message,true); }
     };
+
+    /* ── Drag-to-reorder tabs, saved per-browser (no server round-trip --
+       this is a personal "useful stuff first" preference, not shared
+       data). Runs once at load, independent of login state -- the tab
+       bar exists in the DOM either way, just hidden behind the auth
+       overlay until then. ── */
+    const TAB_ORDER_KEY='admin-tab-order';
+    function initTabDragReorder(){
+      const bar=document.getElementById('admin-tabs');
+      if(!bar) return;
+
+      // Restore a saved order first. Anything saved that no longer exists
+      // (a renamed/removed tab) is dropped; anything new that was never
+      // saved (a tab added after the admin last reordered, e.g. Platform
+      // Usage) keeps its original relative position instead of always
+      // landing at the very end, so a fresh tab doesn't get buried.
+      try{
+        const saved=JSON.parse(localStorage.getItem(TAB_ORDER_KEY)||'null');
+        if(Array.isArray(saved)&&saved.length){
+          const tabs=[...bar.children];
+          const byName=new Map(tabs.map(t=>[t.dataset.v,t]));
+          const ordered=[];
+          saved.forEach(name=>{ const t=byName.get(name); if(t){ ordered.push(t); byName.delete(name); } });
+          tabs.forEach(t=>{ if(byName.has(t.dataset.v)) ordered.push(t); });
+          ordered.forEach(t=>bar.appendChild(t));
+        }
+      }catch(e){ /* a corrupted saved value isn't worth failing over */ }
+
+      let dragging=null;
+      const saveOrder=()=>{ try{ localStorage.setItem(TAB_ORDER_KEY, JSON.stringify([...bar.children].map(t=>t.dataset.v))); }catch(e){} };
+      const clearMarks=()=>bar.querySelectorAll('.drag-before,.drag-after').forEach(t=>t.classList.remove('drag-before','drag-after'));
+      const isBefore=(e,tab)=>{ const r=tab.getBoundingClientRect(); return e.clientX < r.left+r.width/2; };
+
+      bar.querySelectorAll('.tab').forEach(tab=>{
+        tab.addEventListener('dragstart',e=>{
+          dragging=tab;
+          tab.classList.add('dragging');
+          e.dataTransfer.effectAllowed='move';
+          e.dataTransfer.setData('text/plain',tab.dataset.v); // Firefox needs data set to allow the drag at all
+        });
+        tab.addEventListener('dragend',()=>{ tab.classList.remove('dragging'); clearMarks(); dragging=null; });
+        tab.addEventListener('dragover',e=>{
+          if(!dragging||dragging===tab) return;
+          e.preventDefault();
+          const before=isBefore(e,tab);
+          clearMarks();
+          tab.classList.add(before?'drag-before':'drag-after');
+        });
+        tab.addEventListener('drop',e=>{
+          e.preventDefault();
+          if(!dragging||dragging===tab) return;
+          bar.insertBefore(dragging, isBefore(e,tab)?tab:tab.nextSibling);
+          clearMarks();
+          saveOrder();
+        });
+      });
+      // Dropping in empty space past the last tab (the bar is wider than
+      // its content) appends to the end instead of snapping back.
+      bar.addEventListener('dragover',e=>e.preventDefault());
+      bar.addEventListener('drop',e=>{ if(e.target===bar&&dragging){ bar.appendChild(dragging); saveOrder(); } });
+    }
+    initTabDragReorder();
 
     api('/api/admin/overview').then(()=>{ document.getElementById('auth-overlay').style.display='none'; loadAll(); }).catch(()=>{});
   </script>
