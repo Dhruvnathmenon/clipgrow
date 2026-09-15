@@ -54,16 +54,19 @@ for (const path of GET_ROUTES) {
   });
 }
 
-test('a moderator can create a clipper and it is attributed to them', async () => {
+// Creating a clipper login used to be something a moderator could do too --
+// removed on request so only the admin account can create logins. This route
+// no longer exists in handleModerator at all, so it falls through to the
+// same `return null` every unrecognised /api/moderator/* path hits (proving
+// that, not just that it 404s some other way).
+test('a moderator can no longer create a clipper -- the route does not exist', async () => {
   const env = seedEnv();
   const res = await moderatorRequest(env, '/api/moderator/clippers', {
     method: 'POST', body: { username: 'newclipper', password: 'longenough' }
   });
-  assert.equal(res.status, 201);
-  const row = await env.DB.prepare('SELECT created_by_type, created_by_id FROM clippers WHERE username = ?')
-    .bind('newclipper').first();
-  assert.equal(row.created_by_type, 'moderator');
-  assert.equal(row.created_by_id, 1);
+  assert.equal(res, null, 'POST /api/moderator/clippers is unhandled, not a working create endpoint');
+  const row = await env.DB.prepare('SELECT id FROM clippers WHERE username = ?').bind('newclipper').first();
+  assert.equal(row, null, 'no clipper was created');
 });
 
 test('a disabled moderator is fully cut off, not just read-only', async () => {

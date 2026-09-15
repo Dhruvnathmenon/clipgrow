@@ -3,7 +3,7 @@ import {
   createSessionCookie, requireModerator, verifyPassword, hashPassword, clearCookieHeader
 } from '../auth.js';
 import {
-  now, normalizeUsername, defaultDisplayName, getModeratorByUsername, getModeratorById,
+  now, getModeratorByUsername, getModeratorById,
   publicClipper, publicAccount
 } from '../db.js';
 import { createRefreshJob, advanceJob, getJob, publicJob } from '../refresh-jobs.js';
@@ -14,13 +14,14 @@ import {
 import { logAction } from '../audit.js';
 
 // Moderator staff role (migration 023) -- deliberately narrow. A moderator
-// can: create clipper logins, trigger a resync for one clipper, leave a
-// private note on a clipper, review videos (tick/cross/skip), see the
-// roster and each clipper's connected accounts by campaign (read-only, no
-// money), and change their own password. Nothing here can kick, pause,
-// approve/reject an access request, disconnect an account, edit a
-// campaign, or touch a payment -- those routes simply do not exist in
-// this file, which is the entire enforcement of the boundary.
+// can: trigger a resync for one clipper, leave a private note on a
+// clipper, review videos (tick/cross/skip), see the roster and each
+// clipper's connected accounts by campaign (read-only, no money), and
+// change their own password. Nothing here can create a clipper login
+// (admin-only, on purpose -- see the removed POST /api/moderator/clippers
+// below), kick, pause, approve/reject an access request, disconnect an
+// account, edit a campaign, or touch a payment -- those routes simply do
+// not exist in this file, which is the entire enforcement of the boundary.
 export async function handleModerator(request, env, url) {
   const { pathname } = url;
   const method = request.method;
@@ -84,30 +85,11 @@ export async function handleModerator(request, env, url) {
 
   // ------------------------------------------------------------ clippers
   //
-  // Create-clipper mirrors admin.js's own POST /api/admin/clippers exactly
-  // (same validation, same hashing), plus attribution so the admin can
-  // always see which moderator created a given login.
-  if (pathname === '/api/moderator/clippers' && method === 'POST') {
-    const { username, password } = await readJson(request);
-    if (!username || !password) return err('Username and password are required');
-    if (String(password).length < 6) return err('Password must be at least 6 characters');
-    const clean = normalizeUsername(username);
-    if (!clean) return err('Username cannot be blank');
-    const existing = await env.DB
-      .prepare('SELECT id FROM clippers WHERE username = ? COLLATE NOCASE').bind(clean).first();
-    if (existing) return err('That username is already taken', 409);
-    const { hash, salt } = await hashPassword(password);
-    // Display name is always the username, capitalised -- the gold standard.
-    const res = await env.DB.prepare(
-      `INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at, created_by_type, created_by_id, created_by_name)
-       VALUES (?, ?, ?, ?, 'active', ?, 'moderator', ?, ?)`
-    ).bind(clean, hash, salt, defaultDisplayName(clean), now(), moderatorId, staffName).run();
-    await logAction(env.DB, {
-      staffType: 'moderator', staffId: moderatorId, staffName, action: 'clipper_created',
-      targetType: 'clipper', targetId: res.meta.last_row_id, targetLabel: clean
-    });
-    return json({ ok: true, id: res.meta.last_row_id, username: clean }, 201);
-  }
+  // Creating a clipper login is admin-only now (moderators used to be able
+  // to, mirroring admin.js's POST /api/admin/clippers -- removed on request
+  // so only the admin account can create logins; everything else a
+  // moderator could already do -- roster, notes, resync, review -- is
+  // unchanged).
 
   // Roster, no financial fields -- same shape as admin.js's GET
   // /api/admin/clippers, minus clipperFinancials().

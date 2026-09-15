@@ -130,7 +130,6 @@
 
     <div class="tabs">
       <button class="tab on" data-v="queue" onclick="showView('queue',this)">Daily Queue</button>
-      <button class="tab" data-v="create" onclick="showView('create',this)">Create Clipper</button>
       <button class="tab" data-v="roster" onclick="showView('roster',this)">Roster</button>
       <button class="tab" data-v="me" onclick="showView('me',this)">My Profile</button>
     </div>
@@ -148,19 +147,6 @@
       <div class="panel">
         <h2 class="panel-title">Reviewed</h2>
         <div id="reviewed-list">Loading…</div>
-      </div>
-    </div>
-
-    <!-- CREATE CLIPPER -->
-    <div class="view" id="v-create">
-      <div class="panel">
-        <h2 class="panel-title">Create Clipper Login</h2>
-        <div class="form-grid">
-          <div><label>Username</label><input class="form-control" id="nc-username" placeholder="yourclipper" /></div>
-          <div><label>Password</label><input class="form-control" id="nc-password" type="password" placeholder="At least 6 characters" /></div>
-          <div><button class="btn" style="width:100%" onclick="createClipper()">Create</button></div>
-        </div>
-        <p class="note" id="nc-note" style="margin-top:.8rem; font-size:.78rem; color:var(--muted)"></p>
       </div>
     </div>
 
@@ -299,20 +285,6 @@
         await api('/api/moderator/reviews',{method:'POST',body:JSON.stringify({submission_id:id,verdict,feedback})});
         toast(verdict==='tick'?'Marked good':verdict==='cross'?'Marked needs improvement':'Marked skip');
         loadQueue();
-      }catch(e){ toast(e.message,true); }
-    };
-
-    // -------------------------------------------------------- create clipper
-    window.createClipper=async function(){
-      const username=document.getElementById('nc-username').value.trim();
-      const password=document.getElementById('nc-password').value;
-      if(!username||!password){ toast('Username and password are required',true); return; }
-      try{
-        const r=await api('/api/moderator/clippers',{method:'POST',body:JSON.stringify({username,password})});
-        document.getElementById('nc-note').textContent=`Created — the clipper can log in as "${r.username}" now.`;
-        document.getElementById('nc-username').value='';
-        document.getElementById('nc-password').value='';
-        toast('Clipper created');
       }catch(e){ toast(e.message,true); }
     };
 
