@@ -9,14 +9,18 @@ import * as yt from './youtube.js';
 //   id                                     platform key stored on rows
 //   label                                  human name for UI and error text
 //   isConfigured(env)                      are the app credentials present?
-//   fetchViews(account, mediaIds, env)     -> Map(mediaId -> {ok:true, views} |
+//   fetchViews(account, mediaIds, env)     -> Map(mediaId -> {ok:true, views, engagement} |
 //                                                             {ok:false, code, needsReauth?})
 //                                              An id absent from the map means it was
 //                                              genuinely missing from a successful
 //                                              response (deleted/private), not a fetch
 //                                              failure. Per-id isolation is mandatory:
 //                                              one id failing must never cost any other
-//                                              id in the same call its result.
+//                                              id in the same call its result. `engagement`
+//                                              is {likes, comments, saved, shares,
+//                                              avg_watch_time_sec}, each null when the
+//                                              platform/media didn't report it -- feeds the
+//                                              bot-detection badge only, never earnings.
 //   listRecent(account, {sinceTs}, env)    -> normalised media[]
 //   findByUrl(account, url, env)           -> normalised media | null
 //   refreshToken(account, env)             -> {access_token, expires_at, refresh_token?}
@@ -73,8 +77,11 @@ const instagramAdapter = {
     const out = new Map();
     for (const id of mediaIds) {
       try {
-        const views = await fetchOne(id, account.access_token, { onAttempt });
-        out.set(id, { ok: true, views });
+        const r = await fetchOne(id, account.access_token, { onAttempt });
+        out.set(id, {
+          ok: true, views: r.views,
+          engagement: { likes: r.likes, comments: r.comments, saved: r.saved, shares: r.shares, avg_watch_time_sec: r.avgWatchTimeSec }
+        });
       } catch (e) {
         out.set(id, { ok: false, code: (e && e.code) || 'UNKNOWN', needsReauth: !!(e && e.needsReauth) });
       }

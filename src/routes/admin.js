@@ -11,6 +11,8 @@ import {
 } from '../db.js';
 import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
 import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
+import { scoreRecentSubmissions } from '../bot-scoring.js';
+import { tierForScore } from '../bot-detection.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
 import {
   walletBalances, walletOfKind, agencyAvailable, recordClientPayment, topUpCampaignBudget,
@@ -685,7 +687,9 @@ export async function handleAdmin(request, env, url) {
       // alongside it rather than replacing it, so the wider clipper detail
       // panel can render a proper table instead of parsing a delimited string.
       participations: (parts || []).map(p => ({ ...p, linked_accounts_list: parseLinkedAccounts(p.linked_accounts) })),
-      submissions: subs || [],
+      // bot_risk_tier is the None/Low/Medium/High badge (src/bot-detection.js) --
+      // a passive display signal derived from bot_score, never a status change.
+      submissions: (subs || []).map(s => ({ ...s, bot_risk_tier: tierForScore(s.bot_score) })),
       payments: pays || [],
       notes: notes || []
     });
@@ -957,6 +961,7 @@ export async function handleAdmin(request, env, url) {
       // after the first payout run, which is the error the founder walked into.
       `SELECT s.id, s.permalink, s.views, s.earning, s.status, s.sync_error, s.sync_error_acknowledged_as, s.created_at, s.last_synced_at, s.source, s.platform,
               s.locked_at, s.locked_earning, s.lock_reason, s.payment_id, s.invalidated_reason,
+              s.bot_score, s.bot_score_reason, s.bot_correlation_cluster_id,
               cl.username, a.username AS account_username
        FROM submissions s JOIN clippers cl ON cl.id = s.clipper_id
        LEFT JOIN social_accounts a ON a.id = s.account_id
@@ -967,7 +972,9 @@ export async function handleAdmin(request, env, url) {
       // than added to publicCampaign, which this same helper feeds to the
       // homepage, SEO pages, and the client/clipper dashboards.
       campaign: { ...(await campaignWithSpend(env.DB, campaign)), campaign_kind: campaign.campaign_kind, fee_percent: campaign.fee_percent },
-      submissions: submissions || []
+      // bot_risk_tier is the None/Low/Medium/High badge (src/bot-detection.js) --
+      // a passive display signal derived from bot_score, never a status change.
+      submissions: (submissions || []).map(s => ({ ...s, bot_risk_tier: tierForScore(s.bot_score) }))
     });
   }
 
@@ -1868,7 +1875,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'global', targetLabel: 'All clippers'
@@ -1893,7 +1900,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
@@ -1935,7 +1942,7 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'POST') {
     const r = await retryJob(env.DB, env, Number(params.jobId));
     if (r.error) return err(r.error, r.status || 400);
-    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: () => reallocateAll(env.DB) });
+    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
   }
 

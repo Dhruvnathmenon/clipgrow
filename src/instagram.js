@@ -393,7 +393,52 @@ export function isVideoMedia(media) {
 // fallbacks for older media so a metric rename doesn't zero everyone's earnings.
 const VIEW_METRICS = ['views', 'plays', 'video_views', 'impressions'];
 
+// Bundled into ONE Insights call alongside `views` -- Meta counts quota per
+// *call*, not per metric, so this costs exactly what fetching `views` alone
+// already costs. Feeds the bot-detection badge (src/bot-detection.js,
+// src/bot-correlation.js), never the earnings math. `ig_reels_avg_watch_time`
+// only applies to Reels and simply won't be present in the response for
+// other video types -- handled as "field absent", not an error.
+const ENGAGEMENT_METRICS = 'views,reach,saved,shares,likes,comments,ig_reels_avg_watch_time,total_interactions';
+
+function numOrNull(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** @returns {views, likes, comments, saved, shares, avgWatchTimeSec} -- the
+ *  engagement fields are null whenever the bundled call wasn't used (the
+ *  sequential fallback below) or a metric was absent from the response. */
 export async function fetchMediaViews(mediaId, accessToken, { onAttempt } = {}) {
+  // Try the bundled call first. On any failure (an unrecognised metric name
+  // in the bundle, or anything else recoverable) fall straight through to
+  // the existing sequential fallback below unchanged -- the earnings-
+  // critical view number must never regress just because the engagement
+  // bundle didn't apply to this media.
+  try {
+    const url = new URL(`${GRAPH_BASE}/${mediaId}/insights`);
+    url.searchParams.set('metric', ENGAGEMENT_METRICS);
+    url.searchParams.set('access_token', accessToken);
+    const body = await igFetch(url.toString(), { retries: 1, onAttempt });
+    const byName = new Map((body.data || []).map(d => [d.name, d.values && d.values[0] ? d.values[0].value : null]));
+    const views = byName.get('views');
+    if (views != null) {
+      return {
+        views: Number(views) || 0,
+        likes: numOrNull(byName.get('likes')),
+        comments: numOrNull(byName.get('comments')),
+        saved: numOrNull(byName.get('saved')),
+        shares: numOrNull(byName.get('shares')),
+        avgWatchTimeSec: numOrNull(byName.get('ig_reels_avg_watch_time'))
+      };
+    }
+    // Bundled call answered but without a `views` value -- fall through to
+    // the sequential fallback rather than treating this as success.
+  } catch (e) {
+    if (e.code !== 'INSIGHTS_UNAVAILABLE' && e.code !== 'UNKNOWN' && !/metric/i.test(e.message || '')) throw e;
+  }
+
   let lastErr;
   for (const metric of VIEW_METRICS) {
     const url = new URL(`${GRAPH_BASE}/${mediaId}/insights`);
@@ -403,7 +448,9 @@ export async function fetchMediaViews(mediaId, accessToken, { onAttempt } = {}) 
       const body = await igFetch(url.toString(), { retries: 1, onAttempt });
       const row = (body.data || []).find(d => d.name === metric);
       const value = row && row.values && row.values[0] ? row.values[0].value : null;
-      if (value != null) return Number(value) || 0;
+      if (value != null) {
+        return { views: Number(value) || 0, likes: null, comments: null, saved: null, shares: null, avgWatchTimeSec: null };
+      }
     } catch (e) {
       lastErr = e;
       // An unsupported metric is worth trying the next name; anything else is real.

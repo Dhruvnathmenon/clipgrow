@@ -36,6 +36,7 @@ function makeDb({ job, submissions = [], accounts = [], lockedBy = {} } = {}) {
     if (/^INSERT INTO ig_api_calls/.test(sql)) return { meta:{} };
     if (/^DELETE FROM ig_api_calls/.test(sql)) return { meta:{} };
     if (/^INSERT INTO refresh_jobs/.test(sql)) return { meta:{ last_row_id: 99 } };
+    if (/^INSERT INTO submission_view_snapshots/.test(sql)) return { meta:{ changes: 1 } };
     throw new Error('unhandled run: '+sql);
   }
   function first(sql,a){

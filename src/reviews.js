@@ -1,4 +1,5 @@
 import { now } from './db.js';
+import { tierForScore } from './bot-detection.js';
 
 // Video quality review (migration 023). Shared by admin.js and
 // moderator.js, since both an admin and a moderator can review a video --
@@ -17,7 +18,7 @@ const VERDICTS = ['tick', 'cross', 'skip'];
 export async function reviewQueue(db) {
   const { results } = await db.prepare(
     `SELECT s.id, s.permalink, s.platform, s.views, s.posted_at, s.created_at,
-            s.thumbnail_key, s.thumbnail_url,
+            s.thumbnail_key, s.thumbnail_url, s.bot_score, s.bot_score_reason,
             date(COALESCE(s.posted_at, s.created_at) / 1000, 'unixepoch') AS day,
             cl.username AS clipper_username, cl.display_name AS clipper_display_name,
             c.name AS campaign_name, a.username AS account_username
@@ -37,7 +38,12 @@ export async function reviewQueue(db) {
       posted_at: r.posted_at, created_at: r.created_at,
       has_thumb: !!(r.thumbnail_key || r.thumbnail_url), thumb: `/api/media/thumb/${r.id}`,
       clipper_username: r.clipper_username, clipper_display_name: r.clipper_display_name || r.clipper_username,
-      campaign_name: r.campaign_name, account_username: r.account_username
+      campaign_name: r.campaign_name, account_username: r.account_username,
+      // The None/Low/Medium/High traffic-light badge -- a passive display
+      // signal only (see src/bot-detection.js), never affects tick/cross/
+      // skip. bot_risk_tier is null (no badge shown) until a clip has
+      // actually been scored at least once.
+      bot_risk_tier: tierForScore(r.bot_score), bot_score_reason: r.bot_score_reason || null
     });
   }
   return [...byDay.entries()].map(([date, items]) => ({ date, items }));
@@ -49,7 +55,7 @@ export async function reviewedList(db, { limit = 100 } = {}) {
   const { results } = await db.prepare(
     `SELECT sr.verdict, sr.feedback, sr.reviewer_type, sr.reviewer_name, sr.reviewed_at,
             s.id AS submission_id, s.permalink, s.platform, s.views, s.posted_at, s.created_at,
-            s.thumbnail_key, s.thumbnail_url,
+            s.thumbnail_key, s.thumbnail_url, s.bot_score, s.bot_score_reason,
             date(COALESCE(s.posted_at, s.created_at) / 1000, 'unixepoch') AS day,
             cl.username AS clipper_username, c.name AS campaign_name
      FROM submission_reviews sr
@@ -61,7 +67,8 @@ export async function reviewedList(db, { limit = 100 } = {}) {
   return (results || []).map(r => ({
     ...r,
     has_thumb: !!(r.thumbnail_key || r.thumbnail_url),
-    thumb: `/api/media/thumb/${r.submission_id}`
+    thumb: `/api/media/thumb/${r.submission_id}`,
+    bot_risk_tier: tierForScore(r.bot_score)
   }));
 }
 

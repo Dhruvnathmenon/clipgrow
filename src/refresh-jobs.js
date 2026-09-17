@@ -27,6 +27,7 @@ import { recordClipEvent, recordClipEvents, recordAccountEvent, classifyError, p
 import { TRACKING_WINDOW_MS, TERMINAL_SYNC_ERRORS } from './clipstate.js';
 import { logAction } from './audit.js';
 import { isPaused } from './d1-usage.js';
+import { recordViewSnapshot } from './view-snapshots.js';
 
 // Deliberately under Cloudflare's 50 so a single item that internally retries
 // (igFetch backs off and retries on a transient failure, spending more than
@@ -860,10 +861,20 @@ async function runViews(db, env, account, item, counter, adapters, jobId = null)
       });
       continue;
     }
+    const eng = r.engagement || {};
     const changed = await writeGuarded(db,
-      'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ? AND locked_at IS NULL',
-      [r.views, now, now, subId]);
+      `UPDATE submissions SET views = ?, likes = ?, comments = ?, saved = ?, shares = ?, avg_watch_time_sec = ?,
+              last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL
+        WHERE id = ? AND locked_at IS NULL`,
+      [r.views, eng.likes ?? null, eng.comments ?? null, eng.saved ?? null, eng.shares ?? null, eng.avg_watch_time_sec ?? null,
+       now, now, subId]);
     changed ? ok++ : skipped++;
+    if (changed) {
+      await recordViewSnapshot(db, {
+        submissionId: subId, clipperId: account.clipper_id, views: r.views,
+        likes: eng.likes ?? null, comments: eng.comments ?? null, recordedAt: now
+      });
+    }
     // Successes are recorded as well as failures -- without them the panel can
     // say what broke but not what it actually got through, which is half of
     // "what has been refreshed and what is still pending".

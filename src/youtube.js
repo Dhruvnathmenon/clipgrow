@@ -416,20 +416,32 @@ export async function fetchVideoDetails(ids, accessToken, apiKey, fetchOneBatch 
 
 /**
  * View counts for a set of video ids.
- * @returns Map(videoId -> {ok:true, views} | {ok:false, code}). An id missing
- *          from the map entirely means it was genuinely absent from a
- *          successful response -- the honest signal that the video is gone.
- *          An id present with ok:false means the fetch itself failed for
- *          just that id's batch, which the caller must not confuse with the
- *          video not existing.
+ * @returns Map(videoId -> {ok:true, views, engagement} | {ok:false, code}).
+ *          An id missing from the map entirely means it was genuinely
+ *          absent from a successful response -- the honest signal that the
+ *          video is gone. An id present with ok:false means the fetch
+ *          itself failed for just that id's batch, which the caller must
+ *          not confuse with the video not existing. `engagement` reads
+ *          likeCount/commentCount straight out of the SAME `statistics`
+ *          object already fetched for viewCount -- zero extra quota, feeds
+ *          the bot-detection badge only, never earnings. Instagram-only
+ *          fields (saved/shares/avg_watch_time_sec) are always null here.
  */
 export async function fetchViews(account, mediaIds, env, { onAttempt } = {}) {
   const items = await fetchVideoDetails(mediaIds, account.access_token, env && env.YT_API_KEY, undefined, onAttempt);
   const map = new Map();
   for (const v of items) {
     if (v.__batchError) { map.set(v.id, { ok: false, code: v.__batchError }); continue; }
-    const n = v.statistics && v.statistics.viewCount;
-    map.set(v.id, { ok: true, views: Number(n || 0) || 0 });
+    const stats = v.statistics || {};
+    const n = stats.viewCount;
+    map.set(v.id, {
+      ok: true, views: Number(n || 0) || 0,
+      engagement: {
+        likes: stats.likeCount != null ? Number(stats.likeCount) || 0 : null,
+        comments: stats.commentCount != null ? Number(stats.commentCount) || 0 : null,
+        saved: null, shares: null, avg_watch_time_sec: null
+      }
+    });
   }
   return map;
 }

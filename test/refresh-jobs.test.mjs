@@ -53,11 +53,20 @@ function makeDb({ job, submissions = [], accounts = [], igCalls = [] } = {}) {
       return { meta: { changes: 1 } };
     }
     // Guarded submission writes -- the AND locked_at IS NULL is the point.
+    // Bind order matches the real statement in src/refresh-jobs.js:
+    // views, likes, comments, saved, shares, avg_watch_time_sec, last_synced_at, last_ok_sync_at, id.
     if (/^UPDATE submissions SET views = \?/.test(sql)) {
-      const [views, ls, lok, id] = a;
+      const [views, likes, comments, saved, shares, avgWatchTimeSec, ls, lok, id] = a;
       const s = state.submissions.find(x => x.id === id);
       if (!s || s.locked_at != null) return { meta: { changes: 0 } };
-      Object.assign(s, { views, last_synced_at: ls, last_ok_sync_at: lok, sync_error: null });
+      Object.assign(s, { views, likes, comments, saved, shares, avg_watch_time_sec: avgWatchTimeSec,
+        last_synced_at: ls, last_ok_sync_at: lok, sync_error: null });
+      return { meta: { changes: 1 } };
+    }
+    if (/^INSERT INTO submission_view_snapshots/.test(sql)) {
+      state.snapshots = state.snapshots || [];
+      const [submissionId, clipperId, views, likes, comments, recordedAt] = a;
+      state.snapshots.push({ submission_id: submissionId, clipper_id: clipperId, views, likes, comments, recorded_at: recordedAt });
       return { meta: { changes: 1 } };
     }
     if (/^UPDATE submissions SET sync_error = \?, last_synced_at = \?/.test(sql)) {
@@ -74,6 +83,10 @@ function makeDb({ job, submissions = [], accounts = [], igCalls = [] } = {}) {
 
   function first(sql, a) {
     if (/FROM refresh_jobs WHERE id/.test(sql)) return { ...state.job };
+    // recordViewSnapshot's "is this a real delta" check -- no prior snapshot
+    // in these tests, so every real write records one, matching production
+    // behaviour for a clip's first-ever sync.
+    if (/FROM submission_view_snapshots WHERE submission_id/.test(sql)) return null;
     // loadAccount joins in the campaign this account works for, so match the
     // new query shape too and supply the fields it aliases.
     if (/FROM social_accounts/.test(sql)) {

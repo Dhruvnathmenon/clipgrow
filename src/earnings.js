@@ -2,6 +2,7 @@ import { cpmEarning } from './earning-math.js';
 import { maxPayoutPerVideo } from './db.js';
 import { getAdapter, campaignPlatforms } from './platforms.js';
 import { makeCallCounter, getBudget, MAX_CLIPS_FOR_FULL_REFRESH, CLIP_COOLDOWN_MS } from './rate-budget.js';
+import { recordViewSnapshot } from './view-snapshots.js';
 
 export async function markAccount(db, accountId, { status, code }) {
   await db.prepare(
@@ -176,9 +177,19 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
       continue;
     }
 
-    await db.prepare(
-      'UPDATE submissions SET views = ?, last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL WHERE id = ? AND locked_at IS NULL'
-    ).bind(r.views, now, now, s.id).run();
+    const eng = r.engagement || {};
+    const changed = await db.prepare(
+      `UPDATE submissions SET views = ?, likes = ?, comments = ?, saved = ?, shares = ?, avg_watch_time_sec = ?,
+              last_synced_at = ?, last_ok_sync_at = ?, sync_error = NULL
+        WHERE id = ? AND locked_at IS NULL`
+    ).bind(r.views, eng.likes ?? null, eng.comments ?? null, eng.saved ?? null, eng.shares ?? null, eng.avg_watch_time_sec ?? null,
+           now, now, s.id).run();
+    if (changed.meta.changes) {
+      await recordViewSnapshot(db, {
+        submissionId: s.id, clipperId: account.clipper_id, views: r.views,
+        likes: eng.likes ?? null, comments: eng.comments ?? null, recordedAt: now
+      });
+    }
     synced++;
   }
 

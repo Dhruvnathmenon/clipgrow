@@ -237,9 +237,21 @@
     // wiring is needed here.
     // Reviewing is a quality + channel check done by opening the video
     // itself -- no thumbnail, views or platform badge needed for that.
+    // None/Low/Medium/High traffic-light -- a passive display signal
+    // (src/bot-detection.js, src/bot-correlation.js) so a reviewer is
+    // naturally more careful on an amber/red clip. It never changes what
+    // tick/cross/skip does, and there is nothing to dismiss -- reuses the
+    // existing badge colour classes rather than inventing new CSS.
+    const RISK_BADGE_CLASS={none:'skip',low:'active',medium:'needs_reauth',high:'cross'};
+    const RISK_LABEL={none:'clear',low:'low risk',medium:'medium risk',high:'high risk'};
+    function riskBadge(tier,reason){
+      if(!tier) return ''; // not yet scored -- no badge at all
+      return ` <span class="badge ${RISK_BADGE_CLASS[tier]}" title="${esc(reason||'Automated risk signal -- for your attention only')}">${RISK_LABEL[tier]}</span>`;
+    }
+
     function qcard(v){
       return `<div class="qcard">
-        <div class="qcard-meta"><b>${esc(v.clipper_display_name)}</b><br>
+        <div class="qcard-meta"><b>${esc(v.clipper_display_name)}</b>${riskBadge(v.bot_risk_tier,v.bot_score_reason)}<br>
           <a href="${esc(v.permalink)}" target="_blank" rel="noopener">Open video ↗</a></div>
         <textarea class="form-control" id="fb-${v.id}" placeholder="Feedback (required)"></textarea>
         <div class="qcard-btns">
@@ -267,7 +279,7 @@
           ? rv.reviews.map(r=>`<div class="rcard">
               ${r.has_thumb?`<img src="${r.thumb}" loading="lazy" />`:''}
               <div class="rcard-body">
-                <span class="badge ${r.verdict}">${r.verdict}</span>
+                <span class="badge ${r.verdict}">${r.verdict}</span>${riskBadge(r.bot_risk_tier,r.bot_score_reason)}
                 <b>${esc(r.clipper_username)}</b> · ${esc(r.campaign_name)}<br>
                 <span class="muted">Reviewed by ${esc(r.reviewer_name)} · ${when(r.reviewed_at)}</span>
                 ${r.feedback?`<div class="rcard-fb">"${esc(r.feedback)}"</div>`:''}

@@ -17,6 +17,7 @@ import { getSession } from './auth.js';
 import { err } from './http.js';
 import { logError, pruneErrorLog } from './error-log.js';
 import { wrapD1, flushUsage } from './d1-usage.js';
+import { scoreRecentSubmissions } from './bot-scoring.js';
 
 // A session only ever carries a role + a bare id (auth.js's signSession
 // payload) -- never a name -- so resolving a human-readable actor_label for
@@ -356,7 +357,9 @@ export default {
       const jobId = message.body && message.body.jobId;
       if (!jobId) { message.ack(); continue; }
       try {
-        const r = await advanceJob(wrapped, wrappedEnv, jobId, { onFinish: () => reallocateAll(wrapped) });
+        const r = await advanceJob(wrapped, wrappedEnv, jobId, {
+          onFinish: async () => { await reallocateAll(wrapped); await scoreRecentSubmissions(wrapped); }
+        });
         if (r.error) console.error(`[refresh-queue] job ${jobId}: ${r.error}`);
         message.ack();
       } catch (e) {
@@ -448,7 +451,9 @@ export default {
           console.log(`[cron sync] skipped: ${created.error}`);
           return;
         }
-        const r = await advanceJob(wrapped, wrappedEnv, created.job_id, { onFinish: () => reallocateAll(wrapped) });
+        const r = await advanceJob(wrapped, wrappedEnv, created.job_id, {
+          onFinish: async () => { await reallocateAll(wrapped); await scoreRecentSubmissions(wrapped); }
+        });
         console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} calls, ${r.remaining} remaining`);
       } finally {
         await flushUsage(rawDB, wrapped._usage());

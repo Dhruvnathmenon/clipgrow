@@ -30,10 +30,13 @@ test('Instagram fetchViews: one clip failing does not affect the others', async 
   const instagram = getAdapter('instagram');
 
   // 5 clips; the 3rd throws mid-loop, exactly like a transient rate limit or
-  // network blip does in production.
+  // network blip does in production. fetchOne returns fetchMediaViews' real
+  // shape ({views, likes, comments, saved, shares, avgWatchTimeSec}) -- the
+  // engagement fields are omitted here since this test is about isolation,
+  // not about them.
   const fetchOne = async (id) => {
     if (id === 'bad-3') throw Object.assign(new Error('boom'), { code: 'NETWORK' });
-    return { good: 100, 'good-2': 200, 'good-4': 400, 'good-5': 500 }[id];
+    return { views: { good: 100, 'good-2': 200, 'good-4': 400, 'good-5': 500 }[id] };
   };
 
   const results = await instagram.fetchViews(
@@ -43,10 +46,11 @@ test('Instagram fetchViews: one clip failing does not affect the others', async 
     { fetchOne }
   );
 
-  assert.deepEqual(results.get('good'), { ok: true, views: 100 });
-  assert.deepEqual(results.get('good-2'), { ok: true, views: 200 });
-  assert.deepEqual(results.get('good-4'), { ok: true, views: 400 });
-  assert.deepEqual(results.get('good-5'), { ok: true, views: 500 });
+  const engagement = { likes: undefined, comments: undefined, saved: undefined, shares: undefined, avg_watch_time_sec: undefined };
+  assert.deepEqual(results.get('good'), { ok: true, views: 100, engagement });
+  assert.deepEqual(results.get('good-2'), { ok: true, views: 200, engagement });
+  assert.deepEqual(results.get('good-4'), { ok: true, views: 400, engagement });
+  assert.deepEqual(results.get('good-5'), { ok: true, views: 500, engagement });
 
   // The failing clip gets its own isolated error -- fetchViews does not
   // throw, and the failure does not erase or block the four clips around it.
@@ -59,11 +63,14 @@ test('Instagram fetchViews: needsReauth is recorded per-clip, never thrown', asy
   const instagram = getAdapter('instagram');
   const fetchOne = async (id) => {
     if (id === 'expired') throw Object.assign(new Error('token'), { code: 'TOKEN_EXPIRED', needsReauth: true });
-    return 42;
+    return { views: 42 };
   };
 
   const results = await instagram.fetchViews({ access_token: 'tok' }, ['ok-1', 'expired'], {}, { fetchOne });
-  assert.deepEqual(results.get('ok-1'), { ok: true, views: 42 });
+  assert.deepEqual(results.get('ok-1'), {
+    ok: true, views: 42,
+    engagement: { likes: undefined, comments: undefined, saved: undefined, shares: undefined, avg_watch_time_sec: undefined }
+  });
   assert.equal(results.get('expired').ok, false);
   assert.equal(results.get('expired').needsReauth, true);
 });

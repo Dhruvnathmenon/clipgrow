@@ -1864,11 +1864,23 @@
       }catch(e){ box.innerHTML=`<p class="muted">${esc(e.message)}</p>`; }
     };
 
+    // None/Low/Medium/High traffic-light -- a passive display signal
+    // (src/bot-detection.js, src/bot-correlation.js), never a status change.
+    // Reuses the existing badge colour classes rather than inventing new
+    // CSS: none -> skip's grey outline, low -> active's green, medium ->
+    // needs_reauth's amber, high -> disqualified's red.
+    const RISK_BADGE_CLASS={none:'skip',low:'active',medium:'needs_reauth',high:'disqualified'};
+    const RISK_LABEL={none:'clear',low:'low risk',medium:'medium risk',high:'high risk'};
+    function riskBadge(tier,reason){
+      if(!tier) return ''; // not yet scored -- no badge at all
+      return ` <span class="badge ${RISK_BADGE_CLASS[tier]}" title="${esc(reason||'Automated risk signal -- decision support only, nothing acted on automatically')}">${RISK_LABEL[tier]}</span>`;
+    }
+
     function videoRow(s){
       return `<tr>
         <td class="handle">${esc(s.username)}</td>
         <td class="muted">${s.account_username?acctLink(s.platform,s.account_username,s.platform==='youtube'?esc(s.account_username):'@'+esc(s.account_username)):'—'}</td>
-        <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+        <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a>${riskBadge(s.bot_risk_tier,s.bot_score_reason)}</td>
         <td><span class="badge ${s.source==='auto'?'active':''}" style="opacity:.75">${s.source==='auto'?'auto':'pasted'}</span></td>
         <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
         <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
@@ -2789,7 +2801,7 @@
             <thead><tr><th>Campaign</th><th>Video</th><th>Views</th><th>Earning</th><th>State</th><th>Actions</th></tr></thead>
             <tbody>${d.submissions.map(s=>`<tr>
               <td class="muted">${esc(s.campaign_name)}</td>
-              <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a></td>
+              <td><a href="${esc(s.permalink)}" target="_blank" rel="noopener" style="color:var(--neon)">View ↗</a>${riskBadge(s.bot_risk_tier,s.bot_score_reason)}</td>
               <td>${num(s.views)}</td><td class="money">${money(s.locked_at?s.locked_earning:s.earning)}</td>
               <td>${s.lock_reason==='paid'?'<span class="badge connected">paid</span>'
                     :s.locked_at?`<span class="badge kicked">closed${s.lock_reason?' · '+esc(s.lock_reason):''}</span>`

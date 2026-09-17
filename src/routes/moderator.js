@@ -12,6 +12,7 @@ import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
 } from '../reviews.js';
 import { logAction } from '../audit.js';
+import { scoreRecentSubmissions } from '../bot-scoring.js';
 
 // Moderator staff role (migration 023) -- deliberately narrow. A moderator
 // can: trigger a resync for one clipper, leave a private note on a
@@ -172,7 +173,9 @@ export async function handleModerator(request, env, url) {
       kind: 'clipper', clipperId: Number(params.id), triggeredBy: `moderator:${moderatorId}`, respectCooldown: false
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: () => reallocateAll(env.DB) });
+    const first = await advanceJob(env.DB, env, created.job_id, {
+      onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); }
+    });
     await logAction(env.DB, {
       staffType: 'moderator', staffId: moderatorId, staffName, action: 'refresh_triggered',
       targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
