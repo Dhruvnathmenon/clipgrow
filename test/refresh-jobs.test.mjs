@@ -177,12 +177,25 @@ test('runChunk: stops at the per-invocation call budget and leaves the rest pend
 
 test('runChunk: chained invocations eventually complete the whole job with no double-fetching', async () => {
   const total = CALLS_PER_INVOCATION + 15;
-  const subs = Array.from({ length: total }, (_, i) => clip({ id: i + 1, ig_media_id: 'm' + (i + 1) }));
+  // Split across TWO accounts, each kept under Instagram's real 200/hour
+  // ceiling (HOURLY_LIMIT), so this test exercises ONLY the CALLS_PER_INVOCATION
+  // chain-hop mechanism in isolation -- real-budget deferral/exhaustion has its
+  // own dedicated tests below. A single account carrying the whole `total`
+  // would (correctly) get deferred once its real budget ran out, which looks
+  // identical to "never finishes" from this test's fake clock that never
+  // advances -- that's the account-budget mechanism working as intended, not
+  // a chaining bug, so it must not be conflated with this test's assertion.
+  const half = Math.ceil(total / 2);
+  const subs = Array.from({ length: total }, (_, i) =>
+    clip({ id: i + 1, account_id: i < half ? 1 : 2, ig_media_id: 'm' + (i + 1) }));
   const views = {}; subs.forEach(s => { views[s.ig_media_id] = 500; });
-  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+  const pending = subs.map(s => ({ t: 'ig_view', a: s.account_id, s: s.id, m: s.ig_media_id }));
 
   const seen = [];
-  const db = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()] });
+  const db = makeDb({
+    job: { pending_json: JSON.stringify(pending) }, submissions: subs,
+    accounts: [igAccount(), igAccount({ id: 2, username: 'ig2' })]
+  });
   const adapters = igAdapter(views, id => seen.push(id));
 
   let guard = 0, res;

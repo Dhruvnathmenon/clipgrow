@@ -29,11 +29,16 @@ import { logAction } from './audit.js';
 import { isPaused } from './d1-usage.js';
 import { recordViewSnapshot } from './view-snapshots.js';
 
-// Deliberately under Cloudflare's 50 so a single item that internally retries
-// (igFetch backs off and retries on a transient failure, spending more than
-// the 1 call it was budgeted) cannot tip the invocation over the real cap
-// mid-item and lose that item's work.
-export const CALLS_PER_INVOCATION = 40;
+// Cloudflare's per-invocation external-subrequest cap is no longer the real
+// ceiling here (Workers Paid defaults to 10,000/invocation, configurable via
+// wrangler.jsonc's `limits.subrequests`, pinned there to 1000) -- this constant's
+// job now is purely to bound how much work one chain hop covers. Each hop costs
+// a real round trip (persist pending_json, enqueue, queue latency, dequeue,
+// re-read), so fewer/bigger hops means less wall-clock time lost to that
+// overhead alone. 200 keeps a full Instagram account's hourly ceiling
+// (rate-budget.js's HOURLY_LIMIT) coverable in one hop, with 5x headroom under
+// the pinned subrequest limit for a retrying item to not tip the invocation over.
+export const CALLS_PER_INVOCATION = 200;
 
 // What one work item may cost, used to decide whether it still fits in this
 // invocation BEFORE starting it. Import is variable (paging + per-new-video
