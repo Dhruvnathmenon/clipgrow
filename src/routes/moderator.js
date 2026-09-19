@@ -6,7 +6,7 @@ import {
   now, getModeratorByUsername, getModeratorById,
   publicClipper, publicAccount
 } from '../db.js';
-import { createRefreshJob, advanceJob, getJob, publicJob } from '../refresh-jobs.js';
+import { createRefreshJob, startJob, getJob, publicJob } from '../refresh-jobs.js';
 import { reallocateAll } from '../earnings.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
@@ -173,7 +173,7 @@ export async function handleModerator(request, env, url) {
       kind: 'clipper', clipperId: Number(params.id), triggeredBy: `moderator:${moderatorId}`, respectCooldown: false
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
-    const first = await advanceJob(env.DB, env, created.job_id, {
+    const first = await startJob(env.DB, env, created.job_id, {
       onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); }
     });
     await logAction(env.DB, {

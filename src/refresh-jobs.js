@@ -186,8 +186,12 @@ export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy
   // existence as the job happens to reach them.
   let pending = [];
   const acctStats = {};
-  for (const acct of accounts) {
-    const items = await buildAccountItems(db, acct, { respectCooldown });
+  // Read-only per-account queries, run together; Promise.all keeps input order
+  // so the queue order is identical to the old sequential loop.
+  const itemLists = await Promise.all(accounts.map(a => buildAccountItems(db, a, { respectCooldown })));
+  for (let i = 0; i < accounts.length; i++) {
+    const acct = accounts[i];
+    const items = itemLists[i];
     acctStats[String(acct.account_id)] = {
       label: acct.username,
       platform: acct.platform,
@@ -504,6 +508,21 @@ export async function advanceJob(db, env, jobId, opts = {}) {
     await opts.onFinish(jobId);
   }
   return r;
+}
+
+/**
+ * Kick-off for a human-pressed refresh: hand the job to the queue and return
+ * at once, so the button's request doesn't block on the first chunk of work
+ * (up to CALLS_PER_INVOCATION real API calls) while the UI shows a spinner.
+ * The queue consumer runs the same advanceJob with the same onFinish. Falls
+ * back to running the first chunk inline only when no queue binding exists.
+ */
+export async function startJob(db, env, jobId, opts = {}) {
+  if (env && env.REFRESH_QUEUE) {
+    await env.REFRESH_QUEUE.send({ jobId });
+    return { calls: 0, done: false, queued: true };
+  }
+  return advanceJob(db, env, jobId, opts);
 }
 
 /** Shape the progress panel polls. Budget figures are read live, never cached. */

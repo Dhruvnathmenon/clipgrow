@@ -10,7 +10,7 @@ import {
   ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
 import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
-import { createRefreshJob, advanceJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
+import { createRefreshJob, advanceJob, startJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { scoreRecentSubmissions } from '../bot-scoring.js';
 import { tierForScore } from '../bot-detection.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
@@ -1875,7 +1875,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const first = await startJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'global', targetLabel: 'All clippers'
@@ -1900,7 +1900,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await advanceJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const first = await startJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
