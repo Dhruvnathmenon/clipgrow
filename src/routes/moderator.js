@@ -9,6 +9,8 @@ import {
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
 } from '../reviews.js';
+import { applicationQueue, reviewApplication, applicationHistory } from '../applications.js';
+import { logAction } from '../audit.js';
 
 // Moderator staff role (migration 023) -- deliberately narrow. A moderator
 // can: leave a private note on a clipper, review videos (tick/cross/skip),
@@ -166,6 +168,45 @@ export async function handleModerator(request, env, url) {
   // and emergencies -- which is the whole reason the budget headroom exists.
   // A moderator who needs fresher numbers waits for the top of the hour, the
   // same as everyone else.
+
+  // ------------------------------------------------ campaign applications
+  //
+  // Step 1 of the new two-step onboarding. Separate from the posted-clip
+  // review queue below: that one judges live, monetising clips on a
+  // connected account, this one judges a video from someone who has not
+  // connected anything yet. Same reviewer, same "a verdict needs a reason"
+  // rule, different subject -- so they are different queues rather than one
+  // queue with a type column nobody can filter on reliably.
+  if (pathname === '/api/moderator/applications' && method === 'GET') {
+    return json({ applications: await applicationQueue(env.DB) });
+  }
+
+  params = matchPath('/api/moderator/applications/:id/history', pathname);
+  if (params && method === 'GET') {
+    const app = await env.DB.prepare(
+      'SELECT clipper_id, campaign_id FROM campaign_applications WHERE id = ?'
+    ).bind(params.id).first();
+    if (!app) return err('Application not found', 404);
+    // Previous attempts and the notes left on them -- a reviewer deciding a
+    // second or third attempt needs to see what was already asked for.
+    return json({ history: await applicationHistory(env.DB, app.clipper_id, app.campaign_id) });
+  }
+
+  params = matchPath('/api/moderator/applications/:id', pathname);
+  if (params && method === 'POST') {
+    const { verdict, note } = await readJson(request);
+    const r = await reviewApplication(env.DB, Number(params.id), {
+      verdict, note, reviewerType: 'moderator', reviewerId: moderatorId, reviewerName: staffName
+    });
+    if (r.error) return json({ error: r.error }, r.status || 400);
+    await logAction(env.DB, {
+      staffType: 'moderator', staffId: moderatorId, staffName,
+      action: r.verdict === 'approved' ? 'application_approved' : 'application_rejected',
+      targetType: 'application', targetId: Number(params.id),
+      targetLabel: r.removed_from_campaign ? 'final attempt -- removed from campaign' : null
+    });
+    return json(r);
+  }
 
   // -------------------------------------------------------- video review
   if (pathname === '/api/moderator/queue' && method === 'GET') {

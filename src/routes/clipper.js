@@ -25,6 +25,7 @@ import { IgError } from '../instagram.js';
 import { captureThumbnail } from '../media.js';
 import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
+import { submitApplication, applicationState } from '../applications.js';
 
 
 // Clip status lives in src/clipstate.js so the clipper dashboard, the admin
@@ -362,6 +363,38 @@ export async function handleClipper(request, env, url) {
     return json({ ok: true }, 201);
   }
 
+  // Step 1 of joining a campaign: submit a video for review. Joining still
+  // creates the participation instantly (above) -- what an approved
+  // application unlocks is step 2, connecting the account, gated in the
+  // access-request handler below. src/applications.js owns every attempt
+  // rule, so this handler only enforces what is true of the campaign.
+  params = matchPath('/api/clipper/campaigns/:id/applications', pathname);
+  if (params && method === 'POST') {
+    const blocked = blockIfReadOnly();
+    if (blocked) return blocked;
+
+    const campaign = await getCampaignById(env.DB, params.id);
+    if (!campaign) return err('Campaign not found', 404);
+    if (campaign.status === 'completed') return err('This campaign is over and is no longer accepting videos');
+    if (campaign.status === 'budget_full') return err('This campaign\'s budget is fully allocated, so it is closed to new clippers');
+
+    const part = await getParticipation(env.DB, clipperId, params.id);
+    if (!part) return err('Join this campaign before submitting your video');
+    if (part.status === 'kicked') return err('You have been removed from this campaign. Contact the ClipGrow admin.', 403);
+
+    const { video_url } = await readJson(request);
+    const r = await submitApplication(env.DB, {
+      clipperId, campaignId: Number(params.id), videoUrl: video_url
+    });
+    if (r.error) return json({ error: r.error }, r.status || 400);
+    return json(r, 201);
+  }
+
+  params = matchPath('/api/clipper/campaigns/:id/applications', pathname);
+  if (params && method === 'GET') {
+    return json(await applicationState(env.DB, clipperId, Number(params.id)));
+  }
+
   // Detach one platform's account from a campaign so a different one can be
   // linked. Scoped per platform, so unlinking YouTube leaves Instagram intact.
   params = matchPath('/api/clipper/campaigns/:id/account', pathname);
@@ -412,6 +445,19 @@ export async function handleClipper(request, env, url) {
     const part = await getParticipation(env.DB, clipperId, campaignId);
     if (!part) return err('Join this campaign before requesting access');
     if (part.status === 'kicked') return err('You have been removed from this campaign.', 403);
+
+    // Step 1 must have passed before step 2 can start. This is the single
+    // gate that makes the video review mean anything -- without it a clipper
+    // could skip straight to connecting an account, exactly as they could
+    // before applications existed. Everyone already on a campaign when this
+    // shipped carries a grandfathered approval (migration 044), so this
+    // cannot lock out an existing clipper reconnecting an account.
+    const app = await applicationState(env.DB, clipperId, campaignId);
+    if (!app.may_connect) {
+      return err(app.state === 'pending'
+        ? 'Your video is still with a reviewer. You can connect your account once it is approved.'
+        : 'Submit your video for this campaign and get it approved before connecting an account.', 403);
+    }
 
     // `ig_username` is the legacy field name; accept either so an older client
     // posting the old shape still works.
