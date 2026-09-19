@@ -106,14 +106,20 @@ export async function jobAccounts(db, { clipperId = null } = {}) {
 /**
  * Builds the work list for one account.
  *
- * `respectCooldown` is the single difference between the automatic cron and a
+ * `cooldownMs` is the single difference between the automatic cron and a
  * human pressing Refresh. Cron skips clips checked within the last hour --
  * without that, an account with 60 clips would need 240 calls/hour from
  * routine background syncing alone, over Instagram's own 200/hour ceiling
- * before any human asks for anything. A human-triggered full refresh is a
- * deliberate "show me the truth right now", so it checks everything.
+ * before any human asks for anything. A human-triggered refresh uses a much
+ * shorter window (MANUAL_REFRESH_COOLDOWN_MS) rather than none at all: it
+ * still means "now" for anything actually stale, without re-spending the
+ * ceiling on counts fetched minutes earlier. Pass 0 to check everything.
+ *
+ * A clip that has never synced, or whose last attempt failed, has no
+ * last_ok_sync_at and is therefore always due -- no cooldown can strand a
+ * broken clip, whatever window is passed.
  */
-export async function buildAccountItems(db, account, { respectCooldown = true } = {}) {
+export async function buildAccountItems(db, account, { cooldownMs = CLIP_COOLDOWN_MS } = {}) {
   const items = [];
 
   // A completed campaign (Section B3 -- auto-completed on budget exhaustion,
@@ -155,7 +161,7 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
 
   const now = Date.now();
   const due = (results || []).filter(s =>
-    !respectCooldown || !s.last_ok_sync_at || (now - s.last_ok_sync_at) >= CLIP_COOLDOWN_MS
+    !s.last_ok_sync_at || (now - s.last_ok_sync_at) >= cooldownMs
   );
 
   if (account.platform === 'youtube') {
@@ -179,7 +185,7 @@ export async function buildAccountItems(db, account, { respectCooldown = true } 
  * against a partial unique index, not from a check-then-insert, which would
  * race between the check and the insert.
  */
-export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy, respectCooldown = true }) {
+export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy, cooldownMs = CLIP_COOLDOWN_MS }) {
   // Heavy-sync pause (system_pause, src/d1-usage.js) only gates the GLOBAL
   // sweep -- both the cron's automatic kick-off and an admin's own manual
   // "full refresh" button, which share this exact call shape (kind:
@@ -206,7 +212,7 @@ export async function createRefreshJob(db, { kind, clipperId = null, triggeredBy
   const acctStats = {};
   // Read-only per-account queries, run together; Promise.all keeps input order
   // so the queue order is identical to the old sequential loop.
-  const itemLists = await Promise.all(accounts.map(a => buildAccountItems(db, a, { respectCooldown })));
+  const itemLists = await Promise.all(accounts.map(a => buildAccountItems(db, a, { cooldownMs })));
   for (let i = 0; i < accounts.length; i++) {
     const acct = accounts[i];
     const items = itemLists[i];

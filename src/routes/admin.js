@@ -24,7 +24,7 @@ import { payableClips, settlePayment, reversePayment, writeOffAllBelowMin } from
 import { exportClipsCsv, exportPaymentsCsv } from '../export.js';
 import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.js';
 import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
-import { makeCallCounter } from '../rate-budget.js';
+import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { listErrors, resolveError } from '../error-log.js';
 import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
@@ -1871,7 +1871,7 @@ export async function handleAdmin(request, env, url) {
   // truncated, which is what sync_error = 'SUBREQUEST_LIMIT' recorded.
   if (pathname === '/api/admin/refresh/global' && method === 'POST') {
     const created = await createRefreshJob(env.DB, {
-      kind: 'global', triggeredBy: 'admin', respectCooldown: false
+      kind: 'global', triggeredBy: 'admin', cooldownMs: MANUAL_REFRESH_COOLDOWN_MS
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
@@ -1896,7 +1896,7 @@ export async function handleAdmin(request, env, url) {
     if (!clipper) return err('Clipper not found', 404);
 
     const created = await createRefreshJob(env.DB, {
-      kind: 'clipper', clipperId: Number(params.id), triggeredBy: 'admin', respectCooldown: false
+      kind: 'clipper', clipperId: Number(params.id), triggeredBy: 'admin', cooldownMs: MANUAL_REFRESH_COOLDOWN_MS
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 

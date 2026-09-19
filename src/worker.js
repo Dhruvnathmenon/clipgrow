@@ -435,15 +435,16 @@ export default {
           console.error('[cron sync] IG token renewal failed', e && e.message);
         }
 
-        // respectCooldown TRUE, unlike a human-triggered refresh. Without it an
-        // account with 60 clips would need 240 calls/hour from routine syncing
-        // alone -- past Instagram's own 200/hour ceiling before anyone even
-        // asks for a refresh. The cron is upkeep; humans get the full sweep.
+        // Takes createRefreshJob's default cooldown -- the full hour. Without
+        // it an account with 60 clips would need 240 calls/hour from routine
+        // syncing alone, past Instagram's own 200/hour ceiling before anyone
+        // even asks for a refresh. The cron is upkeep; a human pressing
+        // Refresh gets the much shorter MANUAL_REFRESH_COOLDOWN_MS window.
         // createRefreshJob() itself checks the admin's heavy-sync pause switch
         // (system_pause, src/d1-usage.js) and returns the same shape of
         // "skipped" result as the existing in-flight-conflict case below.
         const created = await createRefreshJob(wrapped, {
-          kind: 'global', triggeredBy: 'cron', respectCooldown: true
+          kind: 'global', triggeredBy: 'cron'
         });
         if (created.error) {
           // A global refresh is already in flight (admin-triggered, or a slow

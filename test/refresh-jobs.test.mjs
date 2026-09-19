@@ -13,6 +13,7 @@ import {
   runChunk, advanceJob, buildAccountItems, claimAccount, CALLS_PER_INVOCATION, CHECKPOINT_EVERY,
   BLOCKED_RETRY_DELAY_SECONDS
 } from '../src/refresh-jobs.js';
+import { CLIP_COOLDOWN_MS, MANUAL_REFRESH_COOLDOWN_MS } from '../src/rate-budget.js';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -328,10 +329,10 @@ test('buildAccountItems: cooldown is respected for cron and ignored for a human 
   const db = makeDb({ submissions: subs, accounts: [igAccount()] });
   const acct = { account_id: 1, platform: 'instagram', auto_import: 0 };
 
-  const cron = await buildAccountItems(db, acct, { respectCooldown: true });
+  const cron = await buildAccountItems(db, acct, { cooldownMs: CLIP_COOLDOWN_MS });
   assert.deepEqual(cron.map(i => i.m).sort(), ['never', 'stale'], 'cron skips the recently-checked clip');
 
-  const human = await buildAccountItems(db, acct, { respectCooldown: false });
+  const human = await buildAccountItems(db, acct, { cooldownMs: 0 });
   assert.equal(human.length, 3, 'a human full refresh checks every eligible clip');
 });
 
@@ -344,14 +345,14 @@ test('buildAccountItems: a clip past its 7-day tracking window is excluded, even
   const db = makeDb({ submissions: subs, accounts: [igAccount()] });
   const acct = { account_id: 1, platform: 'instagram', auto_import: 0 };
 
-  const items = await buildAccountItems(db, acct, { respectCooldown: false });
+  const items = await buildAccountItems(db, acct, { cooldownMs: 0 });
   assert.deepEqual(items.map(i => i.m), ['young'], 'the 8-day-old clip is final -- never offered for another sync');
 });
 
 test('buildAccountItems: YouTube batches 50 clips per call instead of one item each', async () => {
   const subs = Array.from({ length: 120 }, (_, i) => clip({ id: i + 1, account_id: 2, ig_media_id: 'v' + i }));
   const db = makeDb({ submissions: subs, accounts: [igAccount({ id: 2, platform: 'youtube' })] });
-  const items = await buildAccountItems(db, { account_id: 2, platform: 'youtube', auto_import: 0 }, { respectCooldown: false });
+  const items = await buildAccountItems(db, { account_id: 2, platform: 'youtube', auto_import: 0 }, { cooldownMs: 0 });
 
   assert.equal(items.length, 3, '120 clips -> 3 batched calls, not 120');
   assert.equal(items[0].s.length, 50);
@@ -469,4 +470,52 @@ test('advanceJob: a chunk that did real work hands off immediately, with no adde
   assert.equal(r.done, false, 'and there is still work left over for the next leg');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].opts, undefined, 'no delay -- a working chain must not be slowed down by the guard');
+});
+
+/* The Refresh button used to pass no cooldown at all, so pressing it twice
+   re-fetched every clip both times. With one account's 139 clips against
+   Instagram's 200/hour ceiling, the second press had nothing left to spend
+   on the clips that actually were stale, and the job sat deferring for over
+   half an hour. MANUAL_REFRESH_COOLDOWN_MS is the middle ground: short
+   enough that Refresh still means "now", long enough that a double-press
+   cannot burn the hour's budget twice. */
+test('buildAccountItems: a manual refresh skips only what was checked minutes ago', async () => {
+  const now = Date.now();
+  const subs = [
+    clip({ id: 1, ig_media_id: 'just-checked', last_ok_sync_at: now - 5 * 60 * 1000 }),
+    clip({ id: 2, ig_media_id: 'worth-rechecking', last_ok_sync_at: now - 20 * 60 * 1000 }),
+    clip({ id: 3, ig_media_id: 'stale', last_ok_sync_at: now - 2 * HOUR })
+  ];
+  const db = makeDb({ submissions: subs, accounts: [igAccount()] });
+  const acct = { account_id: 1, platform: 'instagram', auto_import: 0 };
+
+  const manual = await buildAccountItems(db, acct, { cooldownMs: MANUAL_REFRESH_COOLDOWN_MS });
+  assert.deepEqual(manual.map(i => i.m).sort(), ['stale', 'worth-rechecking'],
+    'the clip fetched five minutes ago has no newer number to give, so its call is not spent again');
+
+  // The cron's own window is unchanged by any of this.
+  const cron = await buildAccountItems(db, acct, { cooldownMs: CLIP_COOLDOWN_MS });
+  assert.deepEqual(cron.map(i => i.m), ['stale'], 'the hourly cron window still applies to the cron');
+});
+
+/* The edge case a cooldown could plausibly break: a clip that has never
+   synced, or whose last attempt failed, has no last_ok_sync_at at all. It
+   must stay due under EVERY window, or a broken clip would be quietly
+   skipped for as long as the cooldown lasts -- the opposite of what someone
+   pressing Refresh is trying to find out. */
+test('buildAccountItems: a never-synced or failed clip is due under any cooldown', async () => {
+  const now = Date.now();
+  const subs = [
+    clip({ id: 1, ig_media_id: 'never-synced', last_ok_sync_at: null }),
+    clip({ id: 2, ig_media_id: 'failed-last-time', last_ok_sync_at: null, sync_error: 'NETWORK' }),
+    clip({ id: 3, ig_media_id: 'fine', last_ok_sync_at: now - 60 * 1000 })
+  ];
+  const db = makeDb({ submissions: subs, accounts: [igAccount()] });
+  const acct = { account_id: 1, platform: 'instagram', auto_import: 0 };
+
+  for (const cooldownMs of [0, MANUAL_REFRESH_COOLDOWN_MS, CLIP_COOLDOWN_MS]) {
+    const items = await buildAccountItems(db, acct, { cooldownMs });
+    assert.ok(items.some(i => i.m === 'never-synced'), `never-synced stays due at cooldown ${cooldownMs}`);
+    assert.ok(items.some(i => i.m === 'failed-last-time'), `a failed clip stays due at cooldown ${cooldownMs}`);
+  }
 });

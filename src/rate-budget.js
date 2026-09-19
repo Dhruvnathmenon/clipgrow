@@ -14,6 +14,16 @@ const WINDOW_MS = 60 * 60 * 1000;
 // refresh or individual -- there is nothing fresher to get within the hour,
 // and re-asking would just spend budget for the same number.
 export const CLIP_COOLDOWN_MS = 60 * 60 * 1000;
+// The same idea, sized for a human pressing Refresh rather than the cron.
+// That path used to apply no cooldown at all, on the reasoning that a person
+// asking is asking for the truth right now -- but a clip checked minutes ago
+// has no newer number to give, so the calls went on re-fetching counts we
+// already had. That is what let one refresh, pressed again soon after
+// another, spend an account's entire 200/hour ceiling on unchanged numbers
+// and leave the genuinely stale clips with no budget left to check them.
+// Short enough that Refresh still means "now", long enough that pressing it
+// twice cannot burn an hour's budget twice.
+export const MANUAL_REFRESH_COOLDOWN_MS = 15 * 60 * 1000;
 // A full refresh needs every eligible clip to fit in one hour's ceiling, full
 // stop -- no partial/priority attempt. An account that outgrows this needs
 // its old clips locked/paid down below the line, not a cleverer sync order.

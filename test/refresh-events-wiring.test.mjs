@@ -65,7 +65,7 @@ const events = (db) => db._rows('refresh_events');
 
 test('a per-clip failure is written with its clipper, campaign, permalink and reason', async () => {
   const db = seed([{ id: 101, media: 'm101' }]);
-  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
 
   await runChunk(db, {}, job_id, {
     adapters: adapter({
@@ -89,7 +89,7 @@ test('a per-clip failure is written with its clipper, campaign, permalink and re
 
 test('a successful clip is recorded too, so "what got through" is answerable', async () => {
   const db = seed([{ id: 101, media: 'm101' }]);
-  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
 
   await runChunk(db, {}, job_id, { adapters: adapter({ m101: 5000 }) });
 
@@ -101,7 +101,7 @@ test('a successful clip is recorded too, so "what got through" is answerable', a
 
 test('a deleted post is recorded as gone, not as a mystery', async () => {
   const db = seed([{ id: 101, media: 'm101' }]);
-  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
 
   await runChunk(db, {}, job_id, { adapters: adapter({}) });   // undefined => not found
 
@@ -116,7 +116,7 @@ test('an item that THROWS records one event per clip it was carrying', async () 
   // any per-clip write, so clips_failed went up while the clips kept whatever
   // stale sync_error they already had.
   const db = seed([{ id: 101, media: 'm101' }, { id: 102, media: 'm102' }]);
-  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const { job_id } = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
 
   await runChunk(db, {}, job_id, { adapters: adapter({}, { throwFor: 'm101' }) });
 
@@ -132,12 +132,12 @@ test('an item that THROWS records one event per clip it was carrying', async () 
 test('the recorded history outlives the clip succeeding later', async () => {
   const db = seed([{ id: 101, media: 'm101' }]);
 
-  const first = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const first = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
   await runChunk(db, {}, first.job_id, { adapters: adapter({ m101: { err: 'RATE_LIMITED' } }) });
 
   // Second run succeeds and clears submissions.sync_error -- which is exactly
   // how the old single-slot record lost the reason.
-  const second = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', respectCooldown: false });
+  const second = await createRefreshJob(db, { kind: 'global', triggeredBy: 'cron', cooldownMs: 0 });
   await runChunk(db, {}, second.job_id, { adapters: adapter({ m101: 8000 }) });
 
   const clip = db._rows('submissions')[0];
@@ -155,7 +155,7 @@ test('buildAccountItems still drives the whole chain from a real participation',
   const acct = {
     account_id: 11, platform: 'instagram', auto_import: 0, part_status: 'active'
   };
-  const items = await buildAccountItems(db, acct, { respectCooldown: false });
+  const items = await buildAccountItems(db, acct, { cooldownMs: 0 });
   assert.equal(items.length, 2, 'one view item per clip');
   assert.deepEqual(items.map(i => i.s).sort(), [101, 102]);
 });

@@ -58,7 +58,7 @@ test('buildAccountItems never re-queues a MEDIA_NOT_FOUND or PRE_CONVERSION_MEDI
     ]
   });
   const account = { account_id: 1, platform: 'instagram', auto_import: 0, part_status: 'active', campaign_status: 'active' };
-  const items = await buildAccountItems(db, account, { respectCooldown: false });
+  const items = await buildAccountItems(db, account, { cooldownMs: 0 });
   assert.deepEqual(items.map(i => i.m), ['live'], 'only the clip with no permanent error is offered');
 });
 

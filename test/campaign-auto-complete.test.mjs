@@ -129,6 +129,6 @@ test('buildAccountItems excludes every submission on a completed campaign, even 
     account_id: 1, platform: 'instagram', auto_import: 0, part_status: 'active',
     campaign_status: 'completed' // as loadAccount would now report it
   };
-  const items = await buildAccountItems(db, account, { respectCooldown: false });
+  const items = await buildAccountItems(db, account, { cooldownMs: 0 });
   assert.deepEqual(items, [], 'nothing offered for sync -- not the import leg, not any view leg');
 });

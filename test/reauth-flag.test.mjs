@@ -42,7 +42,7 @@ function seed() {
 const acct = (db) => db._sqlite.prepare('SELECT * FROM social_accounts WHERE id = 10').get();
 
 async function runWith(db, fetchViews) {
-  const created = await createRefreshJob(db, { kind: 'global', triggeredBy: 'test', respectCooldown: false });
+  const created = await createRefreshJob(db, { kind: 'global', triggeredBy: 'test', cooldownMs: 0 });
   assert.ok(created.job_id, created.error || 'job should create');
   for (let i = 0; i < 10; i++) {
     const r = await runChunk(db, {}, created.job_id, { adapters: { youtube: { listRecent: async () => [], fetchViews } } });

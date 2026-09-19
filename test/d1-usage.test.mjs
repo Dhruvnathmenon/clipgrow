@@ -11,6 +11,7 @@ import { makeSqliteD1 } from './helpers/sqlite-d1.mjs';
 import { handleAdmin } from '../src/routes/admin.js';
 import { createSessionCookie } from '../src/auth.js';
 import { createRefreshJob } from '../src/refresh-jobs.js';
+import { CLIP_COOLDOWN_MS } from '../src/rate-budget.js';
 import {
   wrapD1, flushUsage, isPaused, setPaused, getPauseState, platformUsageSnapshot,
   D1_MONTHLY_LIMITS
@@ -145,14 +146,14 @@ test('pausing blocks a global refresh (cron or admin-triggered) but not a single
   const env = seedEnv();
   await setPaused(env.DB, { paused: true, staffName: 'Admin' });
 
-  const global = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'cron', respectCooldown: true });
+  const global = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'cron', cooldownMs: CLIP_COOLDOWN_MS });
   assert.equal(global.status, 409);
   assert.match(global.error, /paused/i);
 
-  const globalAdmin = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'admin', respectCooldown: false });
+  const globalAdmin = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'admin', cooldownMs: 0 });
   assert.match(globalAdmin.error, /paused/i, 'the admin\'s own manual full-refresh button is gated the same way');
 
-  const perClipper = await createRefreshJob(env.DB, { kind: 'clipper', clipperId: 1, triggeredBy: 'admin', respectCooldown: false });
+  const perClipper = await createRefreshJob(env.DB, { kind: 'clipper', clipperId: 1, triggeredBy: 'admin', cooldownMs: 0 });
   assert.equal(perClipper.error, undefined, 'a targeted single-clipper refresh is not "heavy" and stays ungated');
 });
 
@@ -161,7 +162,7 @@ test('resuming restores both the cron and admin-triggered global refresh', async
   await setPaused(env.DB, { paused: true, staffName: 'Admin' });
   await setPaused(env.DB, { paused: false, staffName: 'Admin' });
 
-  const global = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'cron', respectCooldown: true });
+  const global = await createRefreshJob(env.DB, { kind: 'global', triggeredBy: 'cron', cooldownMs: CLIP_COOLDOWN_MS });
   assert.equal(global.error, undefined);
 });
 

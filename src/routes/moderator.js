@@ -8,6 +8,7 @@ import {
 } from '../db.js';
 import { createRefreshJob, startJob, getJob, publicJob } from '../refresh-jobs.js';
 import { reallocateAll } from '../earnings.js';
+import { MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
 } from '../reviews.js';
@@ -170,7 +171,7 @@ export async function handleModerator(request, env, url) {
       .bind(params.id).first();
     if (!clipper) return err('Clipper not found', 404);
     const created = await createRefreshJob(env.DB, {
-      kind: 'clipper', clipperId: Number(params.id), triggeredBy: `moderator:${moderatorId}`, respectCooldown: false
+      kind: 'clipper', clipperId: Number(params.id), triggeredBy: `moderator:${moderatorId}`, cooldownMs: MANUAL_REFRESH_COOLDOWN_MS
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
     const first = await startJob(env.DB, env, created.job_id, {

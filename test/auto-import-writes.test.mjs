@@ -48,7 +48,7 @@ const adapters = (media = MEDIA) => ({
 });
 
 async function runImportLeg(db, { media = MEDIA } = {}) {
-  const created = await createRefreshJob(db, { kind: 'global', triggeredBy: 'test', respectCooldown: false });
+  const created = await createRefreshJob(db, { kind: 'global', triggeredBy: 'test', cooldownMs: 0 });
   assert.ok(created.job_id, created.error || 'job should be created');
   // Drive legs until the job finishes, so the import item actually executes.
   for (let i = 0; i < 10; i++) {
