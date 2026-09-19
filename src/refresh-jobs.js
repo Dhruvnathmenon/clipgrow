@@ -48,6 +48,16 @@ export const CALLS_PER_INVOCATION = 200;
 // write per 25 items is negligible next to the network work it protects.
 export const CHECKPOINT_EVERY = 25;
 
+// How long to wait before the next leg when a chunk completed NOTHING.
+// Everything still queued is then waiting on something this job cannot
+// hurry: a real per-account Instagram ceiling (rate-budget.js's rolling
+// 200/hour) or another job's account lock. Handing straight back just
+// spins -- production job 219 burned 259 invocations in 14 minutes
+// deferring the same exhausted account over and over, while the 129 clips
+// it still owed were never going to be fetchable until the rolling hour
+// advanced. Waiting costs the job nothing it was not already waiting for.
+export const BLOCKED_RETRY_DELAY_SECONDS = 60;
+
 // What one work item may cost, used to decide whether it still fits in this
 // invocation BEFORE starting it. Import is variable (paging + per-new-video
 // Shorts probes) so it is budgeted pessimistically rather than optimistically.
@@ -276,6 +286,11 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   if (!ACTIVE.includes(job.status)) return { done: true, alreadyFinished: true };
 
   let pending = JSON.parse(job.pending_json || '[]');
+  // Measured rather than counted per branch: items leave the queue from the
+  // normal path and from the account-unavailable skip, while deferral
+  // reorders without removing. Comparing the length is the one reading that
+  // cannot disagree with the queue it is describing.
+  const startedWith = pending.length;
   const stats = {
     fetched: job.clips_fetched, failed: job.clips_failed,
     skipped: job.clips_skipped, imported: job.imported
@@ -502,6 +517,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   return {
     done: finished,
     calls,
+    itemsDone: startedWith - pending.length,
     remaining: pending.length,
     blocked: blockedThisRound,
     enqueue: !finished,
@@ -525,7 +541,8 @@ export async function advanceJob(db, env, jobId, opts = {}) {
   const r = await runChunk(db, env, jobId, opts);
 
   if (r.enqueue && env && env.REFRESH_QUEUE) {
-    await env.REFRESH_QUEUE.send({ jobId });
+    await env.REFRESH_QUEUE.send({ jobId },
+      r.itemsDone === 0 ? { delaySeconds: BLOCKED_RETRY_DELAY_SECONDS } : undefined);
   }
 
   if (r.done && !r.alreadyFinished && !r.error && typeof opts.onFinish === 'function') {

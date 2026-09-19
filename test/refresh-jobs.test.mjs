@@ -10,7 +10,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  runChunk, buildAccountItems, claimAccount, CALLS_PER_INVOCATION, CHECKPOINT_EVERY
+  runChunk, advanceJob, buildAccountItems, claimAccount, CALLS_PER_INVOCATION, CHECKPOINT_EVERY,
+  BLOCKED_RETRY_DELAY_SECONDS
 } from '../src/refresh-jobs.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -427,4 +428,45 @@ test('runChunk: checkpoints progress mid-chunk, so a killed invocation keeps it'
     'the fetch count persisted alongside the queue it belongs to');
   assert.equal(left.some(x => x.s <= saved), false,
     'nothing already checkpointed is queued again -- that is the wasted API spend');
+});
+
+/* Production job 219: 129 clips all belonged to one account that had spent
+   its full 200/hour Instagram ceiling, so every invocation deferred it and
+   handed straight back. 259 invocations in 14 minutes, none of them able to
+   fetch anything, because nothing separated "hand off, there is more to do"
+   from "hand off, everything left is rate-limited". These pin that split. */
+test('advanceJob: a chunk that completed nothing backs off instead of handing straight back', async () => {
+  const NOW = Date.now();
+  const igCalls = Array.from({ length: 200 }, (_, i) => ({ social_account_id: 1, called_at: NOW - 1000 - i }));
+  const subs = [clip({ id: 1, ig_media_id: 'm1' }), clip({ id: 2, ig_media_id: 'm2' })];
+  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+  const db = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()], igCalls });
+
+  const sent = [];
+  const env = { REFRESH_QUEUE: { send: async (body, opts) => { sent.push({ body, opts }); } } };
+
+  const r = await advanceJob(db, env, 1, { adapters: igAdapter({ m1: 1, m2: 2 }) });
+
+  assert.equal(r.itemsDone, 0, 'nothing left the queue -- the account was rate-limited, not slow');
+  assert.equal(sent.length, 1, 'the job still continues; it is the timing that changes');
+  assert.equal(sent[0].opts && sent[0].opts.delaySeconds, BLOCKED_RETRY_DELAY_SECONDS,
+    'the next leg waits, rather than spinning against a ceiling that only time clears');
+});
+
+test('advanceJob: a chunk that did real work hands off immediately, with no added delay', async () => {
+  const total = CALLS_PER_INVOCATION + 5;
+  const subs = Array.from({ length: total }, (_, i) => clip({ id: i + 1, ig_media_id: 'm' + (i + 1) }));
+  const views = {}; subs.forEach(s => { views[s.ig_media_id] = 7; });
+  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+  const db = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()] });
+
+  const sent = [];
+  const env = { REFRESH_QUEUE: { send: async (body, opts) => { sent.push({ body, opts }); } } };
+
+  const r = await advanceJob(db, env, 1, { adapters: igAdapter(views) });
+
+  assert.ok(r.itemsDone > 0, 'this chunk genuinely moved the queue');
+  assert.equal(r.done, false, 'and there is still work left over for the next leg');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].opts, undefined, 'no delay -- a working chain must not be slowed down by the guard');
 });
