@@ -26,6 +26,10 @@ import { captureThumbnail } from '../media.js';
 import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
+import {
+  driveConfigured, createUploadSession, verifyUploadedFile, driveFileName,
+  DriveError, MAX_UPLOAD_BYTES, ALLOWED_MIME
+} from '../drive.js';
 
 
 // Clip status lives in src/clipstate.js so the clipper dashboard, the admin
@@ -382,9 +386,26 @@ export async function handleClipper(request, env, url) {
     if (!part) return err('Join this campaign before submitting your video');
     if (part.status === 'kicked') return err('You have been removed from this campaign. Contact the ClipGrow admin.', 403);
 
-    const { video_url } = await readJson(request);
+    const { video_url, drive_file_id } = await readJson(request);
+
+    // An attached file is the normal path. The browser reports the id Google
+    // gave it, which is not something to take on trust -- verifyUploadedFile
+    // re-reads the object from Drive and refuses anything that is not really
+    // in our pending folder, so a clipper cannot claim someone else's upload
+    // (or any other file in the account) as their submission.
+    let file = null;
+    if (drive_file_id) {
+      if (!driveConfigured(env)) return err('Video uploads are not configured yet.', 503);
+      try {
+        file = await verifyUploadedFile(env, String(drive_file_id));
+      } catch (e) {
+        if (e instanceof DriveError) return json({ error: e.message, code: e.code }, e.status);
+        throw e;
+      }
+    }
+
     const r = await submitApplication(env.DB, {
-      clipperId, campaignId: Number(params.id), videoUrl: video_url
+      clipperId, campaignId: Number(params.id), videoUrl: video_url, file
     });
     if (r.error) return json({ error: r.error }, r.status || 400);
     return json(r, 201);
@@ -393,6 +414,55 @@ export async function handleClipper(request, env, url) {
   params = matchPath('/api/clipper/campaigns/:id/applications', pathname);
   if (params && method === 'GET') {
     return json(await applicationState(env.DB, clipperId, Number(params.id)));
+  }
+
+  // Mints a resumable upload session so the browser can send the video
+  // straight to Drive. The bytes never pass through this Worker -- see the
+  // header comment in src/drive.js for why.
+  //
+  // Eligibility is checked HERE as well as at submit time. Without it a
+  // clipper who has used all three attempts could still spend the founder's
+  // storage on uploads that can never be submitted.
+  params = matchPath('/api/clipper/campaigns/:id/applications/upload-url', pathname);
+  if (params && method === 'POST') {
+    const blocked = blockIfReadOnly();
+    if (blocked) return blocked;
+    if (!driveConfigured(env)) {
+      return err('Video uploads are not configured yet. Contact the ClipGrow admin.', 503);
+    }
+
+    const campaignId = Number(params.id);
+    const campaign = await getCampaignById(env.DB, campaignId);
+    if (!campaign) return err('Campaign not found', 404);
+
+    const part = await getParticipation(env.DB, clipperId, campaignId);
+    if (!part) return err('Join this campaign before submitting your video');
+    if (part.status === 'kicked') return err('You have been removed from this campaign.', 403);
+
+    const state = await applicationState(env.DB, clipperId, campaignId);
+    if (!state.may_submit) {
+      return err(state.state === 'pending'
+        ? 'Your video is already with a reviewer.'
+        : state.state === 'approved'
+          ? 'Your video for this campaign has already been approved.'
+          : 'You have used all your attempts for this campaign.', 409);
+    }
+
+    const { mime_type, size_bytes, ext } = await readJson(request);
+    try {
+      const fileName = driveFileName({
+        clipperUsername: me.username, campaignName: campaign.name,
+        attempt: state.rejections + 1, ext
+      });
+      const session = await createUploadSession(env, {
+        fileName, mimeType: mime_type, sizeBytes: Number(size_bytes),
+        origin: new URL(request.url).origin
+      });
+      return json({ ...session, max_bytes: MAX_UPLOAD_BYTES, allowed: ALLOWED_MIME });
+    } catch (e) {
+      if (e instanceof DriveError) return json({ error: e.message, code: e.code }, e.status);
+      throw e;
+    }
   }
 
   // Detach one platform's account from a campaign so a different one can be

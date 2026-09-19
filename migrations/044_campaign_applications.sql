@@ -19,7 +19,19 @@ CREATE TABLE IF NOT EXISTS campaign_applications (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   clipper_id    INTEGER NOT NULL REFERENCES clippers(id),
   campaign_id   INTEGER NOT NULL REFERENCES campaigns(id),
-  video_url     TEXT NOT NULL,
+  -- Nullable because a submission can arrive two ways: a file attached and
+  -- uploaded to our Drive (drive_file_id below, the normal path), or a
+  -- pasted link. Grandfathered rows have neither -- they predate the whole
+  -- process and were never reviewed.
+  video_url     TEXT,
+  -- The Drive object behind an attached file. Held so a verdict can act on
+  -- the file itself: approved is deleted at once, rejected is moved to the
+  -- rejected folder and purged after DRIVE_REJECTED_RETENTION_MS. NULL once
+  -- the file is gone, which is also what stops the purge sweep picking the
+  -- same row up twice.
+  drive_file_id TEXT,
+  file_name     TEXT,
+  file_size     INTEGER,
   attempt       INTEGER NOT NULL,
   -- 'pending' | 'approved' | 'rejected'
   status        TEXT NOT NULL DEFAULT 'pending',
@@ -73,7 +85,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_applications_one_pending
 INSERT INTO campaign_applications
   (clipper_id, campaign_id, video_url, attempt, status,
    reviewer_type, reviewer_name, reviewer_note, reviewed_at, created_at)
-SELECT p.clipper_id, p.campaign_id, '', 0, 'approved',
+SELECT p.clipper_id, p.campaign_id, NULL, 0, 'approved',
        'system', 'System',
        'Already connected an account to this campaign before applications existed -- approved automatically, since the old access-request approval had already vetted them.',
        p.joined_at, p.joined_at

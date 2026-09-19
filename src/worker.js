@@ -12,6 +12,8 @@ import { handleGuide } from './routes/guides.js';
 import { handleMarketing } from './routes/marketing.js';
 import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
+import { purgeExpiredRejections } from './applications.js';
+import { driveConfigured } from './drive.js';
 import { renewInstagramTokens } from './token-renewal.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
@@ -410,6 +412,23 @@ export default {
           if (flagged.length) console.log(`[cron sync] flagged inactive join(s): ${flagged.join(', ')}`);
         } catch (e) {
           console.error('[cron sync] inactive-join cleanup failed', e && e.message);
+        }
+
+        // A rejected clipper's video is kept for a week so a contested
+        // decision can still be checked, then purged. Reads the rows rather
+        // than trusting each verdict to have cleaned up after itself, so a
+        // Drive outage during a review self-heals here instead of leaving
+        // the file in the founder's Drive for good. Never allowed to break
+        // the cron: this is housekeeping, not the sync it rides along with.
+        try {
+          if (driveConfigured(env)) {
+            const swept = await purgeExpiredRejections(wrapped, env);
+            if (swept.purged || swept.failed) {
+              console.log(`[cron sync] purged ${swept.purged} rejected video(s), ${swept.failed} to retry`);
+            }
+          }
+        } catch (e) {
+          console.error('[cron sync] rejected-video purge failed', e && e.message);
         }
 
         // error_log has no archive -- a row past 7 days is just gone (the

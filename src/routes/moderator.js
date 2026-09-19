@@ -200,7 +200,11 @@ export async function handleModerator(request, env, url) {
   if (params && method === 'POST') {
     const { verdict, note } = await readJson(request);
     const r = await reviewApplication(env.DB, Number(params.id), {
-      verdict, note, reviewerType: 'moderator', reviewerId: moderatorId, reviewerName: staffName
+      verdict, note, reviewerType: 'moderator', reviewerId: moderatorId, reviewerName: staffName,
+      // Passing env is what lets the verdict act on the Drive file. Without
+      // it the verdict still stands and the purge sweep collects the file
+      // later -- the review is never blocked on Drive being reachable.
+      env
     });
     if (r.error) return json({ error: r.error }, r.status || 400);
     await logAction(env.DB, {

@@ -14,6 +14,7 @@
 // a clip can exist at all, so there is no money in scope by construction.
 
 import { now } from './db.js';
+import { deleteFile, moveToRejected, DRIVE_REJECTED_RETENTION_MS } from './drive.js';
 
 // Three tries per campaign, then the clipper is removed from that campaign.
 // Deliberately per campaign, not lifetime: a clipper who cannot hit one
@@ -84,11 +85,16 @@ export async function applicationState(db, clipperId, campaignId) {
  * clipper actually holds a participation -- those are route-level concerns
  * with their own error messages, and access.js draws the same line.
  */
-export async function submitApplication(db, { clipperId, campaignId, videoUrl }) {
+export async function submitApplication(db, { clipperId, campaignId, videoUrl, file = null }) {
+  // Either an attached file (the normal path, already verified against Drive
+  // by the caller) or a pasted link. One of the two is required -- a
+  // submission with neither is nothing to review.
   const url = String(videoUrl || '').trim();
-  if (!url) return { error: 'Paste a link to your video.', status: 400 };
-  if (!/^https?:\/\//i.test(url)) return { error: 'That does not look like a link. Paste the full URL, starting with https://', status: 400 };
-  if (url.length > 2000) return { error: 'That link is too long.', status: 400 };
+  if (!file) {
+    if (!url) return { error: 'Attach your video, or paste a link to it.', status: 400 };
+    if (!/^https?:\/\//i.test(url)) return { error: 'That does not look like a link. Paste the full URL, starting with https://', status: 400 };
+    if (url.length > 2000) return { error: 'That link is too long.', status: 400 };
+  }
 
   const state = await applicationState(db, clipperId, campaignId);
   if (state.approved) return { error: 'Your video for this campaign has already been approved.', status: 409 };
@@ -102,9 +108,12 @@ export async function submitApplication(db, { clipperId, campaignId, videoUrl })
   try {
     const res = await db.prepare(
       `INSERT INTO campaign_applications
-         (clipper_id, campaign_id, video_url, attempt, status, created_at)
-       VALUES (?, ?, ?, ?, 'pending', ?)`
-    ).bind(clipperId, campaignId, url, attempt, ts).run();
+         (clipper_id, campaign_id, video_url, drive_file_id, file_name, file_size,
+          attempt, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+    ).bind(clipperId, campaignId, url || null,
+           file ? file.id : null, file ? file.name : null, file ? file.size : null,
+           attempt, ts).run();
     return { ok: true, id: res.meta.last_row_id, attempt, attempts_left: MAX_ATTEMPTS - state.rejections };
   } catch (e) {
     // The one-pending partial unique index fired: two submits raced. The
@@ -121,7 +130,7 @@ export async function submitApplication(db, { clipperId, campaignId, videoUrl })
  * campaign, which is the whole point of a capped process -- see the comment
  * on that UPDATE below for why it is safe to do inline here.
  */
-export async function reviewApplication(db, applicationId, { verdict, note, reviewerType, reviewerId, reviewerName }) {
+export async function reviewApplication(db, applicationId, { verdict, note, reviewerType, reviewerId, reviewerName, env = null }) {
   if (verdict !== 'approved' && verdict !== 'rejected') {
     return { error: 'A verdict must be approved or rejected.', status: 400 };
   }
@@ -177,7 +186,72 @@ export async function reviewApplication(db, applicationId, { verdict, note, revi
     }
   }
 
-  return { ok: true, verdict, removed_from_campaign: removedFromCampaign };
+  // The file's fate follows the verdict. Approved has served its purpose and
+  // goes at once; rejected is kept for a week so a contested decision can
+  // still be checked, then swept by purgeExpiredRejections.
+  //
+  // Deliberately AFTER the verdict is committed, and deliberately unable to
+  // fail the review: a moderator's decision is the thing that matters, and
+  // Drive being briefly unreachable must not cost them the verdict they just
+  // made or leave the application stuck pending. A file that survives its
+  // verdict is caught by the same purge sweep on a later pass, because that
+  // sweep reads the row's status rather than trusting this to have run.
+  let fileHandled = null;
+  if (env && app.drive_file_id) {
+    try {
+      if (verdict === 'approved') {
+        await deleteFile(env, app.drive_file_id);
+        // Cleared only for a delete. A rejected file still exists, in the
+        // rejected folder, and the id is what lets the purge sweep find it
+        // a week from now.
+        await db.prepare('UPDATE campaign_applications SET drive_file_id = NULL WHERE id = ?')
+          .bind(applicationId).run();
+        fileHandled = 'deleted';
+      } else {
+        await moveToRejected(env, app.drive_file_id);
+        fileHandled = 'moved_to_rejected';
+      }
+    } catch (e) {
+      fileHandled = 'deferred';
+    }
+  }
+
+  return { ok: true, verdict, removed_from_campaign: removedFromCampaign, file: fileHandled };
+}
+
+/**
+ * Removes rejected clippers' videos once their week is up, and clears the
+ * id so the row stops claiming to have a file.
+ *
+ * Reads the rows rather than trusting reviewApplication to have moved every
+ * file, so a Drive outage during a verdict self-heals on the next pass
+ * instead of leaving a video in the founder's Drive indefinitely.
+ */
+export async function purgeExpiredRejections(db, env, { at = Date.now(), fetchImpl } = {}) {
+  if (!env) return { purged: 0, failed: 0 };
+  const opts = fetchImpl ? { fetchImpl } : undefined;
+  const cutoff = at - DRIVE_REJECTED_RETENTION_MS;
+  const { results } = await db.prepare(
+    `SELECT id, drive_file_id FROM campaign_applications
+      WHERE status = 'rejected' AND drive_file_id IS NOT NULL AND reviewed_at IS NOT NULL
+        AND reviewed_at < ?
+      LIMIT 200`
+  ).bind(cutoff).all();
+
+  let purged = 0, failed = 0;
+  for (const row of results || []) {
+    try {
+      await deleteFile(env, row.drive_file_id, opts);
+      // Cleared only after Drive confirms, so a failure here leaves the row
+      // eligible for the next sweep rather than orphaning the file silently.
+      await db.prepare('UPDATE campaign_applications SET drive_file_id = NULL WHERE id = ?')
+        .bind(row.id).run();
+      purged++;
+    } catch {
+      failed++;
+    }
+  }
+  return { purged, failed };
 }
 
 /**
