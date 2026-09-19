@@ -10,7 +10,7 @@ import {
   ACTIVE_WINDOW_MS, pendingClipperExpr
 } from '../db.js';
 import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
-import { createRefreshJob, advanceJob, startJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
+import { createRefreshJob, startJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
 import { scoreRecentSubmissions } from '../bot-scoring.js';
 import { tierForScore } from '../bot-detection.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
@@ -1940,9 +1940,9 @@ export async function handleAdmin(request, env, url) {
 
   params = matchPath('/api/admin/refresh/:jobId/retry', pathname);
   if (params && method === 'POST') {
-    const r = await retryJob(env.DB, env, Number(params.jobId));
+    const r = await retryJob(env.DB, Number(params.jobId));
     if (r.error) return err(r.error, r.status || 400);
-    const after = await advanceJob(env.DB, env, Number(params.jobId), { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const after = await startJob(env.DB, env, Number(params.jobId), { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
     return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
   }
 

@@ -40,6 +40,14 @@ import { recordViewSnapshot } from './view-snapshots.js';
 // the pinned subrequest limit for a retrying item to not tip the invocation over.
 export const CALLS_PER_INVOCATION = 200;
 
+// How many work items may be completed before progress is written back.
+// pending_json used to be persisted only after the whole loop, so an
+// invocation that died partway through discarded every clip it had already
+// fetched -- real Instagram calls, spent against the same 200/hour ceiling,
+// for nothing, with the next run starting again from the top. One small D1
+// write per 25 items is negligible next to the network work it protects.
+export const CHECKPOINT_EVERY = 25;
+
 // What one work item may cost, used to decide whether it still fits in this
 // invocation BEFORE starting it. Import is variable (paging + per-new-video
 // Shorts probes) so it is budgeted pessimistically rather than optimistically.
@@ -284,6 +292,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   // account per invocation rather than once per item.
   const budgets = new Map();
   let calls = 0;
+  let doneSinceCheckpoint = 0;
   let blockedThisRound = false;
   // Accounts already pushed to the back of the queue this invocation, so the
   // loop can tell "try the next account" from "we have cycled the whole list".
@@ -444,6 +453,21 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
 
     calls += Math.max(counter.count() - before, cost === ITEM_COST.import ? 0 : cost);
     pending.shift();
+
+    // Checkpoint mid-chunk so a killed invocation keeps what it has done.
+    // Deliberately does NOT touch status/finished_at -- completion is still
+    // decided once, after the loop, from the real pending length.
+    if (++doneSinceCheckpoint >= CHECKPOINT_EVERY) {
+      doneSinceCheckpoint = 0;
+      await db.prepare(
+        `UPDATE refresh_jobs SET pending_json = ?, clips_fetched = ?, clips_failed = ?,
+           clips_skipped = ?, imported = ?, accounts_json = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(
+        JSON.stringify(pending), stats.fetched, stats.failed, stats.skipped,
+        stats.imported, JSON.stringify(acctStats), Date.now(), jobId
+      ).run();
+    }
   }
 
   // Persist every counter's calls to the shared ledger so the budget the UI
@@ -706,15 +730,23 @@ export async function listJobs(db, { limit = 20 } = {}) {
   return (results || []).map(publicJob);
 }
 
-/** Puts a stalled or failed job back on the queue, resuming from pending_json. */
-export async function retryJob(db, env, jobId) {
+/**
+ * Resets a stalled or failed job so it can run again from pending_json.
+ *
+ * Deliberately does NOT start it: this used to enqueue here AND the route
+ * then ran a chunk inline, so one Retry click put two runners on the same
+ * job at once. They shared a jobId, so claimAccount let both through, and
+ * both re-fetched the same clips from the same stale pending list. Starting
+ * the job is the caller's job now, through startJob, exactly like a fresh
+ * refresh -- one kick-off path, one runner.
+ */
+export async function retryJob(db, jobId) {
   const job = await getJob(db, jobId);
   if (!job) return { error: 'Job not found', status: 404 };
   if (job.status === 'done') return { error: 'That refresh already finished.', status: 400 };
 
   await db.prepare("UPDATE refresh_jobs SET status = 'queued', error = NULL, updated_at = ? WHERE id = ?")
     .bind(Date.now(), jobId).run();
-  if (env && env.REFRESH_QUEUE) await env.REFRESH_QUEUE.send({ jobId });
   return { ok: true, job_id: jobId };
 }
 

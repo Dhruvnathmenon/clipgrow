@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  runChunk, buildAccountItems, claimAccount, CALLS_PER_INVOCATION
+  runChunk, buildAccountItems, claimAccount, CALLS_PER_INVOCATION, CHECKPOINT_EVERY
 } from '../src/refresh-jobs.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -30,6 +30,18 @@ function makeDb({ job, submissions = [], accounts = [], igCalls = [] } = {}) {
   function run(sql, a) {
     if (/^UPDATE refresh_jobs SET status = 'running'/.test(sql)) {
       state.job.status = 'running'; state.job.invocations++; return { meta: { changes: 1 } };
+    }
+    // The mid-chunk checkpoint: same leading columns, but deliberately no
+    // status/finished_at (completion is decided once, after the loop). Matched
+    // BEFORE the final write below, and kept distinct because destructuring it
+    // with the final write's bind order silently writes a timestamp into
+    // status -- which the end-of-chunk write then overwrites, hiding the bug.
+    if (/^UPDATE refresh_jobs SET pending_json/.test(sql) && !/status = \?/.test(sql)) {
+      const [pending, fetched, failed, skipped, imported, acctJson, ts] = a;
+      Object.assign(state.job, { pending_json: pending, clips_fetched: fetched, clips_failed: failed,
+        clips_skipped: skipped, imported, accounts_json: acctJson, updated_at: ts });
+      state.checkpoints = (state.checkpoints || 0) + 1;
+      return { meta: { changes: 1 } };
     }
     if (/^UPDATE refresh_jobs SET pending_json/.test(sql)) {
       const [pending, fetched, failed, skipped, imported, acctJson, status, ts, fin] = a;
@@ -363,4 +375,56 @@ test('runChunk: calls actually spent are written to the shared budget ledger', a
 
   assert.equal(db._state.igCalls.length, 5,
     'the ledger the UI reads reflects what this job really spent, not an estimate');
+});
+
+/* Production outage, 2026-09-19: an admin refresh ran its first chunk inline
+   inside the HTTP request. At CALLS_PER_INVOCATION = 200 the chunk outlived
+   the request, the invocation was killed mid-loop, and because pending_json
+   was written only AFTER the loop, every clip it had already fetched was
+   discarded -- job 218 sat at 521 pending across three invocations while
+   spending real Instagram calls each time. The checkpoint is what makes a
+   killed invocation cost at most CHECKPOINT_EVERY items instead of all of
+   them, so it is pinned here rather than left to the end-of-chunk write. */
+test('runChunk: checkpoints progress mid-chunk, so a killed invocation keeps it', async () => {
+  const total = CHECKPOINT_EVERY * 4;
+  const subs = Array.from({ length: total }, (_, i) =>
+    clip({ id: i + 1, ig_media_id: 'm' + (i + 1) }));
+  const views = {}; subs.forEach(s => { views[s.ig_media_id] = 500; });
+  const pending = subs.map(s => ({ t: 'ig_view', a: 1, s: s.id, m: s.ig_media_id }));
+
+  const real = makeDb({ job: { pending_json: JSON.stringify(pending) }, submissions: subs, accounts: [igAccount()] });
+
+  // Stands in for the platform killing the invocation. It has to come from
+  // OUTSIDE the per-item try/catch -- that block deliberately isolates one
+  // item's failure from the rest of the job, so an adapter that throws is
+  // recorded as a failed clip and the loop carries on, which is not the
+  // scenario being pinned here. Dying on the checkpoint write itself is,
+  // and it leaves the two earlier checkpoints already committed.
+  let checkpointWrites = 0;
+  const db = {
+    ...real,
+    prepare(sql) {
+      const st = real.prepare(sql);
+      if (/^UPDATE refresh_jobs SET pending_json/.test(sql) && !/status = \?/.test(sql)) {
+        const run = st.run;
+        st.run = async () => {
+          if (++checkpointWrites === 3) throw new Error('invocation killed');
+          return run();
+        };
+      }
+      return st;
+    }
+  };
+
+  await assert.rejects(() => runChunk(db, {}, 1, { adapters: igAdapter(views) }), /invocation killed/);
+
+  const saved = CHECKPOINT_EVERY * 2;
+  const left = JSON.parse(db._state.job.pending_json);
+  assert.equal(db._state.checkpoints, 2, 'checkpointed twice while the loop was still running');
+  assert.equal(left.length, total - saved,
+    'the last committed checkpoint survived the kill, so only the unsaved tail is redone');
+  assert.equal(db._state.job.clips_fetched, saved,
+    'the fetch count persisted alongside the queue it belongs to');
+  assert.equal(left.some(x => x.s <= saved), false,
+    'nothing already checkpointed is queued again -- that is the wasted API spend');
 });
