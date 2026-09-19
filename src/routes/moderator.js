@@ -6,24 +6,20 @@ import {
   now, getModeratorByUsername, getModeratorById,
   publicClipper, publicAccount
 } from '../db.js';
-import { createRefreshJob, startJob, getJob, publicJob } from '../refresh-jobs.js';
-import { reallocateAll } from '../earnings.js';
-import { MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import {
   reviewQueue, reviewedList, reviewCountsToday, submitReview, clipperQuality, allClipperQuality, EMPTY_QUALITY
 } from '../reviews.js';
-import { logAction } from '../audit.js';
-import { scoreRecentSubmissions } from '../bot-scoring.js';
 
 // Moderator staff role (migration 023) -- deliberately narrow. A moderator
-// can: trigger a resync for one clipper, leave a private note on a
-// clipper, review videos (tick/cross/skip), see the roster and each
-// clipper's connected accounts by campaign (read-only, no money), and
-// change their own password. Nothing here can create a clipper login
-// (admin-only, on purpose -- see the removed POST /api/moderator/clippers
-// below), kick, pause, approve/reject an access request, disconnect an
-// account, edit a campaign, or touch a payment -- those routes simply do
-// not exist in this file, which is the entire enforcement of the boundary.
+// can: leave a private note on a clipper, review videos (tick/cross/skip),
+// see the roster and each clipper's connected accounts by campaign
+// (read-only, no money), and change their own password. Nothing here can
+// create a clipper login (admin-only, on purpose -- see the removed POST
+// /api/moderator/clippers below), trigger a refresh (also admin-only now --
+// see the removed resync route below), kick, pause, approve/reject an
+// access request, disconnect an account, edit a campaign, or touch a
+// payment -- those routes simply do not exist in this file, which is the
+// entire enforcement of the boundary.
 export async function handleModerator(request, env, url) {
   const { pathname } = url;
   const method = request.method;
@@ -89,9 +85,8 @@ export async function handleModerator(request, env, url) {
   //
   // Creating a clipper login is admin-only now (moderators used to be able
   // to, mirroring admin.js's POST /api/admin/clippers -- removed on request
-  // so only the admin account can create logins; everything else a
-  // moderator could already do -- roster, notes, resync, review -- is
-  // unchanged).
+  // so only the admin account can create logins; the rest of what a
+  // moderator does -- roster, notes, review -- is unchanged).
 
   // Roster, no financial fields -- same shape as admin.js's GET
   // /api/admin/clippers, minus clipperFinancials().
@@ -162,31 +157,15 @@ export async function handleModerator(request, env, url) {
     return json({ ok: true });
   }
 
-  // Same tier-2 resync admin.js's "Refresh Now" uses, just attributed to
-  // this moderator instead of 'admin' -- refresh_jobs.triggered_by is a
-  // free-text column, so no schema change was needed for this.
-  params = matchPath('/api/moderator/clippers/:id/refresh', pathname);
-  if (params && method === 'POST') {
-    const clipper = await env.DB.prepare("SELECT id, username FROM clippers WHERE id = ? AND status != 'deleted'")
-      .bind(params.id).first();
-    if (!clipper) return err('Clipper not found', 404);
-    const created = await createRefreshJob(env.DB, {
-      kind: 'clipper', clipperId: Number(params.id), triggeredBy: `moderator:${moderatorId}`, cooldownMs: MANUAL_REFRESH_COOLDOWN_MS
-    });
-    if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
-    const first = await startJob(env.DB, env, created.job_id, {
-      onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); }
-    });
-    await logAction(env.DB, {
-      staffType: 'moderator', staffId: moderatorId, staffName, action: 'refresh_triggered',
-      targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
-    });
-    return json({
-      ok: true, job_id: created.job_id,
-      job: publicJob(await getJob(env.DB, created.job_id)),
-      first_chunk: { calls: first.calls, done: first.done }
-    });
-  }
+  // A moderator used to be able to trigger a tier-2 resync here. It is gone
+  // along with the clipper's own per-clip button: with the cron running
+  // hourly, a manual sweep cannot surface anything that is not already
+  // minutes away, and every one of them spends from the same per-account
+  // 200/hour Instagram ceiling the cron needs to keep that promise.
+  // Triggering a refresh is now an admin-only action, kept for verification
+  // and emergencies -- which is the whole reason the budget headroom exists.
+  // A moderator who needs fresher numbers waits for the top of the hour, the
+  // same as everyone else.
 
   // -------------------------------------------------------- video review
   if (pathname === '/api/moderator/queue' && method === 'GET') {

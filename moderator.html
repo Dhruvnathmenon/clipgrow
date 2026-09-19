@@ -342,23 +342,12 @@
               <td><span class="badge ${a.status}">${esc(a.status.replace('_',' '))}</span></td>
             </tr>`).join('')}</tbody>
           </table></div>`:'<p class="empty">No connected accounts.</p>'}
-          <div class="sub-h" style="margin-top:1.2rem">Actions</div>
-          <div class="actions" style="margin-bottom:1rem">
-            <button class="btn btn-ghost btn-sm" onclick="resyncClipper(${id})">Resync now</button>
-          </div>
-          <div class="sub-h">Staff Notes (${d.notes.length})</div>
+          <div class="sub-h" style="margin-top:1.2rem">Staff Notes (${d.notes.length})</div>
           ${d.notes.map(n=>`<div style="font-size:.8rem;margin-bottom:.5rem"><span class="muted">${esc(n.author_name)} · ${when(n.created_at)}</span><br>${esc(n.note)}</div>`).join('')||'<p class="muted" style="font-size:.8rem">No notes yet.</p>'}
           <textarea class="form-control" id="note-${id}" placeholder="Add a private note (staff only)" style="margin-top:.6rem"></textarea>
           <button class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addNote(${id})">Add Note</button>
         `;
       }catch(e){ box.innerHTML='<p class="empty">Could not load.</p>'; toast(e.message,true); }
-    };
-
-    window.resyncClipper=async function(id){
-      try{
-        await api('/api/moderator/clippers/'+id+'/refresh',{method:'POST'});
-        toast('Resync started');
-      }catch(e){ toast(e.message,true); }
     };
 
     window.addNote=async function(id){

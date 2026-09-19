@@ -69,6 +69,19 @@ test('a moderator can no longer create a clipper -- the route does not exist', a
   assert.equal(row, null, 'no clipper was created');
 });
 
+/* Triggering a refresh is admin-only now. A moderator's resync spent from
+   the same per-account 200/hour Instagram ceiling the hourly cron needs to
+   keep its countdown honest, and could not surface anything more than an
+   hour ahead of that sweep anyway. The headroom it used to consume is what
+   an admin's emergency refresh now relies on. */
+test('a moderator can no longer trigger a refresh -- the route does not exist', async () => {
+  const env = seedEnv();
+  const res = await moderatorRequest(env, '/api/moderator/clippers/1/refresh', { method: 'POST' });
+  assert.equal(res, null, 'POST /api/moderator/clippers/:id/refresh is unhandled, not a working resync');
+  const row = await env.DB.prepare('SELECT id FROM refresh_jobs').first();
+  assert.equal(row, null, 'no refresh job was created, so no Instagram budget was spent');
+});
+
 test('a disabled moderator is fully cut off, not just read-only', async () => {
   const env = seedEnv();
   await env.DB.prepare("UPDATE moderators SET status = 'disabled' WHERE id = 1").run();
