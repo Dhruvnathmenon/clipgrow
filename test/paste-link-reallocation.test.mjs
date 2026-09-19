@@ -3,7 +3,10 @@
 // `earning` sat frozen at its insert-time 0 forever -- because computing
 // earning is a SEPARATE step (allocateCampaignEarnings, which walks the
 // whole campaign's FCFS budget queue) that only the single-clip REFRESH
-// endpoint (POST /api/clipper/submissions/:id/refresh) was calling. This
+// endpoint was calling. (That endpoint has since been removed entirely --
+// the hourly cron is the only thing that refreshes a clipper's views now --
+// which makes THIS path's own reallocate call the only one left on the
+// paste flow, and so more load-bearing than when the bug was found.) This
 // endpoint -- POST /api/clipper/submissions, the "paste a link" ADD path --
 // does the exact same "sync one clip, read back earning" shape and had
 // simply never been given the matching reallocateCampaign call.

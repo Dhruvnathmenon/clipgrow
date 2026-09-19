@@ -85,7 +85,7 @@ export function wrapD1(db) {
 
 const RECOMMENDATION =
   'Recommended: pause heavy sync from the Platform Usage tab -- the ' +
-  '6-hourly refresh is the largest known D1 consumer. This is ' +
+  'The hourly refresh is the largest known D1 consumer. This is ' +
   'visibility only; nothing has been disabled automatically.';
 
 /**
@@ -167,7 +167,7 @@ async function upsertAlertState(db, scope, { warned70, warned90 } = {}) {
 //
 // One admin-togglable switch (system_pause, migration 042) gating heavy
 // background work only -- createRefreshJob()'s 'global' kind, which
-// covers both the 6-hourly cron AND an admin's own manual "full refresh"
+// covers both the hourly cron AND an admin's own manual "full refresh"
 // button. Every clipper/client/admin-facing feature keeps working
 // untouched. Deliberately one-click, never automatic: the admin decides,
 // the system just makes the decision-relevant numbers impossible to miss.

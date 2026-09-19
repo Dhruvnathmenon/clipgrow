@@ -619,7 +619,7 @@
         </div>
         <p class="note" style="margin:.5rem 0 0">
           Instagram tokens last 60 days. The system now extends each one automatically — on the
-          6-hourly cron, well before it can expire — so clippers no longer get "reconnect needed"
+          hourly cron, well before it can expire — so clippers no longer get "reconnect needed"
           waves. A clipper only has to reconnect if they revoke access in their own Instagram
           settings. Use the button for a one-off top-up of everything.
         </p>
@@ -648,7 +648,7 @@
           own lag and rate limit. Workers Paid bills per row past a monthly allowance rather than
           hard-failing the way the Free plan did on 2026-09-13 — so the figures below are monthly
           totals against that allowance. "Today" is shown too, as an early-warning pace signal, not
-          a real Cloudflare cutoff. Pausing only stops the heavy 6-hourly refresh sync — everything
+          a real Cloudflare cutoff. Pausing only stops the heavy hourly refresh sync — everything
           else (logins, dashboards, submitting clips, payouts) keeps working.
         </p>
         <div id="pause-banner"></div>
@@ -1655,7 +1655,7 @@
       // fall back to the bare count if that list could not be built.
       if(!problems.length && o.accounts_import_failing>0) urgent.push(`${o.accounts_import_failing} account(s) failed to import new videos — new uploads may not be appearing`);
       // A refresh job stuck in 'running' blocks EVERY later sync via the
-      // unique index, and the 6-hourly cron just logs "skipped" forever. The
+      // unique index, and the hourly cron just logs "skipped" forever. The
       // cron now reaps these automatically; this is the visible signal that it
       // happened, or that one is wedged right now between cron runs.
       stalledJobs.forEach(j=>{

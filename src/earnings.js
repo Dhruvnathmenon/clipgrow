@@ -111,7 +111,7 @@ export async function syncAccountClips(db, env, account, subs, { skipCooldown = 
 
   // Instagram's 200-calls/hour limit is real, per-account, and NOT reduced by
   // batching (Meta counts every call in a batch individually -- see
-  // src/rate-budget.js). This is the one place both the 6-hourly cron and
+  // src/rate-budget.js). This is the one place both the hourly cron and
   // every manual refresh path funnel through, so gating it here protects all
   // of them at once rather than needing the same logic duplicated per caller.
   let attemptSubs = subs;

@@ -425,14 +425,21 @@ export async function handleClipper(request, env, url) {
   }
 
   // ----------------------------------------------------------- submissions
-  // The clipper-triggered full refresh used to live here. It spawned a chained
-  // job across every campaign and account the clipper was active in, which
-  // competed with the cron and the admin for the same per-account locks and
-  // gave the clipper a progress bar to watch instead of an answer. Views are
-  // now refreshed solely by the 6-hourly cron, and the dashboard shows a
-  // countdown to the next sweep. Refreshing ONE clip is still available below
-  // (/submissions/:id/refresh): a single call, answered immediately, and
-  // capped by the account's real hourly budget.
+  // No clipper-triggered sync of any kind lives here any more.
+  //
+  // The full refresh went first: it spawned a chained job across every
+  // campaign and account the clipper was active in, competing with the cron
+  // and the admin for the same per-account locks. The per-clip button
+  // (/submissions/:id/refresh) followed it, because once the cron runs hourly
+  // it can no longer tell a clipper anything they will not know within the
+  // hour -- while still spending from the same 200/hour ceiling the cron
+  // needs, at an unpredictable moment, for a number that has barely moved.
+  //
+  // What replaces both is a promise rather than a button: views refresh at
+  // the top of every hour, and the dashboard counts down to it, so a clipper
+  // always knows exactly when their numbers change. A brand-new clip is still
+  // fetched the moment it is submitted, and re-pasting a dead clip's link
+  // still clears its sync_error -- neither of those paths goes through here.
 
   // --------------------------------------------------- Instagram call budget
   // Real, dynamic usage for the specific Instagram account driving this
@@ -491,51 +498,6 @@ export async function handleClipper(request, env, url) {
   // Refreshes exactly one clip, spending exactly one call -- the "just check
   // this one" alternative to a full account refresh, for when a clipper only
   // cares about a specific video's current number.
-  params = matchPath('/api/clipper/submissions/:id/refresh', pathname);
-  if (params && method === 'POST') {
-    const blocked = blockIfReadOnly();
-    if (blocked) return blocked;
-
-    const sub = await env.DB.prepare('SELECT * FROM submissions WHERE id = ?').bind(params.id).first();
-    if (!sub || sub.clipper_id !== clipperId) return err('Not found', 404);
-    if (sub.locked_at) return err('This clip is locked and settled -- it no longer needs refreshing.');
-    if (sub.status !== 'active') return err('This clip is not currently active.');
-    if (Date.now() - (sub.created_at || 0) > TRACKING_WINDOW_MS) {
-      return err('This clip\'s 7-day tracking window has closed -- its view count is now final and no longer needs refreshing.');
-    }
-    const campaign = await getCampaignById(env.DB, sub.campaign_id);
-    if (campaign && campaign.status === 'completed') {
-      return err('This campaign has ended -- its clips are no longer being refreshed.');
-    }
-
-    const account = await env.DB.prepare('SELECT * FROM social_accounts WHERE id = ?').bind(sub.account_id).first();
-    if (!account) return err('No connected account for this clip.', 404);
-
-    // Deliberately no per-clip cooldown here. That cooldown exists to stop an
-    // AUTOMATIC full sweep from wastefully re-checking clips it only just
-    // looked at -- it was never meant to stop a clipper from choosing to
-    // spend one of their own calls on this specific clip right now. The
-    // account's real, shared 200/hour budget below is the actual limit; how
-    // to spend it is the clipper's call (see src/rate-budget.js).
-    if (account.platform === 'instagram') {
-      const budget = await getBudget(env.DB, account.id);
-      if (budget.remaining < 1) {
-        return json({
-          error: `This account has used its Instagram refresh budget for the hour. Frees up in ${Math.ceil(budget.reset_in_ms / 60000)}m.`,
-          retry_in_ms: budget.reset_in_ms
-        }, 429);
-      }
-    }
-
-    await syncAccountClips(env.DB, env, account,
-      [{ id: sub.id, ig_media_id: sub.ig_media_id, last_ok_sync_at: sub.last_ok_sync_at }],
-      { skipCooldown: true });
-    await reallocateCampaign(env.DB, sub.campaign_id);
-
-    const fresh = await env.DB.prepare('SELECT views, earning, sync_error FROM submissions WHERE id = ?').bind(sub.id).first();
-    return json({ ok: true, views: fresh.views, earning: fresh.earning, sync_error: fresh.sync_error });
-  }
-
   if (pathname === '/api/clipper/submissions' && method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.permalink, s.views, s.earning, s.clipper_earning, s.status, s.sync_error, s.created_at, s.last_synced_at,
@@ -763,7 +725,7 @@ export async function handleClipper(request, env, url) {
     // the next cron pass, so the number on screen is live the instant the
     // clip is added. Best-effort: a fresh Reel with insights not ready yet, or
     // a transient Instagram error, must never block the submission itself --
-    // it just sits at 0 until the next sync (manual or 6-hourly) picks it up.
+    // it just sits at 0 until the next hourly cron sync picks it up.
     let liveViews = 0, liveEarning = 0;
     try {
       // Just this clip -- syncing the whole clipper here would spend one call
@@ -777,7 +739,7 @@ export async function handleClipper(request, env, url) {
       // order (allocateCampaignEarnings), which only THIS call actually
       // does. Without it, a pasted clip's real view count lands but its
       // earning sits at its insert-time 0 until some unrelated action (a
-      // kick, a top-up, the next 6-hourly cron) happens to touch this
+      // kick, a top-up, the next hourly cron) happens to touch this
       // campaign -- exactly the gap the single-clip refresh endpoint just
       // above already closes for a re-sync, that this one, doing the same
       // "sync one clip, read back earning" shape, had missed.

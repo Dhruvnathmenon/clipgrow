@@ -203,9 +203,6 @@
     .clip-link:hover { color:var(--neon); }
     .clip-actions { display:flex; align-items:stretch; margin-top:.6rem; border-top:1px solid var(--border); }
     .clip-actions .clip-link { flex:1; margin-top:0; border-top:none; }
-    .clip-refresh-btn { background:none; border:none; border-left:1px solid var(--border); color:var(--muted-l); font-size:.85rem; padding:.35rem .7rem; cursor:pointer; font-family:'Inter',sans-serif; }
-    .clip-refresh-btn:hover:not(:disabled) { color:var(--neon); }
-    .clip-refresh-btn:disabled { opacity:.5; cursor:default; }
 
     /* Instagram rate budget widget */
     .ig-budget { margin-top:.75rem; padding:.75rem .85rem; background:var(--bg-mid); border:1px solid var(--border-s); border-radius:8px; }
@@ -937,7 +934,6 @@
           // One refresh control for the whole campaign, not one per platform.
           action+=`<div class="refresh-wrap" style="margin-top:.7rem;text-align:left">
               <div class="note next-sweep">Next automatic check…</div>
-              <div class="note" style="margin-top:.25rem">Use ↻ on a video to check that one now.</div>
             </div>
             <div class="submit-row">
               <input type="url" id="d-url" placeholder="${manualOnly?`Paste your campaign ${what} link here`:`Paste a link to add an older ${what}`}" onkeydown="if(event.key==='Enter')submitClip(${c.id},'d-url')"/>
@@ -1035,23 +1031,6 @@
       }));
     }
 
-    /* Refreshes one clip for exactly one call's worth of budget. */
-    window.refreshOneClip=async function(clipId,btn){
-      if(btn){ btn.disabled=true; btn.textContent='…'; }
-      try{
-        const r=await api('/api/clipper/submissions/'+clipId+'/refresh',{method:'POST'});
-        toast(`${num(r.views)} views`);
-        // The button can be visible from either the home preview or the full
-        // My Clips grid -- both render from the same CLIPS array, so both
-        // need refreshing regardless of which one triggered this. Same for
-        // the budget row: this just spent one of the account's calls.
-        await loadClips();
-        renderClips();
-        renderClipsBudget();
-      }catch(e){ toast(e.message,true); }
-      finally{ if(btn){ btn.disabled=false; btn.textContent='↻'; } }
-    };
-
     window.joinCampaign=async function(id){
       try{ await api('/api/clipper/campaigns/'+id+'/join',{method:'POST'});
         toast('Joined — now connect the Instagram account for this campaign');
@@ -1088,22 +1067,25 @@
 
     /* ── next automatic refresh ──
 
-       Views are refreshed by the 6-hourly cron, not by the clipper. The
+       Views are refreshed by the hourly cron, not by the clipper. The
        clipper-triggered full refresh was removed: it spawned a chained job
        that competed with the cron and the admin for the same per-account
        locks, and a clipper watching a progress bar is a worse experience
-       than simply knowing when the next sweep lands. Per-clip refresh stays
-       -- one call, immediate, capped by the account's hourly budget. */
+       than simply knowing when the next sweep lands. The per-clip button is
+       gone too: with an hourly sweep it could not tell anyone anything they
+       would not know within the hour, while spending from the same 200/hour
+       ceiling the sweep itself needs. */
     let nextRefreshTimer=null;
 
-    /* The cron fires at 00:00, 06:00, 12:00 and 18:00 UTC. Computed from the
-       clock rather than sent by the server, so it stays correct on a page
-       left open for hours. */
+    /* The cron fires at the top of every hour, UTC. Computed from the clock
+       rather than sent by the server, so it stays correct on a page left open
+       for hours -- and it must keep matching wrangler.jsonc's schedule, which
+       is the whole basis of the promise this countdown makes. */
     function msUntilNextSweep(){
       const now=new Date();
       const next=new Date(now);
       next.setUTCMinutes(0,0,0);
-      next.setUTCHours(Math.floor(now.getUTCHours()/6)*6+6);
+      next.setUTCHours(now.getUTCHours()+1);
       return next.getTime()-now.getTime();
     }
 
@@ -1141,7 +1123,7 @@
 
     /* How long ago this clip's view count was last actually confirmed with the
        platform. Without this the card showed a big confident number with no
-       hint of its age: routine syncing runs every 6 hours, so a clipper who had
+       hint of its age: routine syncing runs hourly, so a clipper who had
        just checked Instagram saw a smaller figure here and reasonably concluded
        the tracking was broken. The number was never wrong, only stale and
        presented as current. Reads last_ok_sync_at -- the last SUCCESSFUL fetch
@@ -1185,8 +1167,6 @@
           ${c.why_text?`<div class="clip-why">${esc(c.why_text)}</div>`:''}
           <div class="clip-actions">
             <a class="clip-link" href="${esc(c.permalink)}" target="_blank" rel="noopener">Open on ${esc(c.platform_label||'Instagram')} ↗</a>
-            ${!c.locked&&(c.state==='tracking'||c.state==='below_min'||c.state==='verified')
-              ?`<button class="clip-refresh-btn" title="${c.platform==='youtube'?'Refresh just this Short':'Refresh just this clip (1 call)'}" onclick="refreshOneClip(${c.id},this)">↻</button>`:''}
           </div>
         </div></div>`;
     }

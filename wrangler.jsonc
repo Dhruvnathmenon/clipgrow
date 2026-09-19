@@ -55,8 +55,14 @@
       }
     ]
   },
+  // Hourly, matching rate-budget.js's CLIP_COOLDOWN_MS exactly: a clip synced
+  // inside the last hour is skipped, so firing more often than this would
+  // cost nothing and achieve nothing, and firing less often (it was every 6
+  // hours) left views stale for up to six hours for no reason. This is now
+  // the ONLY thing that refreshes a clipper's views -- the per-clip button is
+  // gone -- so the cadence is also the promise the dashboard countdown makes.
   "triggers": {
-    "crons": ["0 */6 * * *"]
+    "crons": ["0 * * * *"]
   },
   // Pinned explicitly rather than trusting the account-wide platform default,
   // which has already changed once (Workers Paid moved from 1,000 to 10,000

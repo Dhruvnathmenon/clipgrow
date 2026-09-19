@@ -1,7 +1,7 @@
 // Orchestrates src/bot-correlation.js (primary) and src/bot-detection.js
 // (secondary) into the informational columns added by migration 043.
 // Runs piggybacked on the existing refresh-job completion hook
-// (src/worker.js's `onFinish`, shared by the 6-hourly cron, an admin's
+// (src/worker.js's `onFinish`, shared by the hourly cron, an admin's
 // manual full refresh, and single-account resyncs) -- no new cron, no
 // new infrastructure, matching the founder-approved plan.
 //

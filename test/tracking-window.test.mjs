@@ -1,7 +1,18 @@
 // A clip's view-tracking lifecycle is 7 days from created_at (clipstate.js's
 // TRACKING_WINDOW_MS) -- past that, its view count is final and nothing
-// should spend an Instagram call checking it again, including a clipper
-// deliberately asking for one.
+// should spend an Instagram call checking it again.
+//
+// This file used to prove that the clipper's per-clip refresh endpoint
+// honoured that window. That endpoint no longer exists: the hourly cron is
+// the only thing that refreshes a clipper's views now, so the window is
+// enforced in ONE place, buildAccountItems, and is pinned there instead
+// ("a clip past its 7-day tracking window is excluded", refresh-jobs.test.mjs).
+//
+// What remains worth pinning here is the removal itself. A clipper-triggered
+// sync is the one thing that can spend an account's 200/hour Instagram
+// ceiling at an unpredictable moment -- the budget the cron needs to keep
+// its hourly promise. Re-adding such a route would quietly break that
+// promise rather than fail loudly, so this asserts the route is gone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeSqliteD1 } from './helpers/sqlite-d1.mjs';
@@ -38,19 +49,21 @@ function seedEnv(subCreatedAt) {
   return { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
 }
 
-test('single-clip refresh is refused once the 7-day tracking window has closed', async () => {
-  const env = seedEnv(NOW - 8 * DAY_MS);
-  const res = await clipperRequest(env, '/api/clipper/submissions/1/refresh', { method: 'POST' });
-  assert.equal(res.status, 400);
-  const body = await res.json();
-  assert.match(body.error, /tracking window has closed/i);
-});
-
-test('single-clip refresh still works for a clip inside its 7-day window', async () => {
+test('there is no clipper-triggered refresh route at all any more', async () => {
+  // Inside its window, so nothing about the clip itself could explain a
+  // refusal -- if any handler still answered here, this would not be null.
   const env = seedEnv(NOW - 6 * DAY_MS);
   const res = await clipperRequest(env, '/api/clipper/submissions/1/refresh', { method: 'POST' });
-  // Reaches the real sync attempt (no adapter configured here, so it may
-  // fail downstream) -- the point is it's NOT rejected by the age guard.
+  assert.equal(res, null,
+    'no handler claims this path, so the Worker falls through to a 404 -- the hourly cron is the only refresh');
+});
+
+test('the clipper API still serves the clip list it replaced the button with', async () => {
+  // The countdown-and-list dashboard is what a clipper gets instead of a
+  // refresh button, so that path must keep working on its own.
+  const env = seedEnv(NOW - 6 * DAY_MS);
+  const res = await clipperRequest(env, '/api/clipper/submissions');
+  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.doesNotMatch(String(body.error || ''), /tracking window has closed/i);
+  assert.equal(body.clips.length, 1, 'the clip is still listed, with whatever the last sweep recorded');
 });

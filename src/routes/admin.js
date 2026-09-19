@@ -154,7 +154,7 @@ export async function handleAdmin(request, env, url) {
   // ------------------------------------------------------------- overview
   if (pathname === '/api/admin/overview' && method === 'GET') {
     // A single sync_error is normal noise -- a transient rate limit clears on
-    // the next 6-hourly cycle. What actually needs a human is a clip that has
+    // the next hourly cycle. What actually needs a human is a clip that has
     // gone TWO cycles (12h+) without a single successful sync despite
     // presumably being retried each time: that is a genuinely stuck clip, not
     // a blip, and this is the number that would have surfaced the batch-
@@ -2019,9 +2019,9 @@ export async function handleAdmin(request, env, url) {
       disconnected:{ label: 'Account is disconnected', who: 'clipper',
                      what: 'The clipper must reconnect (or connect a fresh account) from their dashboard. Views resume from where they left off.' },
       unavailable: { label: 'Platform not answering for a while', who: 'nobody',
-                     what: 'Usually a rate limit or a platform blip. Clears on its own. Only worth a look if the exact same clips are still here after another cron cycle (6h).' },
+                     what: 'Usually a rate limit or a platform blip. Clears on its own. Only worth a look if the exact same clips are still here after another cron cycle (1h).' },
       issue:       { label: 'Last check did not go through', who: 'nobody',
-                     what: 'A one-off miss — the next automatic sweep (within 6h) almost always picks it up. No action.' },
+                     what: 'A one-off miss — the next automatic sweep (within the hour) almost always picks it up. No action.' },
       verified:    { label: 'Waiting for its first view count', who: 'nobody',
                      what: 'Brand new — the platform has not published stats yet, or the first cron sweep has not run. Give it a few hours.' }
     };
