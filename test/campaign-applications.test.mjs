@@ -181,3 +181,64 @@ test('a clipper cannot apply to a campaign they never joined', async () => {
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /join this campaign/i);
 });
+
+/* The moderator queue is grouped into one tab per campaign, and ordered
+   oldest-first WITHIN the whole queue. First-come-first-served means the
+   clipper who has waited longest is reviewed first -- ordering newest-first
+   would push the earliest submission further down every time someone else
+   submitted, so it could sit unreviewed indefinitely. */
+test('the queue is first-come-first-served and grouped per campaign', async () => {
+  const db = makeSqliteD1({
+    clippers: [
+      { id: 1, username: 'early', password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW },
+      { id: 2, username: 'late', password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW },
+      { id: 3, username: 'other', password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW }
+    ],
+    moderators: [{ id: 7, username: 'mod1', password_hash: 'h', password_salt: 's',
+                   display_name: 'Mod One', status: 'active', created_at: NOW }],
+    campaigns: [
+      { id: 1, name: 'Alpha', description: '', cpm: 40, budget: 100000, status: 'active',
+        created_at: NOW, model: 'cpm', min_views: 1000, allowed_platforms: 'instagram' },
+      { id: 2, name: 'Beta', description: '', cpm: 40, budget: 100000, status: 'active',
+        created_at: NOW, model: 'cpm', min_views: 1000, allowed_platforms: 'instagram' }
+    ],
+    // Deliberately inserted out of order, and the newest is listed first, so
+    // a queue that simply returned insertion order would fail this.
+    campaign_applications: [
+      { id: 10, clipper_id: 2, campaign_id: 1, video_url: 'https://x/late',  attempt: 1, status: 'pending', created_at: NOW - 1000 },
+      { id: 11, clipper_id: 1, campaign_id: 1, video_url: 'https://x/early', attempt: 1, status: 'pending', created_at: NOW - 90000 },
+      { id: 12, clipper_id: 3, campaign_id: 2, video_url: 'https://x/beta',  attempt: 1, status: 'pending', created_at: NOW - 40000 }
+    ]
+  });
+  const env = { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
+  const q = await (await asModerator(env, '/api/moderator/applications')).json();
+
+  assert.equal(q.total, 3);
+  assert.deepEqual(q.applications.map(a => a.clipper_username), ['early', 'other', 'late'],
+    'longest wait first, across the whole queue');
+
+  assert.deepEqual(q.campaigns.map(c => c.campaign_name), ['Alpha', 'Beta'],
+    'the campaign whose clipper has waited longest leads the tab strip');
+  assert.deepEqual(q.campaigns.map(c => c.pending), [2, 1],
+    'each tab carries its own count, from the same read as the rows');
+
+  const alpha = q.applications.filter(a => a.campaign_id === 1);
+  assert.deepEqual(alpha.map(a => a.clipper_username), ['early', 'late'],
+    'and within one campaign tab the order is still oldest-first');
+  assert.ok(alpha[0].waiting_ms >= 80000, 'how long they have waited is reported, not left to the page to guess');
+});
+
+test('a campaign with nothing waiting gets no tab at all', async () => {
+  const env = seedEnv();
+  let q = await (await asModerator(env, '/api/moderator/applications')).json();
+  assert.deepEqual(q.campaigns, [], 'an empty queue is an empty tab strip, not a tab with a zero on it');
+
+  await submit(env);
+  q = await (await asModerator(env, '/api/moderator/applications')).json();
+  assert.equal(q.campaigns.length, 1);
+  assert.equal(q.campaigns[0].pending, 1);
+
+  await reviewLatest(env, 'approved');
+  q = await (await asModerator(env, '/api/moderator/applications')).json();
+  assert.deepEqual(q.campaigns, [], 'the tab disappears once its last application is decided');
+});

@@ -52,20 +52,31 @@ CREATE INDEX IF NOT EXISTS idx_campaign_applications_status
 CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_applications_one_pending
   ON campaign_applications(clipper_id, campaign_id) WHERE status = 'pending';
 
--- Grandfather everyone already on a campaign.
+-- Grandfather only the participations that have ALREADY connected an account.
 --
--- Connecting an account is about to require an approved application. Without
--- this, all 60 clippers currently holding a live participation would be
--- locked out the moment they tried to connect a new or reconnected account,
--- for a step that did not exist when they joined. attempt 0 marks these as
--- never having gone through review, so they are distinguishable from a real
--- approval in any later audit.
+-- A clipper who connected an account to a campaign has, in practice, been
+-- through the old vetting: an admin approved their access request and they
+-- are posting real clips. Asking them to make a demo video now would be
+-- asking them to prove something they have already proved, so they carry on
+-- untouched.
+--
+-- A participation with NO connected account is a different case. That clipper
+-- joined but never actually started on this campaign, so nothing has been
+-- vetted for it -- they go through step 1 exactly like a new clipper. This is
+-- scoped per PARTICIPATION, not per clipper, deliberately: someone connected
+-- on campaign A but merely joined on campaign B is grandfathered on A and
+-- starts fresh on B, because the review is about fit for one campaign's
+-- style, not about the person in general.
+--
+-- attempt 0 keeps these distinguishable from a real approval in any later
+-- audit, and the note records why they were let through.
 INSERT INTO campaign_applications
   (clipper_id, campaign_id, video_url, attempt, status,
    reviewer_type, reviewer_name, reviewer_note, reviewed_at, created_at)
 SELECT p.clipper_id, p.campaign_id, '', 0, 'approved',
        'system', 'System',
-       'Joined before campaign applications existed -- approved automatically so an existing clipper is never locked out of connecting an account.',
+       'Already connected an account to this campaign before applications existed -- approved automatically, since the old access-request approval had already vetted them.',
        p.joined_at, p.joined_at
 FROM participations p
-WHERE p.status != 'kicked';
+WHERE p.status != 'kicked'
+  AND EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id);

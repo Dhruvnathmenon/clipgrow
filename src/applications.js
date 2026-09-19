@@ -180,12 +180,24 @@ export async function reviewApplication(db, applicationId, { verdict, note, revi
   return { ok: true, verdict, removed_from_campaign: removedFromCampaign };
 }
 
-/** Oldest pending applications first -- the moderator's work queue. */
-export async function applicationQueue(db, { limit = 100 } = {}) {
+/**
+ * The moderator's work queue, grouped into one bucket per campaign.
+ *
+ * Ordered oldest-submitted first, which is what first-come-first-served
+ * means in practice: the clipper who has been waiting longest is reviewed
+ * first. Ordering newest-first would do the opposite -- the earliest
+ * submission would sink further down the list every time someone else
+ * submitted, and could sit unreviewed indefinitely.
+ *
+ * Grouped here rather than in the page so the ordering and the counts come
+ * from the same query that produced the rows, and a tab can never show a
+ * count that disagrees with what opening it reveals.
+ */
+export async function applicationQueue(db, { limit = 300 } = {}) {
   const { results } = await db.prepare(
     `SELECT a.id, a.clipper_id, a.campaign_id, a.video_url, a.attempt, a.created_at,
             cl.username AS clipper_username, cl.display_name AS clipper_display_name,
-            c.name AS campaign_name,
+            c.name AS campaign_name, c.status AS campaign_status,
             (SELECT COUNT(*) FROM campaign_applications r
               WHERE r.clipper_id = a.clipper_id AND r.campaign_id = a.campaign_id
                 AND r.status = 'rejected') AS prior_rejections
@@ -196,10 +208,37 @@ export async function applicationQueue(db, { limit = 100 } = {}) {
       ORDER BY a.created_at ASC
       LIMIT ?`
   ).bind(limit).all();
-  return (results || []).map(r => ({
+
+  const applications = (results || []).map(r => ({
     ...r,
     attempts_left: Math.max(0, MAX_ATTEMPTS - r.prior_rejections),
     // Surfaced so a reviewer knows this verdict is the one that removes them.
-    is_final_attempt: r.prior_rejections >= MAX_ATTEMPTS - 1
+    is_final_attempt: r.prior_rejections >= MAX_ATTEMPTS - 1,
+    waiting_ms: Math.max(0, Date.now() - r.created_at)
   }));
+
+  // One tab per campaign that actually has something waiting. A campaign with
+  // an empty queue gets no tab rather than an empty one, so the tab strip is
+  // a list of work rather than a list of campaigns.
+  const byCampaign = new Map();
+  for (const a of applications) {
+    if (!byCampaign.has(a.campaign_id)) {
+      byCampaign.set(a.campaign_id, {
+        campaign_id: a.campaign_id,
+        campaign_name: a.campaign_name,
+        campaign_status: a.campaign_status,
+        pending: 0,
+        // Drives the "longest wait" figure on the tab -- the rows are already
+        // oldest-first, so the first one in is the oldest.
+        oldest_created_at: a.created_at
+      });
+    }
+    byCampaign.get(a.campaign_id).pending++;
+  }
+
+  // Campaigns with the longest-waiting clipper first, so the tab that needs
+  // attention most is the one nearest the left.
+  const campaigns = [...byCampaign.values()].sort((x, y) => x.oldest_created_at - y.oldest_created_at);
+
+  return { applications, campaigns, total: applications.length };
 }

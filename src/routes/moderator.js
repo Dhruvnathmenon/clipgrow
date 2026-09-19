@@ -178,7 +178,11 @@ export async function handleModerator(request, env, url) {
   // rule, different subject -- so they are different queues rather than one
   // queue with a type column nobody can filter on reliably.
   if (pathname === '/api/moderator/applications' && method === 'GET') {
-    return json({ applications: await applicationQueue(env.DB) });
+    // Returns { applications, campaigns, total } -- the page builds one tab
+    // per campaign from `campaigns` and filters `applications` by id, so the
+    // counts on the tabs and the rows behind them come from one read and
+    // cannot disagree.
+    return json(await applicationQueue(env.DB));
   }
 
   params = matchPath('/api/moderator/applications/:id/history', pathname);
