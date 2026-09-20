@@ -416,15 +416,23 @@
     <section class="view on" id="v-home">
       <div class="page-head"><h1 id="greet">Welcome back</h1><p>Your clipping at a glance</p></div>
       <div class="stats" id="home-stats"></div>
-      <div class="sec-title">Active campaigns</div>
-      <div id="home-camps"><div class="empty">Loading…</div></div>
-      <div class="clips-head">
-        <div class="sec-title" style="margin-bottom:0">Your clips</div>
-        <div class="refresh-wrap"><div class="note next-sweep">Next automatic check…</div></div>
+      <!-- Both blocks stay hidden until there is something real to show: a
+           campaign appears here only once the clipper has finished both steps
+           (video approved AND an account connected), and clips only once they
+           have some. Nothing here is a placeholder. -->
+      <div id="home-camps-wrap" style="display:none">
+        <div class="sec-title">Active campaigns</div>
+        <div id="home-camps"></div>
       </div>
-      <div id="clips-budget-row" class="clips-budget-row"></div>
-      <div class="plat-row" id="plat-row"></div>
-      <div id="clip-grid"><div class="empty">Loading…</div></div>
+      <div id="home-clips-wrap" style="display:none">
+        <div class="clips-head">
+          <div class="sec-title" style="margin-bottom:0">Your clips</div>
+          <div class="refresh-wrap"><div class="note next-sweep">Next automatic check…</div></div>
+        </div>
+        <div id="clips-budget-row" class="clips-budget-row"></div>
+        <div class="plat-row" id="plat-row"></div>
+        <div id="clip-grid"></div>
+      </div>
     </section>
 
     <!-- CAMPAIGNS -->
@@ -722,9 +730,13 @@
         document.getElementById('camp-list').innerHTML=campaigns.length
           ? campaigns.map(campCard).join('') : '<div class="empty">No campaigns are open right now.</div>';
       }
-      document.getElementById('home-camps').innerHTML=joined.length
-        ? joined.map(campCard).join('')
-        : '<div class="card"><p class="muted" style="font-size:.85rem">You haven\'t joined a campaign yet.</p><button class="btn btn-sm" style="margin-top:.7rem" onclick="go(\'campaigns\',document.querySelector(\'[data-v=campaigns]\'))">Browse campaigns</button></div>';
+      // Only campaigns the clipper is actually working on: video approved and
+      // an account connected (or clips already made there, which keeps an ended
+      // campaign's recap card). Someone who has only joined, or is still in
+      // review, sees the campaign under the Campaigns tab instead.
+      const working=joined.filter(c=>Object.keys((c.participation&&c.participation.accounts)||{}).length>0||(c.my_stats&&c.my_stats.videos>0));
+      document.getElementById('home-camps').innerHTML=working.map(campCard).join('');
+      document.getElementById('home-camps-wrap').style.display=working.length?'':'none';
     }
 
     let onboarding=null;
@@ -1221,6 +1233,8 @@
     window.placeholderHTML=()=>`<div class="clip-ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l4.55-2.28A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14"/></svg>No preview</div>`;
 
     function renderClips(){
+      // The whole clips block appears only once there is at least one clip.
+      document.getElementById('home-clips-wrap').style.display=CLIPS.length?'':'none';
       renderPlatRow();
       const list=platFilter==='all'?CLIPS:CLIPS.filter(c=>c.platform===platFilter);
       document.getElementById('clip-grid').innerHTML=list.length
