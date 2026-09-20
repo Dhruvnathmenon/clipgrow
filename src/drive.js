@@ -263,7 +263,9 @@ export async function driveHealth(env, { fetchImpl = fetch } = {}) {
 
   const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN', 'GDRIVE_PENDING_FOLDER_ID'];
   const missing = required.filter(k => !env[k]);
-  add('Secrets present', !missing.length, missing.length ? `Missing: ${missing.join(', ')}` : 'All four required secrets are set.');
+  // A client ID is public (it appears in every OAuth URL), so showing it is safe -- and
+  // it is what lets you compare the Worker's client with the one the Playground used.
+  add('Secrets present', !missing.length, missing.length ? `Missing: ${missing.join(', ')}` : `All four required secrets are set. Worker's client ID: ${env.GOOGLE_CLIENT_ID}`);
   if (!env.GDRIVE_REJECTED_FOLDER_ID) add('Rejected folder configured', false, 'GDRIVE_REJECTED_FOLDER_ID is not set, so rejected videos are deleted at once instead of held for 7 days.');
   if (missing.length) return { ok: false, checks };
 
