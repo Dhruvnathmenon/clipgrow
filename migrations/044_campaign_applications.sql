@@ -64,31 +64,22 @@ CREATE INDEX IF NOT EXISTS idx_campaign_applications_status
 CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_applications_one_pending
   ON campaign_applications(clipper_id, campaign_id) WHERE status = 'pending';
 
--- Grandfather only the participations that have ALREADY connected an account.
---
--- A clipper who connected an account to a campaign has, in practice, been
--- through the old vetting: an admin approved their access request and they
--- are posting real clips. Asking them to make a demo video now would be
--- asking them to prove something they have already proved, so they carry on
--- untouched.
---
--- A participation with NO connected account is a different case. That clipper
--- joined but never actually started on this campaign, so nothing has been
--- vetted for it -- they go through step 1 exactly like a new clipper. This is
--- scoped per PARTICIPATION, not per clipper, deliberately: someone connected
--- on campaign A but merely joined on campaign B is grandfathered on A and
--- starts fresh on B, because the review is about fit for one campaign's
--- style, not about the person in general.
---
--- attempt 0 keeps these distinguishable from a real approval in any later
--- audit, and the note records why they were let through.
-INSERT INTO campaign_applications
-  (clipper_id, campaign_id, video_url, attempt, status,
-   reviewer_type, reviewer_name, reviewer_note, reviewed_at, created_at)
-SELECT p.clipper_id, p.campaign_id, NULL, 0, 'approved',
-       'system', 'System',
-       'Already connected an account to this campaign before applications existed -- approved automatically, since the old access-request approval had already vetted them.',
-       p.joined_at, p.joined_at
-FROM participations p
-WHERE p.status != 'kicked'
-  AND EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id);
+-- The gate has a kill switch. Everything in this feature ships switched OFF,
+-- so deploying it changes nothing for anyone; an admin turns it on when the
+-- moderators are ready, and can turn it straight back off if something is
+-- wrong -- no redeploy either way. Missing row == off, deliberately: if this
+-- table cannot be read, the safe failure is "the old flow keeps working",
+-- not "every clipper is locked out of connecting".
+CREATE TABLE IF NOT EXISTS feature_flags (
+  key        TEXT PRIMARY KEY,
+  enabled    INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER,
+  updated_by TEXT
+);
+INSERT OR IGNORE INTO feature_flags (key, enabled, updated_at) VALUES ('applications_gate', 0, NULL);
+
+-- Grandfathering is deliberately NOT done here. It runs at the moment the gate
+-- is switched on (grandfatherExisting in src/applications.js), because a
+-- snapshot taken now would already be stale by then: anyone who connected an
+-- account between this migration and the switch-on would be sent back to
+-- step 1 for having done nothing wrong.

@@ -26,6 +26,9 @@ import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.
 import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
 import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
+import { flagEnabled, setFlag, APPLICATIONS_GATE } from '../feature-flags.js';
+import { grandfatherExisting, gatePreview } from '../applications.js';
+import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
 import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
 import {
@@ -129,6 +132,24 @@ async function invalidateSubmissionRow(env, sub, reason) {
     targetLabel: who ? `${who.u} — ${who.n}` : null, detail: reason
   });
   return null;
+}
+
+// Reads the reference/raw-footage fields off a create or edit body. `*_sent`
+// tells an edit which fields the admin actually included: absent means "leave
+// as is", while an empty list means "clear it" -- they must not be confused.
+function parseSources(payload) {
+  const out = { reference: [], raw: [], reference_sent: false, raw_sent: false };
+  if (payload.reference_links !== undefined) {
+    const r = normaliseReferenceLinks(payload.reference_links);
+    if (r.error) return { error: r.error };
+    out.reference = r.value; out.reference_sent = true;
+  }
+  if (payload.raw_sources !== undefined) {
+    const r = normaliseRawSources(payload.raw_sources);
+    if (r.error) return { error: r.error };
+    out.raw = r.value; out.raw_sent = true;
+  }
+  return out;
 }
 
 export async function handleAdmin(request, env, url) {
@@ -806,6 +827,32 @@ export async function handleAdmin(request, env, url) {
   }
 
   // ------------------------------------------------------------- campaigns
+  // ------------------------------------------- video-review gate (kill switch)
+  // Admin-only on purpose: a moderator reviews videos but does not decide
+  // whether the review exists.
+  if (pathname === '/api/admin/applications-gate' && method === 'GET') {
+    return json({ enabled: await flagEnabled(env.DB, APPLICATIONS_GATE), preview: await gatePreview(env.DB) });
+  }
+  if (pathname === '/api/admin/applications-gate' && method === 'POST') {
+    const { enabled } = await readJson(request);
+    if (typeof enabled !== 'boolean') return err('enabled must be true or false');
+    let carried = null;
+    if (enabled) {
+      // Carry everyone already past step 1 BEFORE the flag flips, so there is
+      // no instant where the gate is live and an existing clipper is not yet
+      // covered. If this throws the flag is never set, and nothing changed.
+      carried = await grandfatherExisting(env.DB);
+    }
+    await setFlag(env.DB, APPLICATIONS_GATE, enabled, 'admin');
+    await logAction(env.DB, {
+      staffType: 'admin', staffId: 0, staffName: 'Admin',
+      action: enabled ? 'applications_gate_on' : 'applications_gate_off',
+      targetType: 'setting', targetId: 0,
+      targetLabel: carried ? `${carried.carried_over} participations carried over` : null
+    });
+    return json({ ok: true, enabled, ...(carried || {}) });
+  }
+
   if (pathname === '/api/admin/campaigns' && method === 'GET') {
     const { results } = await env.DB.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();
     const out = [];
@@ -844,11 +891,22 @@ export async function handleAdmin(request, env, url) {
     // own self-promo campaigns -- no client, no fee, clipper payouts are a
     // real cost. See finance.js's header comment for the full split.
     const campaignKind = payload.campaign_kind === 'internal' ? 'internal' : 'client';
+    // What a clipper works from. Required once the video review is switched
+    // on -- a Step 1 page with nothing to copy from is a review nobody can
+    // pass -- but optional before that, so the old admin form keeps working
+    // while the feature is still dark.
+    const sources = parseSources(payload);
+    if (sources.error) return err(sources.error);
+    if (await flagEnabled(env.DB, APPLICATIONS_GATE)) {
+      if (!sources.reference.length) return err('Add at least one reference video (a public Google Drive link).');
+      if (!sources.raw.length) return err('Add at least one raw footage source (a Drive link or an official page).');
+    }
     const res = await env.DB.prepare(
-      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, campaign_kind, created_at)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+      `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, campaign_kind, reference_links, raw_sources, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`
     ).bind(name, payload.description || '', cpm, budget, minViews, payload.model || '',
-           JSON.stringify(pickBlueprint(payload)), platforms, campaignKind, now()).run();
+           JSON.stringify(pickBlueprint(payload)), platforms, campaignKind,
+           JSON.stringify(sources.reference), JSON.stringify(sources.raw), now()).run();
     const id = res.meta.last_row_id;
     // Slug needs the id (for uniqueness), which only exists after insert --
     // set it in a follow-up UPDATE. Never changes after this, even if the
@@ -971,7 +1029,7 @@ export async function handleAdmin(request, env, url) {
       // campaign_kind/fee_percent are admin-only -- spread on top rather
       // than added to publicCampaign, which this same helper feeds to the
       // homepage, SEO pages, and the client/clipper dashboards.
-      campaign: { ...(await campaignWithSpend(env.DB, campaign)), campaign_kind: campaign.campaign_kind, fee_percent: campaign.fee_percent },
+      campaign: { ...(await campaignWithSpend(env.DB, campaign)), campaign_kind: campaign.campaign_kind, fee_percent: campaign.fee_percent, ...readStored(campaign) },
       // bot_risk_tier is the None/Low/Medium/High badge (src/bot-detection.js) --
       // a passive display signal derived from bot_score, never a status change.
       submissions: (submissions || []).map(s => ({ ...s, bot_risk_tier: tierForScore(s.bot_score) }))
@@ -985,6 +1043,9 @@ export async function handleAdmin(request, env, url) {
     if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) {
       return err(`'${payload.status}' is not a valid campaign status. Accepted: ${CAMPAIGN_STATUSES.join(', ')}.`);
     }
+    // Validated up front so a bad link cannot leave the campaign half-updated.
+    const sources = parseSources(payload);
+    if (sources.error) return err(sources.error);
     const priorBlueprint = JSON.parse(existing.blueprint_json || '{}');
     const merged = { ...priorBlueprint, ...pickBlueprint(payload) };
     // The per-video cap lives in the blueprint, not in a column, so a change to
@@ -1026,6 +1087,14 @@ export async function handleAdmin(request, env, url) {
         : existing.campaign_kind,
       params.id
     ).run();
+    // Only the fields the admin actually sent are touched, so saving an
+    // unrelated edit never blanks the links.
+    if (sources.reference_sent) {
+      await env.DB.prepare('UPDATE campaigns SET reference_links = ? WHERE id = ?').bind(JSON.stringify(sources.reference), params.id).run();
+    }
+    if (sources.raw_sent) {
+      await env.DB.prepare('UPDATE campaigns SET raw_sources = ? WHERE id = ?').bind(JSON.stringify(sources.raw), params.id).run();
+    }
     // CPM, budget or threshold changes re-price every submission in this campaign.
     if (payload.cpm != null || payload.budget != null || payload.min_views != null || capChanged) {
       await reallocateCampaign(env.DB, params.id);

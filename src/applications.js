@@ -316,3 +316,72 @@ export async function applicationQueue(db, { limit = 300 } = {}) {
 
   return { applications, campaigns, total: applications.length };
 }
+
+/**
+ * Lets everyone already past step 1 in the OLD flow carry on untouched. Run at
+ * the moment the gate is switched on (not at migration time -- see migration
+ * 044 for why), and safe to run again: a participation that already has any
+ * application row is skipped, so a real review is never overwritten.
+ *
+ * Two groups get an approval, matching how far they had actually got:
+ *   - an account is connected to the participation: fully through, carry on;
+ *   - no account yet, but the admin already approved their access request
+ *     ('confirmed'): they are waiting at step 2, so they land at step 2.
+ * Everyone else -- joined only, or a request still waiting on the admin -- has
+ * nothing vetted yet and starts at step 1, like a new clipper. That includes
+ * a request still 'requested' or the legacy 'invited': it had not been
+ * approved, so it is not treated as if it had.
+ *
+ * Per participation, not per clipper: approved on campaign A says nothing
+ * about campaign B, since the review is about fit with one campaign's style.
+ */
+export async function grandfatherExisting(db) {
+  const res = await db.prepare(
+    `INSERT INTO campaign_applications
+       (clipper_id, campaign_id, video_url, attempt, status,
+        reviewer_type, reviewer_name, reviewer_note, reviewed_at, created_at)
+     SELECT p.clipper_id, p.campaign_id, NULL, 0, 'approved', 'system', 'System',
+            CASE WHEN EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)
+                 THEN 'Already connected an account to this campaign before video review existed -- carried over automatically.'
+                 ELSE 'Access request was already approved before video review existed -- carried over to the connect step.'
+            END,
+            ?, ?
+       FROM participations p
+      WHERE p.status != 'kicked'
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications a
+                         WHERE a.clipper_id = p.clipper_id AND a.campaign_id = p.campaign_id)
+        AND ( EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)
+           OR EXISTS (SELECT 1 FROM tester_requests t
+                       WHERE t.clipper_id = p.clipper_id AND t.campaign_id = p.campaign_id
+                         AND t.status = 'confirmed') )`
+  ).bind(now(), now()).run();
+  return { carried_over: (res.meta && res.meta.changes) || 0 };
+}
+
+/**
+ * What switching the gate on would do, counted before anyone commits to it.
+ * Mirrors grandfatherExisting's selection exactly (same WHERE), so the
+ * numbers an admin sees are the numbers that will happen.
+ */
+export async function gatePreview(db) {
+  const row = await db.prepare(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id) THEN 1 ELSE 0 END) AS connected,
+       SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)
+                 AND EXISTS (SELECT 1 FROM tester_requests t WHERE t.clipper_id = p.clipper_id
+                              AND t.campaign_id = p.campaign_id AND t.status = 'confirmed') THEN 1 ELSE 0 END) AS awaiting_connect
+       FROM participations p
+      WHERE p.status != 'kicked'
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications a
+                         WHERE a.clipper_id = p.clipper_id AND a.campaign_id = p.campaign_id)`
+  ).first();
+  const connected = (row && row.connected) || 0;
+  const awaiting = (row && row.awaiting_connect) || 0;
+  const total = (row && row.total) || 0;
+  return {
+    carried_over_connected: connected,
+    carried_over_to_connect_step: awaiting,
+    start_at_step_one: Math.max(0, total - connected - awaiting)
+  };
+}

@@ -36,9 +36,10 @@ function seed() {
   const camp = (id, name, cpm, spent, budget, part, extra = {}) => ({
     id, name, cpm, spent, budget, remaining: budget - spent, min_views: 1000, status: 'active',
     allowed_platforms: ['instagram', 'youtube'], description: 'Clips must be 15–60 seconds.\nUse the raw footage only.\nNo watermarks from other apps.',
-    blueprint: { demo_video_url: 'https://example.com/demo', reference_url: 'https://example.com/ref',
-      samples: [{ label: 'Sample 1 — hook first', url: 'https://example.com/s1' }],
-      raw_sources: [{ label: 'Raw clips (Google Drive)', url: 'https://drive.google.com/' }] },
+    reference_links: ['https://drive.google.com/file/d/1AbC/view', 'https://drive.google.com/file/d/2DeF/view'],
+    raw_sources: part ? [{ url: 'https://drive.google.com/drive/folders/1XyZ', kind: 'drive', label: 'Raw episodes (Drive)' },
+      { url: 'https://www.instagram.com/officialpage/reels/', kind: 'instagram', label: '' },
+      { url: 'https://www.youtube.com/@channel/shorts', kind: 'youtube', label: '' }] : [],
     participation: part, ...extra
   });
   const joined = { status: 'active', accounts: {}, access: {} };

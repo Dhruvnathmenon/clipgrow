@@ -155,17 +155,23 @@
         <span class="attempts-t">${used} of ${MAX_ATTEMPTS} failed${left > 0 ? ` · ${left} ${left === 1 ? 'try' : 'tries'} left` : ''}</span></div>`;
     }
 
+    const KIND = { drive: 'Google Drive', instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', x: 'X', facebook: 'Facebook', twitch: 'Twitch', snapchat: 'Snapchat' };
+    const linkCard = (label, tag, url) => {
+      const u = safeUrl(url);
+      return u ? `<a class="src" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span>${esc(label)}${tag ? ` <span class="cg-muted" style="font-size:.75rem">· ${esc(tag)}</span>` : ''}</span><span>Open ↗</span></a>` : '';
+    };
+
+    /* Two separate jobs, so two separate panels: what a good clip looks like
+       (reference, public Drive links) and what to make it from (raw footage: a
+       Drive link, or the official pages). Raw footage only arrives for people
+       who joined -- the server does not send it to anyone else. */
     function reference(c) {
-      const bp = c.blueprint || {};
-      const links = [];
-      const add = (label, url) => { const u = safeUrl(url); if (u) links.push(`<a class="src" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span>${esc(label)}</span><span>Open ↗</span></a>`); };
-      add('Demo video — what a good clip looks like', bp.demo_video_url || bp.demo_video);
-      add('Reference video', bp.reference_url);
-      for (const s of bp.samples || []) add(s.label || 'Sample', s.url);
-      for (const s of bp.raw_sources || []) add(s.label || 'Raw footage', s.url);
+      const refs = (c.reference_links || []).map((u, i, all) => linkCard(all.length > 1 ? `Reference video ${i + 1}` : 'Reference video', 'Google Drive', u)).join('');
+      const raw = (c.raw_sources || []).map(r => linkCard(r.label || (KIND[r.kind] || 'Source') + ' footage', KIND[r.kind] || '', r.url)).join('');
       const rules = c.description ? `<ul class="rules">${String(c.description).split(/\n+/).filter(Boolean).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '';
-      if (!links.length && !rules) return '';
-      return `<div class="cg-panel"><h3>What to make</h3><div class="sub">Watch the demo, use the raw footage, then submit your own edit.</div>${links.join('')}${rules}</div>`;
+      return (refs ? `<div class="cg-panel"><h3>Reference — what a good clip looks like</h3><div class="sub">Watch these before you make yours.</div>${refs}</div>` : '')
+        + (raw ? `<div class="cg-panel"><h3>Raw footage — clip from these</h3><div class="sub">Download from the official pages or the Drive folder, then make your edit.</div>${raw}</div>` : '')
+        + (rules ? `<div class="cg-panel"><h3>Rules</h3>${rules}</div>` : '');
     }
 
     function feedback(app) {
