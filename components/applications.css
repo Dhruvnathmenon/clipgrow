@@ -129,6 +129,14 @@
 .cga a.src:hover{border-color:var(--c-neon)}
 .cga .rules{margin:0;padding-left:1.1rem;font-size:.84rem;line-height:1.7}
 
+/* key/value rows in the About panel */
+.cga .cg-row{display:grid;grid-template-columns:150px 1fr;gap:.9rem;padding:.65rem 0;border-top:1px solid var(--c-border);font-size:.86rem}
+.cga .cg-row:first-of-type{border-top:none}
+.cga .cg-k{color:var(--c-muted-l);font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding-top:.15rem}
+.cga .cg-v{color:var(--c-text);white-space:pre-wrap;overflow-wrap:anywhere}
+.cga .cg-v a{color:var(--c-neon)}
+@media (max-width:640px){.cga .cg-row{grid-template-columns:1fr;gap:.2rem}}
+
 /* feedback + attempts */
 .cga .feedback{border:1px solid rgba(255,77,77,.4);background:rgba(255,77,77,.07);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
 .cga .feedback .fb-h{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--c-red);font-weight:800}

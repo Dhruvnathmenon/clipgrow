@@ -359,7 +359,7 @@
     }
     .mob-head { display:none; justify-content:space-between; align-items:center; margin-bottom:1.2rem; padding-bottom:.9rem; border-bottom:1px solid var(--border); }
   </style>
-  <link rel="stylesheet" href="/components/applications.css?v=1">
+  <link rel="stylesheet" href="/components/applications.css?v=2">
 </head>
 <body>
 
@@ -431,8 +431,10 @@
     <section class="view" id="v-campaigns">
       <div class="page-head"><h1>Campaigns</h1><p>Join a campaign, connect its Instagram account, then post</p></div>
       <div id="camp-list"><div class="empty">Loading…</div></div>
-      <div class="sec-title" style="margin-top:2rem">Your connected accounts</div>
-      <div id="acct-list"><div class="empty">Loading…</div></div>
+      <div id="acct-wrap">
+        <div class="sec-title" style="margin-top:2rem">Your connected accounts</div>
+        <div id="acct-list"><div class="empty">Loading…</div></div>
+      </div>
     </section>
 
     <!-- CAMPAIGN DETAIL -->
@@ -577,7 +579,7 @@
 
   <div class="toast" id="toast"></div>
 
-  <script src="/components/clipper-applications.js?v=1"></script>
+  <script src="/components/clipper-applications.js?v=2"></script>
   <script>
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
     // Plain counts (views, videos, etc.) get standard 3-digit grouping, not
@@ -732,6 +734,9 @@
       if(onboarding){ onboarding.reload(); return; }
       onboarding=CGApps.clipper.mount(el,{
         api, initial:resp,
+        // A campaign's own page has no use for the connected-accounts list --
+        // it is only shown beside the campaign list.
+        onView:v=>{ document.getElementById('acct-wrap').style.display=v==='detail'?'none':''; },
         // Step 2 is the existing connect flow, untouched: the campaign page
         // already handles the access request, admin approval and OAuth.
         onConnect:c=>openCampaignDetail(c.id),

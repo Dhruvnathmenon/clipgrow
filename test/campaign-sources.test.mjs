@@ -125,7 +125,7 @@ async function clipperList(env, id) {
   return (await (await handleClipper(req, env, new URL(req.url))).json()).campaigns[0];
 }
 
-test('raw footage reaches only a clipper who joined and was not removed', async () => {
+test('reference videos and raw footage reach only a clipper who joined and was not removed', async () => {
   const env = world();
   const joined = await clipperList(env, 1);
   assert.equal(joined.raw_sources.length, 1, 'a joined clipper sees the raw footage');
@@ -133,10 +133,11 @@ test('raw footage reaches only a clipper who joined and was not removed', async 
 
   const stranger = await clipperList(env, 2);
   assert.deepEqual(stranger.raw_sources, [], 'someone who never joined does not');
-  assert.equal(stranger.reference_links.length, 1, 'but can see the reference video while deciding to join');
+  assert.deepEqual(stranger.reference_links, [], 'nor the reference videos -- the first page is the brief, not the assets');
 
   const removed = await clipperList(env, 3);
   assert.deepEqual(removed.raw_sources, [], 'and a removed clipper loses access to it');
+  assert.deepEqual(removed.reference_links, []);
 });
 
 async function adminCall(env, path, method, body) {

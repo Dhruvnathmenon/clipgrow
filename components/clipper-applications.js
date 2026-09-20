@@ -111,6 +111,9 @@
       const c = campaigns.find(x => x.id === openId);
       el.innerHTML = c ? detail(c) : list();
       bind(c);
+      // Lets the host hide page furniture (connected accounts, etc.) that only
+      // belongs next to the campaign list.
+      if (opts.onView) opts.onView(c ? 'detail' : 'list');
     }
 
     /* ---------------------------------------------------------------- list */
@@ -190,17 +193,37 @@
       return u ? `<a class="src" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span>${esc(label)}${tag ? ` <span class="cg-muted" style="font-size:.75rem">· ${esc(tag)}</span>` : ''}</span><span>Open ↗</span></a>` : '';
     };
 
-    /* Two separate jobs, so two separate panels: what a good clip looks like
-       (reference, public Drive links) and what to make it from (raw footage: a
-       Drive link, or the official pages). Raw footage only arrives for people
-       who joined -- the server does not send it to anyone else. */
+    /* What the campaign is about: shown to everyone, including before they
+       join -- this is the page they decide from. Only fields the admin actually
+       filled in are drawn; a value that is a link becomes one. */
+    function about(c) {
+      const bp = c.blueprint || {};
+      const rows = [];
+      const add = (k, v) => {
+        const t = String(v == null ? '' : v).trim();
+        if (!t) return;
+        const u = safeUrl(t);
+        rows.push(`<div class="cg-row"><div class="cg-k">${esc(k)}</div><div class="cg-v">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>` : esc(t)}</div></div>`);
+      };
+      add('Objective', bp.objective);
+      add('Brand guidelines', bp.guidelines);
+      add('Call to action', bp.cta);
+      add('Tags', bp.tags);
+      if (bp.max_payout) add('Max payout per video', money(bp.max_payout));
+      if (c.min_views) add('Minimum views to earn', Number(c.min_views).toLocaleString('en-IN'));
+      const rules = c.description ? `<ul class="rules">${String(c.description).split(/\n+/).filter(Boolean).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '';
+      if (!rows.length && !rules) return '';
+      return `<div class="cg-panel"><h3>About this campaign</h3>${rows.join('')}${rules ? `<div style="margin-top:.7rem">${rules}</div>` : ''}</div>`;
+    }
+
+    /* Working material -- only once the clipper has joined. The reference
+       videos are what to aim for, the raw footage is what to make it from; the
+       server also withholds both from anyone who has not joined. */
     function reference(c) {
       const refs = (c.reference_links || []).map((u, i, all) => linkCard(all.length > 1 ? `Reference video ${i + 1}` : 'Reference video', kindOf(u), u)).join('');
       const raw = (c.raw_sources || []).map(r => linkCard(r.label || (KIND[r.kind] || 'Source') + ' footage', KIND[r.kind] || '', r.url)).join('');
-      const rules = c.description ? `<ul class="rules">${String(c.description).split(/\n+/).filter(Boolean).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '';
       return (refs ? `<div class="cg-panel"><h3>Reference — what a good clip looks like</h3><div class="sub">Watch these before you make yours.</div>${refs}</div>` : '')
-        + (raw ? `<div class="cg-panel"><h3>Raw footage — clip from these</h3><div class="sub">Download from the official pages or the Drive folder, then make your edit.</div>${raw}</div>` : '')
-        + (rules ? `<div class="cg-panel"><h3>Rules</h3>${rules}</div>` : '');
+        + (raw ? `<div class="cg-panel"><h3>Raw footage — clip from these</h3><div class="sub">Download from the official pages or the Drive folder, then make your edit.</div>${raw}</div>` : '');
     }
 
     function feedback(app) {
@@ -268,7 +291,7 @@
       return `<button class="cg-back" id="cga-back">← All campaigns</button>
         <div class="hero">${face(c, heroCap, heroBadge)}</div>
         ${joined ? stepper(v) : '<div style="height:1rem"></div>'}
-        ${body}${joined ? history(app) : ''}${reference(c)}`;
+        ${body}${joined ? history(app) : ''}${about(c)}${joined ? reference(c) : ''}`;
     }
 
     /* ------------------------------------------------------------ behaviour */

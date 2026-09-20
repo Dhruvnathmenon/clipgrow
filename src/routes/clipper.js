@@ -329,10 +329,10 @@ export async function handleClipper(request, env, url) {
       out.push({
         ...publicCampaign(c, await campaignSpend(env.DB, c.id)),
         allowed_platforms: allowed,
-        // Reference videos are shown to any signed-in clipper deciding whether
-        // to join. The raw footage is working material for people who have
-        // joined, and is never sent to anyone else -- nor to someone removed.
-        reference_links: readStored(c).reference_links,
+        // Reference videos and raw footage are working material for people who
+        // have joined. Neither is sent to anyone else, nor to someone removed --
+        // the page a clipper decides from shows the brief, not the assets.
+        reference_links: part && part.status !== 'kicked' ? readStored(c).reference_links : [],
         raw_sources: part && part.status !== 'kicked' ? readStored(c).raw_sources : [],
         platforms_available: allowed.filter(p => configured.includes(p)),
         participation: part

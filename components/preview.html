@@ -36,7 +36,8 @@ function seed() {
   const camp = (id, name, cpm, spent, budget, part, extra = {}) => ({
     id, name, cpm, spent, budget, remaining: budget - spent, min_views: 1000, status: 'active',
     allowed_platforms: ['instagram', 'youtube'], description: 'Clips must be 15–60 seconds.\nUse the raw footage only.\nNo watermarks from other apps.',
-    reference_links: ['https://drive.google.com/file/d/1AbC/view', 'https://drive.google.com/file/d/2DeF/view'],
+    blueprint: { objective: 'Make the song go viral with fan-style edits', guidelines: 'https://drive.google.com/file/d/9Guide/view', cta: 'Stream Mali on Spotify', tags: '#mali #newmusic', max_payout: 2000 },
+    reference_links: part ? ['https://drive.google.com/file/d/1AbC/view', 'https://www.instagram.com/reel/abc123/'] : [],
     raw_sources: part ? [{ url: 'https://drive.google.com/drive/folders/1XyZ', kind: 'drive', label: 'Raw episodes (Drive)' },
       { url: 'https://www.instagram.com/officialpage/reels/', kind: 'instagram', label: '' },
       { url: 'https://www.youtube.com/@channel/shorts', kind: 'youtube', label: '' }] : [],
