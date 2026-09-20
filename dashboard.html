@@ -318,6 +318,8 @@
     /* Password-change modal (reuses .pf/.pf-inner/.pf-foot shell) */
     #pw-back, #pd-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
     #pw-back.open, #pd-back.open { display:flex; }
+    .fld-err { display:none; color:var(--red); font-size:.76rem; margin-top:.3rem; }
+    input.pd-invalid { border-color:var(--red) !important; }
     .form-group { margin-bottom:.9rem; }
     .form-group label { display:block; font-size:.78rem; font-weight:600; color:var(--muted-l); margin-bottom:.35rem; }
     .form-group input { width:100%; background:var(--card-h); border:1px solid var(--border-s); border-radius:8px; padding:.6rem .8rem; color:var(--white); font-size:.88rem; font-family:'Inter',sans-serif; }
@@ -392,7 +394,7 @@
           <span class="streak-l" id="wm-streak-l">day streak</span>
         </div>
       </div>
-      <button class="sb-out" onclick="openPayoutModal()">Your Details</button>
+      <button class="sb-out" onclick="openPayoutModal(false)">Your Details</button>
       <button class="sb-out" onclick="openPasswordModal()">Change Password</button>
       <button class="sb-out" onclick="logout()">Log out</button>
     </div>
@@ -407,7 +409,6 @@
         <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
       </div>
     </div>
-    <div id="details-banner"></div>
 
     <div id="ro-banner"></div>
     <div id="global-alert"></div>
@@ -562,24 +563,25 @@
   </div>
 
   <div id="pd-back" onclick="if(event.target.id==='pd-back')closePayoutModal()">
-    <div class="pf">
+    <div class="pf" role="dialog" aria-modal="true" aria-labelledby="pd-title">
       <div class="pf-inner">
-        <h3 style="margin-bottom:1rem">Fill in Your Details</h3>
-        <p class="note" style="margin-bottom:1rem">How ClipGrow reaches and pays you. Only you and the ClipGrow admin ever see this — never another clipper, and it's editable any time.</p>
-        <form id="pd-form">
-          <div class="form-group"><label for="pd-email">Email</label><input type="email" id="pd-email" required placeholder="name@example.com" /></div>
-          <div class="form-group"><label for="pd-contact">Contact Number</label><input type="tel" id="pd-contact" required placeholder="9876543210" /></div>
-          <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" required placeholder="yourname@bank" /></div>
-          <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" required placeholder="Exactly as it appears on the account" /></div>
-          <div class="form-group"><label for="pd-legal">Legal Full Name</label><input type="text" id="pd-legal" required placeholder="As it appears on your ID" /></div>
-          <div class="form-group"><label for="pd-discord">Discord Username</label><input type="text" id="pd-discord" required placeholder="e.g. yourname" autocapitalize="off" autocorrect="off" />
-            <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message doesn't land. Your @username, not your display name — find it under Discord Settings → My Account.</p>
+        <h3 id="pd-title" style="margin-bottom:.5rem">Your details</h3>
+        <p class="note" id="pd-intro" style="margin-bottom:1rem">How ClipGrow reaches and pays you. Only you and the ClipGrow admin ever see this — never another clipper. You can change it any time from Your Details.</p>
+        <form id="pd-form" novalidate autocomplete="on">
+          <div class="form-group"><label for="pd-email">Email</label><input type="email" id="pd-email" data-f="email" placeholder="name@example.com" autocomplete="email" inputmode="email" autocapitalize="off" /><p class="fld-err" id="pd-e-email"></p></div>
+          <div class="form-group"><label for="pd-contact">Contact number (WhatsApp)</label><input type="tel" id="pd-contact" data-f="contactNumber" placeholder="9876543210" autocomplete="tel" inputmode="tel" /><p class="fld-err" id="pd-e-contactNumber"></p></div>
+          <div class="form-group"><label for="pd-upi">UPI ID</label><input type="text" id="pd-upi" data-f="upiId" placeholder="yourname@bank" autocapitalize="off" autocorrect="off" spellcheck="false" /><p class="fld-err" id="pd-e-upiId"></p></div>
+          <div class="form-group"><label for="pd-name">Name on the UPI account</label><input type="text" id="pd-name" data-f="accountName" placeholder="Exactly as it appears on the account" autocomplete="name" /><p class="fld-err" id="pd-e-accountName"></p></div>
+          <div class="form-group"><label for="pd-legal">Legal full name</label><input type="text" id="pd-legal" data-f="legalName" placeholder="As it appears on your ID" autocomplete="name" /><p class="fld-err" id="pd-e-legalName"></p></div>
+          <div class="form-group"><label for="pd-discord">Discord username</label><input type="text" id="pd-discord" data-f="discordUsername" placeholder="e.g. yourname" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message does not land. Your @username, not your display name — find it under Discord Settings → My Account.</p>
+            <p class="fld-err" id="pd-e-discordUsername"></p>
           </div>
           <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
         </form>
       </div>
       <div class="pf-foot">
-        <button class="btn btn-ghost btn-sm" onclick="closePayoutModal()" type="button">Cancel</button>
+        <button class="btn btn-ghost btn-sm" id="pd-cancel" onclick="closePayoutModal()" type="button">Cancel</button>
         <button class="btn btn-sm" id="pd-submit" onclick="submitPayoutDetails()" type="button">Save</button>
       </div>
     </div>
@@ -674,25 +676,16 @@
           'Contact the ClipGrow admin if you think this is a mistake.');
       }
 
-      // One consolidated nudge for everything ClipGrow needs to reach and pay
-      // you -- email, contact number and UPI ID -- instead of a separate
-      // banner per field. Not a hard block on the rest of the dashboard:
-      // joining campaigns, connecting accounts and posting clips all still
-      // work without it, so this never costs a day of tracked earnings while
-      // it waits. Names exactly what's missing so it never nags about
-      // something already filled in.
-      const missing=[];
-      if(!d.clipper.email) missing.push('email');
-      if(!d.clipper.contact_number) missing.push('contact number');
-      if(!d.clipper.upi_id) missing.push('UPI ID');
-      if(!d.clipper.upi_account_name) missing.push('name on your UPI account');
-      if(!d.clipper.legal_name) missing.push('legal name');
-      if(!d.clipper.discord_username) missing.push('Discord username');
-      document.getElementById('details-banner').innerHTML=missing.length?alertBox('warn',
-        'Fill in your details',
-        `ClipGrow needs your ${missing.join(', ')} to reach you and pay you directly, without messaging you for it on every payout.`,
-        null,
-        '<div style="margin-top:.6rem"><button class="btn btn-sm" onclick="openPayoutModal()">Fill in your details</button></div>'):'';
+      // Every clipper must have complete, valid contact and payout details.
+      // Rather than a banner that can be scrolled past, sign-in itself asks
+      // for them: a blocking prompt that appears whenever anything is missing
+      // OR no longer valid (which also brings clippers who filled this in under
+      // the older, looser rules up to standard). The server sends exactly what
+      // is wrong (profile_problems), and refuses to start anything new until
+      // it is fixed, so this is not just cosmetic. Once saved it never returns.
+      if(d.clipper.profile_problems&&d.clipper.profile_problems.length&&!d.clipper.read_only&&!document.getElementById('pd-back').classList.contains('open')){
+        openPayoutModal(true);
+      }
 
       const s=d.streak||{current:0,best:0};
       document.getElementById('wm-streak').textContent=s.current;
@@ -1443,44 +1436,84 @@
     };
     document.getElementById('pw-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPasswordChange(); } });
 
-    window.openPayoutModal=function(){
-      document.getElementById('pd-email').value=(ME&&ME.clipper.email)||'';
-      document.getElementById('pd-contact').value=(ME&&ME.clipper.contact_number)||'';
-      document.getElementById('pd-upi').value=(ME&&ME.clipper.upi_id)||'';
-      document.getElementById('pd-name').value=(ME&&ME.clipper.upi_account_name)||'';
-      document.getElementById('pd-legal').value=(ME&&ME.clipper.legal_name)||'';
-      document.getElementById('pd-discord').value=(ME&&ME.clipper.discord_username)||'';
+    /* ── Your details: required on sign-in, editable any time ──
+       The rules live in ONE file, /components/profile-validation.js, which the
+       server imports too -- so a value this form accepts is a value the server
+       accepts, and the messages below are the server's own words. */
+    let PROFILE_RULES=null, pdRequired=false;
+    async function profileRules(){
+      if(!PROFILE_RULES) PROFILE_RULES=await import('/components/profile-validation.js?v=1');
+      return PROFILE_RULES;
+    }
+    // form key -> [input id, clippers-table key]
+    const PD_FIELDS={email:['pd-email','email'],contactNumber:['pd-contact','contact_number'],upiId:['pd-upi','upi_id'],
+      accountName:['pd-name','upi_account_name'],legalName:['pd-legal','legal_name'],discordUsername:['pd-discord','discord_username']};
+
+    function pdShowError(field,msg){
+      const inp=document.getElementById(PD_FIELDS[field][0]), out=document.getElementById('pd-e-'+field);
+      out.textContent=msg||''; out.style.display=msg?'block':'none';
+      inp.classList.toggle('pd-invalid',!!msg);
+      inp.setAttribute('aria-invalid',msg?'true':'false');
+    }
+    function pdCheck(field){
+      const R=PROFILE_RULES; if(!R) return null;
+      const def=R.REQUIRED_FIELDS.find(f=>f.field===field);
+      const err=def.check(document.getElementById(PD_FIELDS[field][0]).value);
+      pdShowError(field,err);
+      return err;
+    }
+
+    window.openPayoutModal=async function(required){
+      const R=await profileRules();
+      pdRequired=required===true;
+      const c=(ME&&ME.clipper)||{};
+      Object.entries(PD_FIELDS).forEach(([field,[id,key]])=>{ document.getElementById(id).value=c[key]||''; pdShowError(field,''); });
       document.getElementById('pd-error').style.display='none';
+      const title=document.getElementById('pd-title'), intro=document.getElementById('pd-intro');
+      if(pdRequired){
+        // Blocking: no Cancel, no click-outside, no Escape. It names exactly
+        // what is missing or needs correcting, so a returning clipper is not
+        // asked to re-read fields that are already fine.
+        const need=R.profileProblems(c).map(p=>p.label);
+        title.textContent='Complete your details to continue';
+        intro.textContent='ClipGrow needs these to reach you and pay you directly. '+(need.length?'Still needed: '+need.join(', ')+'. ':'')+'Only you and the ClipGrow admin ever see them.';
+      } else {
+        title.textContent='Your details';
+        intro.textContent='How ClipGrow reaches and pays you. Only you and the ClipGrow admin ever see this — never another clipper. Editable any time.';
+      }
+      document.getElementById('pd-cancel').style.display=pdRequired?'none':'';
       document.getElementById('pd-back').classList.add('open');
-      document.getElementById('pd-email').focus();
+      // Show what is wrong with values already on file (e.g. entered under the
+      // older, looser rules) straight away rather than only after a failed save.
+      if(pdRequired) Object.keys(PD_FIELDS).forEach(f=>{ if(document.getElementById(PD_FIELDS[f][0]).value) pdCheck(f); });
+      const first=Object.keys(PD_FIELDS).find(f=>!document.getElementById(PD_FIELDS[f][0]).value||document.getElementById('pd-e-'+f).textContent)||'email';
+      document.getElementById(PD_FIELDS[first][0]).focus();
     };
-    window.closePayoutModal=function(){ document.getElementById('pd-back').classList.remove('open'); };
+    window.closePayoutModal=function(force){
+      if(pdRequired&&force!==true) return;   // a required prompt cannot be dismissed
+      document.getElementById('pd-back').classList.remove('open');
+    };
     window.submitPayoutDetails=async function(){
-      const email=document.getElementById('pd-email').value.trim();
-      const contactNumber=document.getElementById('pd-contact').value.trim();
-      const upiId=document.getElementById('pd-upi').value.trim();
-      const accountName=document.getElementById('pd-name').value.trim();
-      const legalName=document.getElementById('pd-legal').value.trim();
-      const discordUsername=document.getElementById('pd-discord').value.trim();
-      const errorEl=document.getElementById('pd-error');
-      const btn=document.getElementById('pd-submit');
+      await profileRules();
+      const errorEl=document.getElementById('pd-error'), btn=document.getElementById('pd-submit');
       errorEl.style.display='none';
-      if(!email||!contactNumber||!upiId||!accountName||!legalName||!discordUsername){ errorEl.textContent='Fill in every field: email, contact number, UPI ID, the name on the account, your legal full name, and your Discord username.'; errorEl.style.display='block'; return; }
+      // Every field is checked and every error shown at once, then focus goes to
+      // the first one -- not one round trip per mistake.
+      let firstBad=null;
+      Object.keys(PD_FIELDS).forEach(f=>{ if(pdCheck(f)&&!firstBad) firstBad=f; });
+      if(firstBad){ document.getElementById(PD_FIELDS[firstBad][0]).focus(); return; }
+      const body={};
+      Object.entries(PD_FIELDS).forEach(([field,[id]])=>{ body[field]=document.getElementById(id).value.trim(); });
       btn.disabled=true; btn.textContent='Saving…';
       try{
-        await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify({email,contactNumber,upiId,accountName,legalName,discordUsername})});
-        ME.clipper.email=email; ME.clipper.contact_number=contactNumber;
-        ME.clipper.upi_id=upiId; ME.clipper.upi_account_name=accountName;
-        ME.clipper.legal_name=legalName;
-        ME.clipper.discord_username=discordUsername;
-        document.getElementById('details-banner').innerHTML='';
-        closePayoutModal();
+        await api('/api/clipper/me/profile',{method:'PATCH',body:JSON.stringify(body)});
+        // Take what the server stored (it normalises: lowercase email, digits-only number, etc.)
+        ME=await api('/api/clipper/me');
+        pdRequired=false;
+        closePayoutModal(true);
         toast('Details saved');
       }catch(e){
-        // The server rejects one bad field at a time with a message naming
-        // it (validateEmail/validateContactNumber/validateUpiId in db.js) --
-        // shown verbatim rather than a generic "something went wrong" so the
-        // clipper knows exactly which field to fix.
+        // The server is the final word; its message names the field at fault.
         errorEl.textContent=e.message||'Could not save your details.';
         errorEl.style.display='block';
       }finally{
@@ -1488,6 +1521,11 @@
       }
     };
     document.getElementById('pd-form').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); submitPayoutDetails(); } });
+    // Live feedback: check a field when the clipper leaves it, and re-check on
+    // each keystroke only once it is already showing an error.
+    document.getElementById('pd-form').addEventListener('focusout',e=>{ const f=e.target.dataset&&e.target.dataset.f; if(f&&e.target.value) pdCheck(f); });
+    document.getElementById('pd-form').addEventListener('input',e=>{ const f=e.target.dataset&&e.target.dataset.f; if(f&&e.target.classList.contains('pd-invalid')) pdCheck(f); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&pdRequired) e.stopPropagation(); },true);
 
     /* ── Instagram connect guide ── */
     window.openConnectGuide=function(campaignId,campaignName){

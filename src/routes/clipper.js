@@ -8,7 +8,8 @@ import {
   RETIRED_VIEWS_BY_CLIPPER_EXPR,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
-  normaliseDiscordUsername, validateDiscordUsername
+  normaliseDiscordUsername, validateDiscordUsername,
+  normaliseName, validatePersonName, profileProblems, profileComplete
 } from '../db.js';
 import { clipState, clipStateMessage, TRACKING_WINDOW_MS } from '../clipstate.js';
 // MEDIA_NOT_FOUND is the one sync_error that can genuinely stop being true
@@ -107,6 +108,15 @@ export async function handleClipper(request, env, url) {
   const blockIfReadOnly = () => readOnly
     ? err('Your account is disabled, so this action is not available. You can still see everything you have earned. Contact the ClipGrow admin.', 403)
     : null;
+  // Starting something new (joining, submitting a video, asking to connect an
+  // account) needs a profile ClipGrow can reach and pay. The dashboard already
+  // makes the clipper complete it on sign-in; this is the server saying the
+  // same thing, so the rule holds even for a stale tab or a direct API call.
+  // Posting clips and reading earnings are deliberately NOT gated -- tracked
+  // views must never be lost while a form waits to be filled in.
+  const needsProfile = () => profileComplete(me)
+    ? null
+    : err('Complete your details first (email, contact number, UPI, legal name and Discord). Open Your Details in the sidebar.', 403);
 
   // ------------------------------------------------------------- profile
   if (pathname === '/api/clipper/me' && method === 'GET') {
@@ -129,7 +139,11 @@ export async function handleClipper(request, env, url) {
         legal_name: me.legal_name || null,
         // Fallback contact channel (migration 035/039) -- optional, for when
         // WhatsApp isn't on file or doesn't get an answer.
-        discord_username: me.discord_username || null
+        discord_username: me.discord_username || null,
+        // Which of the required details are missing or no longer valid, so the
+        // dashboard can make the clipper fix exactly those on sign-in.
+        profile_problems: profileProblems(me),
+        profile_complete: profileComplete(me)
       },
       money, streak, totals
     });
@@ -164,17 +178,17 @@ export async function handleClipper(request, env, url) {
     if (discordInvalid) return err(discordInvalid);
     const discord = normaliseDiscordUsername(discordUsername);
     if (!discord) return err('Enter your Discord username');
-    const name = String(accountName || '').trim();
-    if (!name) return err('Enter the name on the UPI account');
-    if (name.length > 100) return err('That name is too long');
+    const nameInvalid = validatePersonName(accountName, 'name on the UPI account');
+    if (nameInvalid) return err(nameInvalid);
+    const name = normaliseName(accountName);
     // Mandatory on the clipper's own self-service save, same reasoning as
     // Discord above: ClipGrow can't reliably pay or verify someone with no
     // legal name on file. (Still nullable on the admin-side edit endpoint --
     // an admin filling in a clipper's profile on their behalf may not have
     // it yet.)
-    const legal = String(legalName || '').trim();
-    if (!legal) return err('Enter your legal full name');
-    if (legal.length > 100) return err('That name is too long');
+    const legalInvalid = validatePersonName(legalName, 'legal name');
+    if (legalInvalid) return err(legalInvalid);
+    const legal = normaliseName(legalName);
     await env.DB.prepare(
       `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_username = ?,
          legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
@@ -368,7 +382,7 @@ export async function handleClipper(request, env, url) {
 
   let params = matchPath('/api/clipper/campaigns/:id/join', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly();
+    const blocked = blockIfReadOnly() || needsProfile();
     if (blocked) return blocked;
     const campaign = await getCampaignById(env.DB, params.id);
     if (!campaign) return err('Campaign not found', 404);
@@ -393,7 +407,7 @@ export async function handleClipper(request, env, url) {
   // rule, so this handler only enforces what is true of the campaign.
   params = matchPath('/api/clipper/campaigns/:id/applications', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly();
+    const blocked = blockIfReadOnly() || needsProfile();
     if (blocked) return blocked;
 
     const campaign = await getCampaignById(env.DB, params.id);
@@ -444,7 +458,7 @@ export async function handleClipper(request, env, url) {
   // storage on uploads that can never be submitted.
   params = matchPath('/api/clipper/campaigns/:id/applications/upload-url', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly();
+    const blocked = blockIfReadOnly() || needsProfile();
     if (blocked) return blocked;
     if (!driveConfigured(env)) {
       return err('Video uploads are not configured yet. Contact the ClipGrow admin.', 503);
@@ -517,7 +531,7 @@ export async function handleClipper(request, env, url) {
   // use, so the admin can grant it access on the platform's side. The old
   // Instagram-only path is kept as an alias so a stale browser tab still works.
   if (pathname === '/api/clipper/access-request' && method === 'POST') {
-    const blocked = blockIfReadOnly();
+    const blocked = blockIfReadOnly() || needsProfile();
     if (blocked) return blocked;
     const body = await readJson(request);
 

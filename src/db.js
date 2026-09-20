@@ -25,98 +25,17 @@ export function defaultDisplayName(username) {
   return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
 }
 
-/**
- * A UPI ID is <handle>@<bank/PSP>, e.g. 9999999999@upi, name@oksbi. There is
- * no fixed registry of PSP suffixes to validate against, so this only trims
- * incidental whitespace -- the same "don't reject a real-world value over an
- * assumption" reasoning as IDENTIFIER_SPEC.youtube in access.js.
- */
-export function normaliseUpiId(input) {
-  return String(input == null ? '' : input).trim().replace(/\s+/g, '');
-}
-
-/**
- * Lenient on purpose, same reasoning as validateIdentifier('youtube', ...):
- * only the shape (handle@psp) is checked, never matched against a real PSP
- * list, so a clipper is never blocked by a suffix ClipGrow hasn't seen yet.
- */
-export function validateUpiId(input) {
-  const v = normaliseUpiId(input);
-  if (!v) return 'Enter a UPI ID';
-  if (!/^[\w.-]{2,256}@[A-Za-z]{2,64}$/.test(v)) {
-    return 'That does not look like a UPI ID. It should look like yourname@bank, for example 9999999999@upi.';
-  }
-  return null;
-}
-
-/**
- * Strips everything but digits, then drops a leading '91' or '0' country/
- * trunk prefix so '+91 98765 43210', '098765 43210' and '9876543210' all
- * normalise to the same 10-digit number -- ClipGrow's clippers are all in
- * India today, and this is the shape a real WhatsApp/call number takes here.
- */
-export function normaliseContactNumber(input) {
-  let v = String(input == null ? '' : input).replace(/\D/g, '');
-  if (v.length === 12 && v.startsWith('91')) v = v.slice(2);
-  else if (v.length === 11 && v.startsWith('0')) v = v.slice(1);
-  return v;
-}
-
-/**
- * Lenient on purpose, same reasoning as validateUpiId: only the shape (10
- * digits, starting 6-9 as every real Indian mobile number does) is checked,
- * not matched against a carrier registry.
- */
-export function validateContactNumber(input) {
-  const v = normaliseContactNumber(input);
-  if (!v) return 'Enter a contact number';
-  if (!/^[6-9]\d{9}$/.test(v)) {
-    return 'That does not look like a 10-digit Indian mobile number.';
-  }
-  return null;
-}
-
-export function normaliseEmail(input) {
-  return String(input == null ? '' : input).trim().toLowerCase();
-}
-
-/**
- * Lenient shape check, same spirit as validateUpiId -- catches an obviously
- * malformed entry (no @, no domain) without pretending to be a full RFC 5322
- * parser that could reject a real address it hasn't seen the shape of.
- */
-export function validateEmail(input) {
-  const v = normaliseEmail(input);
-  if (!v) return 'Enter an email address';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
-    return 'That does not look like a valid email address.';
-  }
-  return null;
-}
-
-// Migration 039: switched from the numeric snowflake ID to the @username --
-// finding Developer Mode and right-clicking to copy an ID was too much
-// friction for clippers to actually do. Strips a leading "@" (people paste
-// it either way) and lowercases, since Discord's own unique @username is
-// always lowercase regardless of how someone types it.
-export function normaliseDiscordUsername(input) {
-  return String(input == null ? '' : input).trim().replace(/^@/, '').toLowerCase();
-}
-
-/**
- * Optional here (empty is valid) -- admin.js's edit endpoint relies on that
- * to let the admin clear/leave it blank on a clipper's behalf; the
- * clipper's own self-service save enforces "required" itself, at the call
- * site, same pattern as before the rename.
- */
-export function validateDiscordUsername(input) {
-  const v = normaliseDiscordUsername(input);
-  if (!v) return null;
-  if (v.length < 2 || v.length > 32 || !/^[a-z0-9_.]+$/.test(v) || v.startsWith('.') || v.endsWith('.') || v.includes('..')) {
-    return 'That doesn\'t look like a Discord username -- 2-32 characters, lowercase letters/numbers/underscores/periods only. Find it under Discord Settings > My Account.';
-  }
-  return null;
-}
+// Profile validation lives in ONE file that both this Worker and the dashboard
+// import, so the form's live messages and the server's final check are the same
+// rules. Re-exported here so every existing `from './db.js'` caller is unchanged.
+export {
+  normaliseName, validatePersonName,
+  normaliseEmail, validateEmail,
+  normaliseContactNumber, validateContactNumber,
+  normaliseUpiId, validateUpiId,
+  normaliseDiscordUsername, validateDiscordUsername,
+  REQUIRED_FIELDS, profileProblems, profileComplete
+} from '../components/profile-validation.js';
 
 export function getClipperByUsername(db, username) {
   // COLLATE NOCASE guards any row stored before normalisation existed.

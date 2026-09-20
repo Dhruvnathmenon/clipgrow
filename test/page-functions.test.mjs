@@ -24,6 +24,7 @@ const PAGES = ['dashboard.html', 'admin.html', 'client-dashboard.html', 'tracker
 const GLOBALS = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function', 'await', 'new', 'do',
   'else', 'delete', 'void', 'in', 'of', 'instanceof', 'yield', 'throw', 'case', 'async',
+  'import',   // dynamic import(): syntax that looks like a call, not a function to define
   'String', 'Number', 'Boolean', 'Array', 'Object', 'JSON', 'Math', 'Date', 'Promise', 'Set', 'Map',
   'RegExp', 'Error', 'TypeError', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'Symbol', 'BigInt',
   'WeakMap', 'WeakSet', 'Proxy', 'Reflect', 'encodeURIComponent', 'decodeURIComponent', 'encodeURI',

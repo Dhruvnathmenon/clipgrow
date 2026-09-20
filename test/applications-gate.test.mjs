@@ -11,11 +11,12 @@ import { handleClipper } from '../src/routes/clipper.js';
 import { createSessionCookie } from '../src/auth.js';
 import { grandfatherExisting, applicationState } from '../src/applications.js';
 import { canConnect } from '../src/access.js';
+import { COMPLETE_PROFILE } from './helpers/profile.mjs';
 
 const NOW = Date.now();
 const SESSION_SECRET = 'test-secret';
 
-const clipper = id => ({ id, username: `c${id}`, password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW });
+const clipper = id => ({ id, username: `c${id}`, password_hash: 'h', password_salt: 's', status: 'active', created_at: NOW, ...COMPLETE_PROFILE });
 
 // Five clippers, one campaign each, one per situation the old flow could leave
 // someone in. The comments say what each is.

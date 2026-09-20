@@ -15,6 +15,7 @@ import { handleClipper } from '../src/routes/clipper.js';
 import { handleModerator } from '../src/routes/moderator.js';
 import { createSessionCookie } from '../src/auth.js';
 import { MAX_ATTEMPTS } from '../src/applications.js';
+import { COMPLETE_PROFILE } from './helpers/profile.mjs';
 
 const NOW = Date.now();
 const SESSION_SECRET = 'test-secret';
@@ -22,7 +23,7 @@ const SESSION_SECRET = 'test-secret';
 function seedEnv() {
   const db = makeSqliteD1({
     clippers: [{ id: 1, username: 'clipper1', password_hash: 'h', password_salt: 's',
-                 status: 'active', created_at: NOW }],
+                 status: 'active', created_at: NOW, ...COMPLETE_PROFILE }],
     moderators: [{ id: 7, username: 'mod1', password_hash: 'h', password_salt: 's',
                    display_name: 'Mod One', status: 'active', created_at: NOW }],
     campaigns: [{ id: 1, name: 'Test Campaign', description: '', cpm: 40, budget: 100000,
