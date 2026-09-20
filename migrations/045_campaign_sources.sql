@@ -7,9 +7,9 @@
 -- only the authenticated clipper and admin routes ever select.
 --
 -- Both hold a JSON array, validated on the way in by src/campaign-sources.js:
---   reference_links  ["https://drive.google.com/...", ...]  public Drive links to
---                    the demo/reference videos (the two used to be separate
---                    ideas; they are one thing)
+--   reference_links  ["https://...", ...]  links to the demo/reference videos: a
+--                    public Drive link or an already-posted video (the demo and
+--                    the samples used to be separate ideas; they are one thing)
 --   raw_sources      [{"url": "...", "kind": "drive"|"instagram"|..., "label": "..."}]
 --                    footage to clip from: a Drive link, or the official pages
 --                    on Instagram, YouTube and other platforms

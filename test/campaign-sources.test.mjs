@@ -19,7 +19,7 @@ import {
 const DRIVE_FILE = 'https://drive.google.com/file/d/1AbC/view?usp=sharing';
 const DRIVE_FOLDER = 'https://drive.google.com/drive/folders/1XyZ';
 
-test('reference videos accept Drive files and folders, and nothing else', () => {
+test('a Drive link must be a Drive file or folder, nothing else', () => {
   assert.ok(driveLink(DRIVE_FILE).url);
   assert.ok(driveLink(DRIVE_FOLDER).url);
   assert.ok(driveLink('https://drive.google.com/open?id=1AbC').url, 'the older ?id= form');
@@ -33,6 +33,15 @@ test('reference videos accept Drive files and folders, and nothing else', () => 
     'not a link',
     ''
   ]) assert.ok(driveLink(bad).error, `should refuse: ${bad}`);
+});
+
+test('a reference video can be a Drive file or an already-posted video on a listed platform', () => {
+  const r = normaliseReferenceLinks([DRIVE_FILE, 'https://www.instagram.com/reel/abc123/', 'https://youtu.be/xyz', 'https://www.tiktok.com/@a/video/1']);
+  assert.equal(r.error, undefined);
+  assert.equal(r.value.length, 4);
+  // Same allowlist as raw footage: an arbitrary site is still refused.
+  assert.match(normaliseReferenceLinks(['https://randomsite.com/v']).error, /Reference video/);
+  assert.ok(normaliseReferenceLinks(['https://instagram.com.evil.com/reel/1']).error, 'a look-alike host still cannot pass');
 });
 
 test('a look-alike host cannot pass as Drive or as a social platform', () => {
@@ -165,7 +174,7 @@ test('with the gate on, a new campaign needs a reference video and a raw footage
 
 test('a bad link is refused on create and on edit, and an edit leaves untouched fields alone', async () => {
   const env = world();
-  let res = await adminCall(env, '/api/admin/campaigns', 'POST', { ...base, reference_links: ['https://youtube.com/watch?v=1'] });
+  let res = await adminCall(env, '/api/admin/campaigns', 'POST', { ...base, reference_links: ['https://evil.com/watch?v=1'] });
   assert.equal(res.status, 400);
 
   res = await adminCall(env, '/api/admin/campaigns/1', 'PATCH', { raw_sources: ['https://evil.com/x'] });

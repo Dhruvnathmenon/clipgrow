@@ -168,6 +168,23 @@
     }
 
     const KIND = { drive: 'Google Drive', instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', x: 'X', facebook: 'Facebook', twitch: 'Twitch', snapchat: 'Snapchat' };
+    // Which platform a stored link points at, for the tag on its card. Derived
+    // from the host so links saved before references accepted social pages
+    // still read correctly.
+    const kindOf = url => {
+      let h = '';
+      try { h = new URL(url).hostname.toLowerCase(); } catch (e) { return ''; }
+      const has = b => h === b || h.endsWith('.' + b);
+      if (has('drive.google.com')) return 'Google Drive';
+      if (has('instagram.com')) return 'Instagram';
+      if (has('youtube.com') || has('youtu.be')) return 'YouTube';
+      if (has('tiktok.com')) return 'TikTok';
+      if (has('x.com') || has('twitter.com')) return 'X';
+      if (has('facebook.com') || has('fb.watch')) return 'Facebook';
+      if (has('twitch.tv')) return 'Twitch';
+      if (has('snapchat.com')) return 'Snapchat';
+      return '';
+    };
     const linkCard = (label, tag, url) => {
       const u = safeUrl(url);
       return u ? `<a class="src" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span>${esc(label)}${tag ? ` <span class="cg-muted" style="font-size:.75rem">· ${esc(tag)}</span>` : ''}</span><span>Open ↗</span></a>` : '';
@@ -178,7 +195,7 @@
        Drive link, or the official pages). Raw footage only arrives for people
        who joined -- the server does not send it to anyone else. */
     function reference(c) {
-      const refs = (c.reference_links || []).map((u, i, all) => linkCard(all.length > 1 ? `Reference video ${i + 1}` : 'Reference video', 'Google Drive', u)).join('');
+      const refs = (c.reference_links || []).map((u, i, all) => linkCard(all.length > 1 ? `Reference video ${i + 1}` : 'Reference video', kindOf(u), u)).join('');
       const raw = (c.raw_sources || []).map(r => linkCard(r.label || (KIND[r.kind] || 'Source') + ' footage', KIND[r.kind] || '', r.url)).join('');
       const rules = c.description ? `<ul class="rules">${String(c.description).split(/\n+/).filter(Boolean).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '';
       return (refs ? `<div class="cg-panel"><h3>Reference — what a good clip looks like</h3><div class="sub">Watch these before you make yours.</div>${refs}</div>` : '')

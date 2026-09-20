@@ -1,6 +1,7 @@
 // Validation and shaping for the material a clipper works from: reference
-// videos (Drive links only) and raw footage sources (a Drive link, or the
-// official pages on the social platforms).
+// videos and raw footage sources. Both take a Drive link or a link to one of
+// the listed social platforms -- a reference is often simply a video that is
+// already posted, so it is not limited to Drive.
 //
 // Strict on purpose. These links are rendered as clickable cards to clippers,
 // so an unvetted URL is a phishing surface with ClipGrow's name on it. Only
@@ -89,7 +90,7 @@ export function normaliseReferenceLinks(input) {
   const out = [];
   const seen = new Set();
   for (const item of toList(input)) {
-    const r = driveLink(typeof item === 'object' && item ? item.url : item);
+    const r = sourceLink(typeof item === 'object' && item ? item.url : item);
     if (r.error) return { error: `Reference video: ${r.error}` };
     if (seen.has(r.url)) continue;
     seen.add(r.url); out.push(r.url);

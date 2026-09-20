@@ -898,7 +898,7 @@ export async function handleAdmin(request, env, url) {
     const sources = parseSources(payload);
     if (sources.error) return err(sources.error);
     if (await flagEnabled(env.DB, APPLICATIONS_GATE)) {
-      if (!sources.reference.length) return err('Add at least one reference video (a public Google Drive link).');
+      if (!sources.reference.length) return err('Add at least one reference video (a Drive link or an already-posted video).');
       if (!sources.raw.length) return err('Add at least one raw footage source (a Drive link or an official page).');
     }
     const res = await env.DB.prepare(
