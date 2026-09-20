@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding Components Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<script>document.write('<link rel="stylesheet" href="applications.css?v='+Date.now()+'">')</script>
+<style>
+  :root{--bg:#080D08;--white:#F0F5F0;--text:#C4D4C4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;padding-bottom:4rem}
+  .bar{position:sticky;top:0;z-index:5;background:#12091A;border-bottom:1px solid #2A1840;padding:.6rem 1.2rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+  .bar b{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:#B98BFF}
+  .bar button{background:#1E1230;border:1px solid #3A2458;color:#D9C7F5;font:inherit;font-size:.76rem;padding:.3rem .75rem;border-radius:6px;cursor:pointer}
+  .bar button[aria-pressed="true"]{background:#B98BFF;color:#1A0E28;font-weight:600}
+  .wrap{max-width:940px;margin:0 auto;padding:1.6rem 1.2rem}
+  .note{font-size:.76rem;color:#849484;margin:0 0 1rem}
+</style>
+</head>
+<body>
+<div class="bar"><b>Preview harness — mock data, not the real site</b>
+  <button id="b-clipper" aria-pressed="true">Clipper view</button>
+  <button id="b-mod" aria-pressed="false">Moderator view</button>
+  <button id="b-reset">Reset data</button></div>
+<div class="wrap">
+  <p class="note" id="note"></p>
+  <div id="root"></div>
+</div>
+
+<script>document.write('<script src="clipper-applications.js?v='+Date.now()+'"><\/script><script src="moderator-applications.js?v='+Date.now()+'"><\/script>')</script>
+<script>
+/* ---- mock server: same response shapes as the real endpoints ---- */
+const H = 3600e3, NOW = () => Date.now();
+function seed() {
+  const camp = (id, name, cpm, spent, budget, part, extra = {}) => ({
+    id, name, cpm, spent, budget, remaining: budget - spent, min_views: 1000, status: 'active',
+    allowed_platforms: ['instagram', 'youtube'], description: 'Clips must be 15–60 seconds.\nUse the raw footage only.\nNo watermarks from other apps.',
+    blueprint: { demo_video_url: 'https://example.com/demo', reference_url: 'https://example.com/ref',
+      samples: [{ label: 'Sample 1 — hook first', url: 'https://example.com/s1' }],
+      raw_sources: [{ label: 'Raw clips (Google Drive)', url: 'https://drive.google.com/' }] },
+    participation: part, ...extra
+  });
+  const joined = { status: 'active', accounts: {}, access: {} };
+  return {
+    apps: {
+      1: { history: [] },
+      2: { history: [{ id: 1, attempt: 1, status: 'pending', created_at: NOW() - 3 * H }] },
+      3: { history: [{ id: 2, attempt: 1, status: 'rejected', reviewer_name: 'Riya', reviewer_note: 'Hook is too slow — cut the first 3 seconds and add captions.', reviewed_at: NOW() - 5 * H, created_at: NOW() - 9 * H }] },
+      4: { history: [{ id: 3, attempt: 1, status: 'approved', reviewer_name: 'Riya', reviewer_note: 'Great pacing.', reviewed_at: NOW() - 2 * H, created_at: NOW() - 6 * H }] },
+      5: { history: [1, 2, 3].map(n => ({ id: 10 + n, attempt: n, status: 'rejected', reviewer_name: 'Riya', reviewer_note: 'Reason ' + n, reviewed_at: NOW() - n * H, created_at: NOW() - n * H - H })) },
+      6: { history: [{ id: 20, attempt: 2, status: 'rejected', reviewer_name: 'Arun', reviewer_note: 'Wrong aspect ratio.', reviewed_at: NOW() - 7 * H, created_at: NOW() - 8 * H },
+                     { id: 21, attempt: 1, status: 'rejected', reviewer_name: 'Arun', reviewer_note: 'Audio clips out at 0:12.', reviewed_at: NOW() - 30 * H, created_at: NOW() - 31 * H }] }
+    },
+    campaigns: [
+      camp(1, 'Mali — Music Campaign', 40, 12400, 50000, null),
+      camp(2, 'Reel Rush — Podcast Clips', 55, 8000, 30000, joined),
+      camp(3, 'Hustle Hub — Motivation', 35, 21000, 40000, joined),
+      camp(4, 'Sneaker Drop Launch', 60, 4200, 25000, joined),
+      camp(5, 'Old Campaign — Failed', 30, 9000, 20000, { status: 'active', accounts: {}, access: {} }),
+      camp(6, 'Final Try Campaign', 45, 1000, 15000, joined),
+      camp(7, 'Live Campaign', 50, 30000, 60000, { status: 'active', accounts: { instagram: { username: 'me' } }, access: {} })
+    ].map(c => c),
+    queue: [
+      { id: 101, clipper_id: 9, campaign_id: 2, video_url: null, attempt: 1, created_at: NOW() - 3 * H, clipper_username: 'arjun_k', clipper_display_name: 'Arjun K', campaign_name: 'Reel Rush — Podcast Clips', campaign_status: 'active', prior_rejections: 0 },
+      { id: 102, clipper_id: 10, campaign_id: 2, video_url: 'https://drive.google.com/file/d/abc/view', attempt: 2, created_at: NOW() - 1 * H, clipper_username: 'meera', clipper_display_name: null, campaign_name: 'Reel Rush — Podcast Clips', campaign_status: 'active', prior_rejections: 1 },
+      { id: 103, clipper_id: 11, campaign_id: 6, video_url: null, attempt: 3, created_at: NOW() - 26 * H, clipper_username: 'dev_edits', clipper_display_name: 'Dev', campaign_name: 'Final Try Campaign', campaign_status: 'active', prior_rejections: 2 },
+      { id: 104, clipper_id: 12, campaign_id: 3, video_url: null, attempt: 1, created_at: NOW() - 50 * 60000, clipper_username: 'zara', clipper_display_name: 'Zara', campaign_name: 'Hustle Hub — Motivation', campaign_status: 'active', prior_rejections: 0 }
+    ]
+  };
+}
+/* stand-in cover art (the real ones are uploaded per campaign) */
+function art(a, b, kind) {
+  const shapes = kind === 1 ? '<circle cx="640" cy="120" r="220" fill="#fff" opacity=".10"/><circle cx="180" cy="420" r="160" fill="#000" opacity=".22"/>'
+    : kind === 2 ? '<path d="M0 420 L260 180 L440 360 L620 120 L900 400 V520 H0Z" fill="#000" opacity=".28"/><circle cx="700" cy="110" r="70" fill="#fff" opacity=".18"/>'
+    : '<rect x="500" y="-40" width="260" height="620" transform="rotate(20 500 0)" fill="#fff" opacity=".09"/><rect x="120" y="-40" width="140" height="620" transform="rotate(20 120 0)" fill="#000" opacity=".2"/>';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="800" height="520" fill="url(#g)"/>${shapes}</svg>`;
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+let S = seed();
+const COVERS = { 1: art('#1f7a4d', '#08261a', 1), 2: art('#7a2fd0', '#1a0b33', 3), 3: art('#d9822b', '#3a1806', 2), 4: art('#1d6fd6', '#08183a', 1), 7: art('#c2306b', '#2a0616', 3) };
+S.campaigns.forEach(c => { c.cover_url = COVERS[c.id] || null; });
+
+function appState(id) {
+  const rows = (S.apps[id] || { history: [] }).history.slice().sort((a, b) => b.attempt - a.attempt);
+  const approved = rows.find(r => r.status === 'approved') || null, pending = rows.find(r => r.status === 'pending') || null;
+  const rej = rows.filter(r => r.status === 'rejected').length;
+  const state = approved ? 'approved' : pending ? 'pending' : rej >= 3 ? 'exhausted' : rows.length ? 'rejected' : 'none';
+  return { state, approved, pending, rejections: rej, attempts_used: rows.length, attempts_left: Math.max(0, 3 - rej),
+    may_connect: !!approved, may_submit: !approved && !pending && rej < 3, history: rows };
+}
+const delay = ms => new Promise(r => setTimeout(r, ms));
+async function mockApi(path, opts = {}) {
+  await delay(180);
+  const m = (opts.method || 'GET').toUpperCase();
+  const body = opts.body ? JSON.parse(opts.body) : {};
+  let x;
+  if (path === '/api/clipper/campaigns') return { campaigns: JSON.parse(JSON.stringify(S.campaigns)) };
+  if ((x = path.match(/^\/api\/clipper\/campaigns\/(\d+)\/join$/))) {
+    const c = S.campaigns.find(c => c.id == x[1]); c.participation = { status: 'active', accounts: {}, access: {} }; return { ok: true };
+  }
+  if ((x = path.match(/^\/api\/clipper\/campaigns\/(\d+)\/applications\/upload-url$/))) {
+    if (body.size_bytes > 500 * 1048576) throw Object.assign(new Error('File is too large.'), {});
+    return { sessionUrl: 'mock://upload/' + x[1], max_bytes: 500 * 1048576 };
+  }
+  if ((x = path.match(/^\/api\/clipper\/campaigns\/(\d+)\/applications$/))) {
+    const id = Number(x[1]);
+    if (m === 'GET') return appState(id);
+    const st = appState(id);
+    if (!st.may_submit) throw new Error('Your video is already with a reviewer.');
+    const a = S.apps[id] || (S.apps[id] = { history: [] });
+    const attempt = st.rejections + 1, aid = 500 + Math.floor(Math.random() * 1e4);
+    a.history.push({ id: aid, attempt, status: 'pending', created_at: NOW() });
+    const c = S.campaigns.find(c => c.id === id);
+    S.queue.push({ id: aid, clipper_id: 1, campaign_id: id, video_url: body.video_url || null, attempt, created_at: NOW(),
+      clipper_username: 'you', clipper_display_name: 'You (demo)', campaign_name: c.name, campaign_status: 'active', prior_rejections: st.rejections });
+    return { ok: true, id: aid, attempt };
+  }
+  if (path === '/api/moderator/applications') {
+    const apps = S.queue.slice().sort((a, b) => a.created_at - b.created_at).map(r => ({ ...r, attempts_left: Math.max(0, 3 - r.prior_rejections),
+      is_final_attempt: r.prior_rejections >= 2, waiting_ms: NOW() - r.created_at }));
+    const by = new Map();
+    for (const a of apps) { if (!by.has(a.campaign_id)) by.set(a.campaign_id, { campaign_id: a.campaign_id, campaign_name: a.campaign_name, campaign_status: 'active', pending: 0, oldest_created_at: a.created_at }); by.get(a.campaign_id).pending++; }
+    return { applications: apps, campaigns: [...by.values()].sort((a, b) => a.oldest_created_at - b.oldest_created_at), total: apps.length };
+  }
+  if ((x = path.match(/^\/api\/moderator\/applications\/(\d+)\/history$/))) {
+    const q = S.queue.find(r => r.id == x[1]);
+    return { history: [{ attempt: 1, status: 'rejected', reviewer_name: 'Riya', reviewer_note: 'Hook is too slow.' }].slice(0, q ? q.prior_rejections : 0) };
+  }
+  if ((x = path.match(/^\/api\/moderator\/applications\/(\d+)$/)) && m === 'POST') {
+    const i = S.queue.findIndex(r => r.id == x[1]); if (i < 0) throw new Error('This video was already reviewed.');
+    const q = S.queue.splice(i, 1)[0];
+    if (body.verdict === 'rejected' && !(body.note || '').trim()) throw new Error('A reason is required to reject.');
+    const row = ((S.apps[q.campaign_id] || (S.apps[q.campaign_id] = { history: [] })).history).find(h => h.id == q.id);
+    if (row) Object.assign(row, { status: body.verdict, reviewer_name: 'Reviewer', reviewer_note: body.note, reviewed_at: NOW() });
+    return { ok: true, verdict: body.verdict, removed_from_campaign: body.verdict === 'rejected' && q.prior_rejections >= 2 };
+  }
+  throw new Error('mock: unhandled ' + path);
+}
+
+/* fake upload target so the progress bar and file-id hand-off can be tried */
+const RealXHR = window.XMLHttpRequest;
+window.XMLHttpRequest = function () {
+  const x = { upload: {}, open(m, u) { this.url = u; }, setRequestHeader() {},
+    send(f) { let p = 0; const t = setInterval(() => { p += 20; this.upload.onprogress && this.upload.onprogress({ lengthComputable: true, loaded: p, total: 100 });
+      if (p >= 100) { clearInterval(t); this.status = 200; this.responseText = JSON.stringify({ id: 'mockfile' + Date.now() }); this.onload(); } }, 250); } };
+  return x;
+};
+
+/* ---- harness chrome ---- */
+const note = document.getElementById('note');
+let view = 'clipper';
+function show(v) {
+  view = v;
+  document.getElementById('b-clipper').setAttribute('aria-pressed', v === 'clipper');
+  document.getElementById('b-mod').setAttribute('aria-pressed', v === 'mod');
+  const old = document.getElementById('root'); const fresh = old.cloneNode(false); old.replaceWith(fresh);
+  if (v === 'clipper') {
+    note.textContent = 'Every card is a different state: open, waiting, changes needed, approved, failed 3 times (greyed, unclickable), final try, live. Approve/reject in the Moderator view and come back.';
+    CGApps.clipper.mount(fresh, { api: mockApi, onConnect: c => alert('Step 2 hands off to the existing connect-account flow for: ' + c.name) });
+  } else {
+    note.textContent = 'One tab per campaign, oldest first. "Final Try Campaign" shows the final-attempt warning and two-click removal. Video pane is a placeholder here.';
+    CGApps.moderator.mount(fresh, { api: mockApi });
+  }
+}
+document.getElementById('b-clipper').onclick = () => show('clipper');
+document.getElementById('b-mod').onclick = () => show('mod');
+document.getElementById('b-reset').onclick = () => { S = seed(); S.campaigns.forEach(c => { c.cover_url = COVERS[c.id] || null; }); show(view); };
+show('clipper');
+</script>
+</body>
+</html>

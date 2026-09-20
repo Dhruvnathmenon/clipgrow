@@ -1,0 +1,187 @@
+/* Campaign onboarding UI (clipper + moderator). Scoped under .cga so it can be
+   dropped into dashboard.html / moderator.html without touching their styles.
+   Tokens fall back to the dashboard palette, so the pages' own :root wins. */
+.cga{--c-card:var(--card,#0F170F);--c-card-h:var(--card-h,#141E14);
+  --c-border:var(--border,#1A2C1A);--c-border-s:var(--border-s,#223322);--c-neon:var(--neon,#3DFF7A);
+  --c-neon-d:var(--neon-d,#2CC760);--c-white:var(--white,#F0F5F0);--c-text:var(--text,#C4D4C4);
+  --c-muted:var(--muted,#566056);--c-muted-l:var(--muted-l,#849484);--c-red:var(--red,#FF4D4D);
+  --c-amber:var(--amber,#FFA53D);--c-blue:var(--blue,#4DA6FF);color:var(--c-text);font-family:'Inter',sans-serif}
+.cga *{box-sizing:border-box}
+.cga h2,.cga h3{font-family:'Inter',sans-serif;letter-spacing:-.01em;color:var(--c-white);line-height:1.15;margin:0}
+.cga button{font-family:inherit}
+.cga .cg-btn{font-weight:600;font-size:.83rem;padding:.6rem 1.1rem;border-radius:9px;border:1px solid var(--c-border-s);
+  background:transparent;color:var(--c-text);cursor:pointer}
+.cga .cg-btn:hover:not(:disabled){border-color:var(--c-neon);color:var(--c-neon)}
+.cga .cg-btn-primary{background:var(--c-neon);border-color:var(--c-neon);color:#062010}
+.cga .cg-btn-primary:hover:not(:disabled){background:var(--c-neon-d);border-color:var(--c-neon-d);color:#062010}
+.cga .cg-btn-danger{border-color:rgba(255,77,77,.4);color:var(--c-red)}
+.cga .cg-btn-danger:hover:not(:disabled){background:rgba(255,77,77,.1);border-color:var(--c-red);color:var(--c-red)}
+.cga .cg-btn-sm{font-size:.76rem;padding:.4rem .8rem}
+.cga .cg-btn:disabled{opacity:.4;cursor:not-allowed}
+.cga .cg-btn:focus-visible,.cga .camp:focus-visible,.cga .cg-tab:focus-visible,.cga .drop:focus-visible{outline:2px solid var(--c-neon);outline-offset:2px}
+.cga .cg-muted{color:var(--c-muted-l)}
+.cga .cg-sec-title{font-size:.72rem;letter-spacing:.11em;text-transform:uppercase;color:var(--c-muted-l);font-weight:700;margin:0 0 .8rem}
+
+/* pills */
+.cga .pill{display:inline-block;font-size:.73rem;font-weight:700;padding:.16rem .55rem;border-radius:6px;white-space:nowrap}
+.cga .pill-reward{background:rgba(77,166,255,.14);color:var(--c-blue);border:1px solid rgba(77,166,255,.3)}
+.cga .pill-review{background:rgba(255,165,61,.12);color:var(--c-amber);border:1px solid rgba(255,165,61,.32)}
+.cga .pill-ok{background:rgba(61,255,122,.12);color:var(--c-neon);border:1px solid rgba(61,255,122,.3)}
+.cga .pill-dead{background:rgba(255,77,77,.1);color:var(--c-red);border:1px solid rgba(255,77,77,.32)}
+.cga .pill-open{background:rgba(255,255,255,.05);color:var(--c-text);border:1px solid var(--c-border-s)}
+
+/* ---------------------------------------------------------------------
+   Campaign card. Layout and motion follow the TrailCard reference: image
+   face with a bottom scrim and caption, a details block beneath, a divider,
+   three stats, and a button that slides in on hover. Phone: face on top.
+   Desktop: face left, details right. Type is Inter throughout (the
+   reference's plain sans), colour is ClipGrow's.
+   --------------------------------------------------------------------- */
+.cga .tc-list{display:grid;gap:1.25rem;max-width:920px}
+.cga .tc{position:relative;display:flex;flex-direction:column;overflow:hidden;border-radius:1rem;
+  background:var(--c-card);border:1px solid var(--c-border);color:var(--c-text);
+  box-shadow:0 14px 34px -14px rgba(0,0,0,.75);
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1),box-shadow .25s,border-color .25s}
+.cga .tc.is-live{cursor:pointer}
+.cga .tc.is-live:hover,.cga .tc.is-live:focus-visible{transform:translateY(-5px) scale(1.015);
+  border-color:var(--c-border-s);box-shadow:0 22px 44px -16px rgba(0,0,0,.85),0 0 0 1px rgba(61,255,122,.10)}
+.cga .tc:focus-visible{outline:2px solid var(--c-neon);outline-offset:3px}
+
+.cga .tc-face{position:relative;height:15rem;width:100%;overflow:hidden;background:#0A120A}
+.cga .tc-art{position:absolute;inset:0;display:grid;place-items:center;
+  font:800 5.5rem/1 'Inter',sans-serif;letter-spacing:-.04em;color:rgba(255,255,255,.14)}
+.cga .tc-face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .6s ease}
+.cga .tc.is-live:hover .tc-face img{transform:scale(1.05)}
+.cga .tc-shade{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,.32) 45%,transparent)}
+.cga .tc-badge{position:absolute;top:.85rem;left:.85rem;z-index:2;font:700 .72rem/1 'Inter',sans-serif;
+  padding:.42rem .65rem;border-radius:99px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  background:rgba(8,13,8,.62);border:1px solid var(--c-border-s);color:var(--c-white);white-space:nowrap}
+.cga .tc-badge.t-warn{color:var(--c-amber);border-color:rgba(255,165,61,.5)}
+.cga .tc-badge.t-ok{color:var(--c-neon);border-color:rgba(61,255,122,.5)}
+.cga .tc-badge.t-dead{color:#ff8a8a;border-color:rgba(255,77,77,.55)}
+.cga .tc-cap{position:absolute;left:0;bottom:0;width:100%;z-index:2;display:flex;align-items:flex-end;
+  justify-content:space-between;gap:.8rem;padding:1rem}
+.cga .tc-cap h3{font:700 1.25rem/1.2 'Inter',sans-serif;letter-spacing:-.01em;color:#fff}
+.cga .tc-cap p{margin:.2rem 0 0;font-size:.85rem;color:rgba(255,255,255,.85)}
+.cga .tc-go{flex-shrink:0;display:inline-flex;align-items:center;gap:.45rem;font:600 .82rem/1 'Inter',sans-serif;
+  padding:.6rem .85rem;border-radius:.6rem;background:rgba(240,245,240,.94);color:#0B120B;
+  opacity:0;transform:translateX(20px);transition:opacity .3s ease-in-out,transform .3s ease-in-out}
+.cga .tc.is-live:hover .tc-go,.cga .tc.is-live:focus-visible .tc-go{opacity:1;transform:none}
+@media (hover:none){.cga .tc.is-live .tc-go{opacity:1;transform:none}}
+
+.cga .tc-body{padding:1.25rem;display:flex;flex-direction:column;justify-content:center;flex:1;min-width:0}
+.cga .tc-row{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.cga .tc-status{margin:0;font:700 1rem/1.3 'Inter',sans-serif;color:var(--c-white)}
+.cga .tc-sub{margin:.15rem 0 0;font-size:.75rem;color:var(--c-muted-l)}
+.cga .tc-plats{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}
+.cga .tc-plat{display:inline-flex;align-items:center;gap:.35rem;font:600 .7rem/1 'Inter',sans-serif;text-transform:capitalize;
+  padding:.38rem .55rem;border-radius:.5rem;background:rgba(255,255,255,.04);border:1px solid var(--c-border);color:var(--c-text)}
+.cga .tc-plat i{width:6px;height:6px;border-radius:50%;background:var(--c-muted-l)}
+.cga .tc-plat.p-instagram i{background:#EE2A7B}.cga .tc-plat.p-youtube i{background:#FF0033}
+.cga .tc-rule{height:1px;width:100%;background:var(--c-border);margin:1rem 0}
+.cga .tc-stats{display:flex;justify-content:space-between;gap:1rem}
+.cga .tc-stat{display:flex;flex-direction:column;min-width:0}
+.cga .tc-stat b{font:600 .88rem/1.3 'Inter',sans-serif;color:var(--c-white);font-variant-numeric:tabular-nums}
+.cga .tc-stat span{font-size:.72rem;color:var(--c-muted-l)}
+.cga .tc-meter{display:flex;align-items:center;gap:.7rem;margin-top:1rem}
+.cga .tc-meter .cg-bar{flex:1;margin:0}
+.cga .tc-meter em{font:600 .72rem/1 'Inter',sans-serif;font-style:normal;color:var(--c-muted-l);font-variant-numeric:tabular-nums}
+.cga .tc-note{margin:.9rem 0 0;font-size:.8rem;font-weight:600}
+.cga .tc-note.n-warn{color:var(--c-amber)}.cga .tc-note.n-dead{color:#ff8a8a}
+.cga .cg-bar{height:6px;background:#0A120A;border:1px solid var(--c-border);border-radius:99px;overflow:hidden}
+.cga .cg-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--c-neon-d),var(--c-neon))}
+
+/* failed / removed: visibly out, genuinely inert */
+.cga .tc.is-dead{cursor:not-allowed}
+.cga .tc.is-dead .tc-art,.cga .tc.is-dead .tc-face img{filter:grayscale(1) brightness(.55)}
+.cga .tc.is-dead .tc-face{background:#0d120d!important}
+.cga .tc.is-dead .tc-body{opacity:.6}
+
+@media (min-width:760px){
+  .cga .tc{flex-direction:row}
+  .cga .tc-face{height:auto;min-height:15.5rem;width:42%;flex-shrink:0}
+  .cga .tc-body{padding:1.5rem 1.6rem}
+  .cga .tc.is-live:hover,.cga .tc.is-live:focus-visible{transform:translateY(-4px) scale(1.01)}
+}
+
+/* campaign page hero: same face, larger, no hover behaviour */
+.cga .hero{position:relative;height:14rem;border-radius:1rem;overflow:hidden;background:#0A120A;border:1px solid var(--c-border)}
+.cga .hero .tc-face{height:100%;width:100%}
+.cga .hero .tc-cap h2{font:700 1.6rem/1.15 'Inter',sans-serif;letter-spacing:-.02em;color:#fff}
+@media (min-width:760px){.cga .hero{height:17rem}}
+
+/* detail */
+.cga .cg-back{background:none;border:none;color:var(--c-muted-l);font-size:.82rem;cursor:pointer;padding:0;margin-bottom:1rem}
+.cga .cg-back:hover{color:var(--c-neon)}
+.cga .cg-steps{display:flex;gap:.5rem;margin:1rem 0 1.4rem;flex-wrap:wrap}
+.cga .step{flex:1;min-width:180px;background:var(--c-card);border:1px solid var(--c-border);border-radius:11px;padding:.75rem .9rem}
+.cga .step.on{border-color:var(--c-neon);background:rgba(61,255,122,.05)}
+.cga .step.done{border-color:rgba(61,255,122,.3)}
+.cga .step-n{font-size:.63rem;letter-spacing:.09em;text-transform:uppercase;color:var(--c-muted);font-weight:700}
+.cga .step.on .step-n{color:var(--c-neon)}
+.cga .step-t{font-size:.87rem;color:var(--c-white);font-weight:600;margin-top:.1rem}
+.cga .step-s{font-size:.75rem;color:var(--c-muted-l)}
+.cga .cg-panel{background:var(--c-card);border:1px solid var(--c-border);border-radius:13px;padding:1.2rem;margin-bottom:1rem}
+.cga .cg-panel h3{font-size:.98rem;margin-bottom:.2rem}
+.cga .cg-panel .sub{font-size:.8rem;color:var(--c-muted-l);margin-bottom:.9rem}
+.cga .src{display:flex;align-items:center;justify-content:space-between;gap:.7rem;padding:.7rem .85rem;
+  border:1px solid var(--c-border);border-radius:9px;margin-bottom:.5rem;background:#0A120A;color:var(--c-text);text-decoration:none;font-size:.85rem}
+.cga a.src:hover{border-color:var(--c-neon)}
+.cga .rules{margin:0;padding-left:1.1rem;font-size:.84rem;line-height:1.7}
+
+/* feedback + attempts */
+.cga .feedback{border:1px solid rgba(255,77,77,.4);background:rgba(255,77,77,.07);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
+.cga .feedback .fb-h{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--c-red);font-weight:800}
+.cga .feedback .fb-t{font-size:1rem;font-weight:700;color:var(--c-white);margin-top:.3rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.cga .feedback .fb-by{font-size:.74rem;color:var(--c-muted-l);margin-top:.35rem}
+.cga .waiting,.cga .approved-box{font-size:.9rem;line-height:1.55}
+.cga .waiting{border:1px solid rgba(255,165,61,.35);background:rgba(255,165,61,.07);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
+.cga .waiting b{color:var(--c-amber)}
+.cga .approved-box{border:1px solid rgba(61,255,122,.35);background:rgba(61,255,122,.06);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
+.cga .approved-box b{color:var(--c-neon)}
+.cga .attempts{display:flex;align-items:center;gap:.4rem;margin:.2rem 0 1rem}
+.cga .dot{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--c-border-s);background:transparent}
+.cga .dot.used{background:var(--c-red);border-color:var(--c-red)}
+.cga .dot.now{border-color:var(--c-amber);box-shadow:0 0 0 3px rgba(255,165,61,.18)}
+.cga .attempts-t{font-size:.78rem;color:var(--c-muted-l);margin-left:.3rem}
+.cga .warn-final{font-size:.8rem;color:var(--c-amber);font-weight:600;margin-bottom:.9rem}
+
+/* dropzone + progress */
+.cga .drop{border:1.5px dashed var(--c-border-s);border-radius:12px;padding:1.6rem 1rem;text-align:center;cursor:pointer;
+  background:#0A120A;transition:border-color .15s,background .15s}
+.cga .drop:hover,.cga .drop.over{border-color:var(--c-neon);background:rgba(61,255,122,.04)}
+.cga .drop b{color:var(--c-white)}
+.cga .drop .hint{font-size:.76rem;color:var(--c-muted-l);margin-top:.3rem}
+.cga .file-row{display:flex;justify-content:space-between;align-items:center;gap:.8rem;padding:.7rem .85rem;
+  border:1px solid var(--c-border);border-radius:9px;background:#0A120A;font-size:.85rem}
+.cga .file-row .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--c-white)}
+.cga .err{color:var(--c-red);font-size:.82rem;margin-top:.6rem}
+.cga .linkfield{width:100%;margin-top:.5rem;background:#0A120A;border:1px solid var(--c-border-s);color:var(--c-white);
+  border-radius:9px;padding:.6rem .8rem;font-size:.85rem}
+.cga .linkfield:focus{outline:2px solid var(--c-neon);outline-offset:1px}
+.cga .row-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
+.cga .hist{font-size:.8rem;padding-left:1.1rem;margin:0}
+.cga .hist li{margin-bottom:.5rem}
+
+/* moderator queue */
+.cga .cg-tabs{display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.4rem;margin-bottom:1rem}
+.cga .cg-tab{flex-shrink:0;background:var(--c-card);border:1px solid var(--c-border);border-radius:10px;padding:.55rem .9rem;
+  color:var(--c-text);cursor:pointer;text-align:left}
+.cga .cg-tab[aria-selected="true"]{border-color:var(--c-neon);background:rgba(61,255,122,.06)}
+.cga .cg-tab .t-n{font-size:.85rem;font-weight:600;color:var(--c-white)}
+.cga .cg-tab .t-s{font-size:.7rem;color:var(--c-muted-l)}
+.cga .q-item{display:grid;grid-template-columns:minmax(0,260px) 1fr;gap:1.1rem;background:var(--c-card);
+  border:1px solid var(--c-border);border-radius:13px;padding:1rem;margin-bottom:.9rem}
+.cga .q-item.final{border-color:rgba(255,165,61,.45)}
+.cga .q-video{aspect-ratio:9/16;max-height:380px;width:100%;background:#000;border-radius:10px}
+.cga .q-title{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.3rem}
+.cga .q-title b{color:var(--c-white);font-size:1rem}
+.cga textarea.note{width:100%;min-height:78px;margin-top:.7rem;background:#0A120A;border:1px solid var(--c-border-s);
+  color:var(--c-white);border-radius:9px;padding:.6rem .8rem;font:inherit;font-size:.85rem;resize:vertical}
+.cga textarea.note:focus{outline:2px solid var(--c-neon);outline-offset:1px}
+.cga .cg-empty{text-align:center;padding:2.4rem 1rem;color:var(--c-muted-l)}
+@media (max-width:640px){
+  .cga .q-item{grid-template-columns:1fr}
+  .cga .q-video{max-height:300px}
+}
+@media (prefers-reduced-motion:reduce){.cga *{transition:none!important}.cga .tc:hover,.cga .tc:focus-visible{transform:none!important}}

@@ -33,6 +33,18 @@
       ],
       "port": 4180,
       "autoPort": true
+    },
+    {
+      "name": "components-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5301",
+        "--directory",
+        "components"
+      ],
+      "port": 5301
     }
   ]
 }

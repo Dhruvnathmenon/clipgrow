@@ -34,3 +34,6 @@ test/
 src/
 schema.sql
 remove_blue.py
+
+# local UI preview harness (mock data)
+components/preview.html
