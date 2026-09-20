@@ -268,6 +268,11 @@
           <button class="btn btn-ghost btn-sm" onclick="openModal(blankDraft(),'create')">or create one manually</button>
         </div>
       </div>
+      <div class="panel" id="gate-panel">
+        <h2 class="panel-title">Video review gate</h2>
+        <p class="note" style="margin-bottom:.8rem">When ON, clippers must get a video approved by a moderator before they can connect an account, and the Campaigns tab shows the new onboarding cards. When OFF, everything works exactly as before. Switching on carries over anyone already connected or already approved to connect.</p>
+        <div id="gate-body">Loading…</div>
+      </div>
       <div class="panel">
         <h2 class="panel-title">All Campaigns</h2>
         <div class="table-wrap"><table>
@@ -757,6 +762,15 @@
           <div class="fld"><label>Brand Guidelines</label><input class="form-control" id="f-guidelines" /></div>
           <div class="fld"><label>Footage / Raw Assets</label><input class="form-control" id="f-footage" /></div>
           <div class="fld"><label>Demo Video</label><input class="form-control" id="f-demo_video" /></div>
+        </div>
+        <div class="fieldset">
+          <div class="fs-title">Clipper Onboarding Material</div>
+          <div class="fld"><label>Reference video(s) — Google Drive links, one per line</label>
+            <textarea class="form-control" id="f-reference_links" style="min-height:70px" placeholder="https://drive.google.com/file/d/..."></textarea>
+            <div class="note">What a good clip looks like. Only drive.google.com links. Set sharing to <strong>Anyone with the link</strong> or clippers will hit an access request. Required once the video-review gate is on.</div></div>
+          <div class="fld"><label>Raw footage — one link per line</label>
+            <textarea class="form-control" id="f-raw_sources" style="min-height:90px" placeholder="https://drive.google.com/drive/folders/...&#10;https://www.instagram.com/officialpage/&#10;https://www.youtube.com/@channel"></textarea>
+            <div class="note">Where clippers get footage: a Drive link, or the official pages on Instagram, YouTube, TikTok, X, Facebook, Twitch or Snapchat. Only clippers who joined can see these. Required once the gate is on.</div></div>
         </div>
         <div class="fieldset">
           <div class="fs-title">Approval Process</div>
@@ -1717,6 +1731,8 @@
       NUM_FIELDS.forEach(k=>{const el=document.getElementById('f-'+k); if(el) el.value=(draft[k]==null?'':draft[k]);});
       document.getElementById('f-approval_steps').value=(draft.approval_steps||[]).join('\n');
       document.getElementById('f-terms').value=(draft.terms||[]).join('\n');
+      document.getElementById('f-reference_links').value=(draft.reference_links||[]).join('\n');
+      document.getElementById('f-raw_sources').value=(draft.raw_sources||[]).map(r=>typeof r==='string'?r:r.url).join('\n');
       // New campaigns default to Instagram only, matching how every existing
       // campaign already behaves.
       const allowed=new Set(draft.allowed_platforms||['instagram']);
@@ -1752,6 +1768,7 @@
       if(p.min_views==null) p.min_views=0;
       const lines=id=>document.getElementById(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
       p.approval_steps=lines('f-approval_steps'); p.terms=lines('f-terms');
+      p.reference_links=lines('f-reference_links'); p.raw_sources=lines('f-raw_sources');
       p.allowed_platforms=[...document.querySelectorAll('.camp-plat:checked')].map(x=>x.value);
       p.campaign_kind=document.getElementById('f-charges-fee').checked?'client':'internal';
       if(!p.name) return toast('Campaign name is required',true);
@@ -1766,8 +1783,36 @@
       }catch(e){ toast(e.message,true); } finally{ btn.disabled=false; }
     };
 
+    /* ---------- video review gate ---------- */
+    async function loadGate(){
+      const el=document.getElementById('gate-body');
+      try{
+        const g=await api('/api/admin/applications-gate');
+        const pv=g.preview||{};
+        el.innerHTML=`<div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+          <span class="badge ${g.enabled?'active':'paused'}" style="font-size:.85rem">${g.enabled?'ON':'OFF'}</span>
+          <button class="btn ${g.enabled?'btn-ghost':''}" onclick="toggleGate(${!g.enabled})">${g.enabled?'Turn OFF':'Turn ON'}</button>
+        </div>
+        ${g.enabled?'':`<p class="note" style="margin-top:.8rem">If you switch on now: <strong>${pv.carried_over_connected||0}</strong> already-connected and <strong>${pv.carried_over_to_connect_step||0}</strong> approved-but-unconnected carry over; <strong>${pv.start_at_step_one||0}</strong> start at Step 1.</p>`}`;
+        window._gatePreview=pv;
+      }catch(e){ el.textContent='Could not load: '+e.message; }
+    }
+    window.toggleGate=async function(enable){
+      const pv=window._gatePreview||{};
+      const msg=enable
+        ? `Turn the video review gate ON?\n\n${pv.carried_over_connected||0} already-connected and ${pv.carried_over_to_connect_step||0} approved-but-unconnected will carry over.\n${pv.start_at_step_one||0} will start at Step 1.\n\nMake sure moderators are ready to review within 24 hours.`
+        : 'Turn the gate OFF? Clippers go back to the old flow immediately. Videos already submitted stay in the queue.';
+      if(!confirm(msg)) return;
+      try{
+        const r=await api('/api/admin/applications-gate',{method:'POST',body:JSON.stringify({enabled:enable})});
+        toast(enable?`Gate ON — ${r.carried_over||0} carried over`:'Gate OFF');
+        loadGate();
+      }catch(e){ toast(e.message,true); }
+    };
+
     /* ---------- campaigns ---------- */
     async function loadCampaigns(){
+      loadGate();
       const {campaigns}=await api('/api/admin/campaigns');
       CAMPAIGNS=campaigns;
       const tb=document.getElementById('campaigns-body');
@@ -2005,7 +2050,7 @@
     window.editCampaign=async function(id){
       try{
         const {campaign}=await api('/api/admin/campaigns/'+id);
-        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model,allowed_platforms:campaign.allowed_platforms,campaign_kind:campaign.campaign_kind},'edit',id);
+        openModal({...campaign.blueprint,name:campaign.name,description:campaign.description,cpm:campaign.cpm,budget:campaign.budget,min_views:campaign.min_views,model:campaign.model,allowed_platforms:campaign.allowed_platforms,campaign_kind:campaign.campaign_kind,reference_links:campaign.reference_links,raw_sources:campaign.raw_sources},'edit',id);
       }catch(e){ toast(e.message,true); }
     };
     window.setCampaignStatus=async function(id,status){

@@ -359,6 +359,7 @@
     }
     .mob-head { display:none; justify-content:space-between; align-items:center; margin-bottom:1.2rem; padding-bottom:.9rem; border-bottom:1px solid var(--border); }
   </style>
+  <link rel="stylesheet" href="/components/applications.css?v=1">
 </head>
 <body>
 
@@ -576,6 +577,7 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="/components/clipper-applications.js?v=1"></script>
   <script>
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
     // Plain counts (views, videos, etc.) get standard 3-digit grouping, not
@@ -699,7 +701,8 @@
 
     /* ── campaigns ── */
     async function loadCampaigns(){
-      const {campaigns,configured_platforms}=await api('/api/clipper/campaigns');
+      const resp=await api('/api/clipper/campaigns');
+      const {campaigns,configured_platforms}=resp;
       CAMPAIGNS=campaigns;
       // A platform is only offered once its credentials exist on the server.
       if(Array.isArray(configured_platforms)){
@@ -708,11 +711,36 @@
       const joined=campaigns.filter(c=>c.participation&&c.participation.status!=='kicked');
       document.getElementById('n-camp').textContent=joined.length;
 
-      document.getElementById('camp-list').innerHTML=campaigns.length
-        ? campaigns.map(campCard).join('') : '<div class="empty">No campaigns are open right now.</div>';
+      // While the video-review gate is on, the Campaigns tab is the onboarding
+      // UI (cards, Step 1 review, submission). While it is off -- the default --
+      // this tab is exactly what it always was. The server sends the flag, so
+      // what is shown and what is enforced cannot disagree.
+      if(resp.applications_gate && window.CGApps){
+        mountOnboarding(resp);
+      } else {
+        document.getElementById('camp-list').innerHTML=campaigns.length
+          ? campaigns.map(campCard).join('') : '<div class="empty">No campaigns are open right now.</div>';
+      }
       document.getElementById('home-camps').innerHTML=joined.length
         ? joined.map(campCard).join('')
         : '<div class="card"><p class="muted" style="font-size:.85rem">You haven\'t joined a campaign yet.</p><button class="btn btn-sm" style="margin-top:.7rem" onclick="go(\'campaigns\',document.querySelector(\'[data-v=campaigns]\'))">Browse campaigns</button></div>';
+    }
+
+    let onboarding=null;
+    function mountOnboarding(resp){
+      const el=document.getElementById('camp-list');
+      if(onboarding){ onboarding.reload(); return; }
+      onboarding=CGApps.clipper.mount(el,{
+        api, initial:resp,
+        // Step 2 is the existing connect flow, untouched: the campaign page
+        // already handles the access request, admin approval and OAuth.
+        onConnect:c=>openCampaign(c.id),
+        onOpenLive:c=>openCampaign(c.id),
+        onData:list=>{
+          CAMPAIGNS=list;
+          document.getElementById('n-camp').textContent=list.filter(c=>c.participation&&c.participation.status!=='kicked').length;
+        }
+      });
     }
 
     function campCard(c){

@@ -216,3 +216,66 @@ test('a Drive failure during purge leaves the row for the next sweep', async () 
   assert.equal(db._rows('campaign_applications')[0].drive_file_id, 'old',
     'the id survives, so the file is still findable on the next pass');
 });
+
+/* ---------------------------------------------------------------- streaming */
+import { streamFile } from '../src/drive.js';
+import { handleModerator } from '../src/routes/moderator.js';
+import { createSessionCookie } from '../src/auth.js';
+
+const videoUpstream = (status = 206) => ({
+  ok: status < 300, status,
+  body: new Uint8Array([1, 2, 3, 4]),
+  headers: { get: k => ({ 'content-type': 'video/mp4', 'content-range': 'bytes 0-3/1000', 'content-length': '4' }[k.toLowerCase()] || null) }
+});
+
+test('a reviewer stream passes Range through and never lets the browser sniff or cache it', async () => {
+  const f = scriptedFetch([TOKEN_OK(), videoUpstream(206)]);
+  const res = await streamFile(ENV, 'f1', 'bytes=0-3', { fetchImpl: f });
+
+  assert.equal(f.calls[1].headers.Range, 'bytes=0-3', 'seeking works because the Range header reaches Drive');
+  assert.match(f.calls[1].url, /alt=media/);
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('Content-Range'), 'bytes 0-3/1000');
+  assert.equal(res.headers.get('Cache-Control'), 'private, no-store');
+  assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff');
+});
+
+test('a video that has left Drive is a clean 404, and a Drive outage is a 502', async () => {
+  await assert.rejects(() => streamFile(ENV, 'f1', null, { fetchImpl: scriptedFetch([TOKEN_OK(), bad(404)]) }),
+    e => e.code === 'DRIVE_NOT_FOUND' && e.status === 404);
+  await assert.rejects(() => streamFile(ENV, 'f1', null, { fetchImpl: scriptedFetch([TOKEN_OK(), bad(500)]) }),
+    e => e.code === 'DRIVE_STREAM' && e.status === 502);
+});
+
+test('the video route is for signed-in moderators only, and only for uploaded files', async () => {
+  const db = makeSqliteD1({
+    clippers: [{ id: 1, username: 'c1', password_hash: 'h', password_salt: 's', status: 'active', created_at: 1 }],
+    moderators: [{ id: 7, username: 'm', password_hash: 'h', password_salt: 's', display_name: 'M', status: 'active', created_at: 1 }],
+    campaigns: [{ id: 1, name: 'C', description: '', cpm: 40, budget: 1000, status: 'active', created_at: 1, model: 'cpm', min_views: 0, allowed_platforms: 'instagram' }],
+    campaign_applications: [
+      { id: 1, clipper_id: 1, campaign_id: 1, attempt: 1, status: 'pending', drive_file_id: 'F1', created_at: 1 },
+      { id: 2, clipper_id: 1, campaign_id: 1, attempt: 2, status: 'rejected', video_url: 'https://x.com/a', created_at: 2 }
+    ]
+  });
+  const env = { ...ENV, DB: db, SESSION_SECRET: 's' };
+  const call = async (path, cookie) => {
+    const req = new Request(`https://clipgrow.in${path}`, { headers: cookie ? { Cookie: cookie.split(';')[0], Range: 'bytes=0-3' } : {} });
+    return handleModerator(req, env, new URL(req.url));
+  };
+
+  assert.equal((await call('/api/moderator/applications/1/video')).status, 401, 'no session, no video');
+  const clipperCookie = await createSessionCookie('clipper', 1, 's');
+  assert.equal((await call('/api/moderator/applications/1/video', clipperCookie)).status, 401, 'a clipper cannot watch another clipper\'s submission');
+
+  const mod = await createSessionCookie('moderator', 7, 's');
+  assert.equal((await call('/api/moderator/applications/2/video', mod)).status, 404, 'a pasted link has nothing to stream');
+  assert.equal((await call('/api/moderator/applications/99/video', mod)).status, 404);
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async url => String(url).includes('oauth2') ? TOKEN_OK() : videoUpstream(206);
+  try {
+    const res = await call('/api/moderator/applications/1/video', mod);
+    assert.equal(res.status, 206);
+    assert.equal(res.headers.get('Content-Type'), 'video/mp4');
+  } finally { globalThis.fetch = realFetch; }
+});

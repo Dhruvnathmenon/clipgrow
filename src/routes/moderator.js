@@ -11,6 +11,7 @@ import {
 } from '../reviews.js';
 import { applicationQueue, reviewApplication, applicationHistory } from '../applications.js';
 import { logAction } from '../audit.js';
+import { streamFile, driveConfigured, DriveError } from '../drive.js';
 
 // Moderator staff role (migration 023) -- deliberately narrow. A moderator
 // can: leave a private note on a clipper, review videos (tick/cross/skip),
@@ -194,6 +195,24 @@ export async function handleModerator(request, env, url) {
     // Previous attempts and the notes left on them -- a reviewer deciding a
     // second or third attempt needs to see what was already asked for.
     return json({ history: await applicationHistory(env.DB, app.clipper_id, app.campaign_id) });
+  }
+
+  // The uploaded video itself, for the reviewer's <video> element.
+  params = matchPath('/api/moderator/applications/:id/video', pathname);
+  if (params && method === 'GET') {
+    const app = await env.DB.prepare(
+      'SELECT drive_file_id FROM campaign_applications WHERE id = ?'
+    ).bind(params.id).first();
+    if (!app) return err('Application not found', 404);
+    // No file means a pasted link, or a file already deleted after a verdict.
+    if (!app.drive_file_id) return err('There is no uploaded video for this application.', 404);
+    if (!driveConfigured(env)) return err('Video storage is not configured.', 503);
+    try {
+      return await streamFile(env, app.drive_file_id, request.headers.get('Range'));
+    } catch (e) {
+      if (e instanceof DriveError) return json({ error: e.message, code: e.code }, e.status);
+      throw e;
+    }
   }
 
   params = matchPath('/api/moderator/applications/:id', pathname);

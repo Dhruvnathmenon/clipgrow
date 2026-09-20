@@ -107,6 +107,7 @@
 
     @media (max-width:700px){ body{padding:1rem .8rem 3rem} .panel{padding:1.2rem} }
   </style>
+  <link rel="stylesheet" href="/components/applications.css?v=1">
 </head>
 <body>
 
@@ -129,13 +130,23 @@
     </header>
 
     <div class="tabs">
-      <button class="tab on" data-v="queue" onclick="showView('queue',this)">Daily Queue</button>
+      <button class="tab on" data-v="apps" onclick="showView('apps',this)">Video Applications <span id="apps-count" style="display:none;margin-left:.3rem;background:var(--neon);color:#062010;border-radius:99px;padding:0 .45rem;font-size:.7rem;font-weight:700"></span></button>
+      <button class="tab" data-v="queue" onclick="showView('queue',this)">Daily Queue</button>
       <button class="tab" data-v="roster" onclick="showView('roster',this)">Roster</button>
       <button class="tab" data-v="me" onclick="showView('me',this)">My Profile</button>
     </div>
 
+    <!-- VIDEO APPLICATIONS (step 1 of campaign onboarding) -->
+    <div class="view on" id="v-apps">
+      <div class="panel">
+        <h2 class="panel-title">Videos waiting for review</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:-.4rem 0 1rem">Oldest first, one tab per campaign. Every video is reviewed within 24 hours. A rejection needs a reason the clipper can act on.</p>
+        <div id="apps-root"></div>
+      </div>
+    </div>
+
     <!-- DAILY QUEUE -->
-    <div class="view on" id="v-queue">
+    <div class="view" id="v-queue">
       <div class="counters">
         <div class="counter"><b id="cnt-total">—</b><span>Reviewed today (everyone)</span></div>
         <div class="counter"><b id="cnt-mine">—</b><span>Reviewed by you today</span></div>
@@ -177,6 +188,7 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="/components/moderator-applications.js?v=1"></script>
   <script>
     const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const when=ts=>ts?new Date(Number(ts)).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
@@ -230,6 +242,15 @@
       if(name==='me') loadMe();
       if(name==='queue') loadQueue();
     };
+
+    let appsMounted=false;
+    function mountApps(){
+      if(appsMounted) return; appsMounted=true;
+      CGApps.moderator.mount(document.getElementById('apps-root'),{
+        api,
+        onData:d=>{ const b=document.getElementById('apps-count'); b.textContent=d.total; b.style.display=d.total?'inline-block':'none'; }
+      });
+    }
 
     // ---------------------------------------------------------- daily queue
     // Uses /api/media/thumb/:id directly -- that endpoint is unauthenticated
@@ -385,7 +406,7 @@
       }catch(e){ toast(e.message,true); }
     };
 
-    function loadAll(){ loadQueue(); }
+    function loadAll(){ loadQueue(); mountApps(); }
 
     // A logged-in session already has a valid cg_session cookie -- probe with
     // a cheap GET rather than always showing the login form first.

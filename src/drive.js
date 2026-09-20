@@ -211,3 +211,38 @@ export async function moveToRejected(env, fileId, { fetchImpl = fetch } = {}) {
   }
   return true;
 }
+
+/**
+ * Streams a stored video to a reviewer, passing the browser's Range header
+ * through so seeking works and the whole file is not pulled for a preview.
+ *
+ * Goes through the Worker because the file sits in the founder's private
+ * Drive: a moderator has no access to it and should not need any. The Worker
+ * fetches it with its own credentials and hands over only the bytes.
+ *
+ * Returns the upstream Response, body untouched (never buffered -- videos run
+ * to hundreds of MB), with only the headers a <video> element needs.
+ */
+export async function streamFile(env, fileId, range, { fetchImpl = fetch } = {}) {
+  const token = await getAccessToken(env, { fetchImpl });
+  const headers = { Authorization: `Bearer ${token}` };
+  if (range) headers.Range = range;
+  const res = await fetchImpl(
+    `${FILES_URL}/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers }
+  );
+  if (res.status === 404) throw new DriveError('The video is no longer in Drive.', { code: 'DRIVE_NOT_FOUND', status: 404 });
+  if (!res.ok && res.status !== 206) {
+    throw new DriveError('Could not load the video from Drive.', { code: 'DRIVE_STREAM', status: 502 });
+  }
+  const out = new Headers();
+  for (const h of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges']) {
+    const v = res.headers.get(h);
+    if (v) out.set(h, v);
+  }
+  if (!out.has('Accept-Ranges')) out.set('Accept-Ranges', 'bytes');
+  // Private reviewer content: never cached by a shared cache.
+  out.set('Cache-Control', 'private, no-store');
+  // A browser sniffing an uploaded file as HTML would be an XSS vector.
+  out.set('X-Content-Type-Options', 'nosniff');
+  return new Response(res.body, { status: res.status, headers: out });
+}

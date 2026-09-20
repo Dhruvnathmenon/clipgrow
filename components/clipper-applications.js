@@ -14,7 +14,7 @@
 (function () {
   'use strict';
   const MAX_ATTEMPTS = 3;
-  const ALLOWED_EXT = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/x-m4v' };
+  const ALLOWED_EXT = { mp4: 'video/mp4', mov: 'video/quicktime' };   // what the server accepts (ALLOWED_MIME in src/drive.js)
 
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -77,6 +77,9 @@
   function mount(el, opts) {
     const api = opts.api;
     const onConnect = opts.onConnect || (() => {});
+    // The host page can hand over the campaign list it already fetched, so the
+    // first paint does not cost a second identical request.
+    let initial = opts.initial || null;
     el.classList.add('cga');
     let campaigns = [];
     let openId = null;
@@ -85,7 +88,8 @@
 
     async function load() {
       el.innerHTML = '<div class="cg-empty">Loading campaigns…</div>';
-      const data = await api('/api/clipper/campaigns');
+      const data = initial || await api('/api/clipper/campaigns');
+      initial = null;
       campaigns = data.campaigns || [];
       // Joined campaigns need their review state for the card badge. Fetched in
       // parallel, and only for campaigns the clipper is actually in.
@@ -93,6 +97,7 @@
         try { c.application = await api(`/api/clipper/campaigns/${c.id}/applications`); } catch (e) { c.application = null; }
       }));
       render();
+      if (opts.onData) opts.onData(campaigns);
     }
 
     function render() {
@@ -194,8 +199,8 @@
         <div id="cga-file"></div>
         <div class="drop" id="cga-drop" tabindex="0" role="button" aria-label="Choose a video file">
           <b>Drop your video here</b> or click to choose
-          <div class="hint">MP4, MOV or WebM · up to <span id="cga-max">500 MB</span> · it is uploaded securely and deleted once reviewed</div>
-          <input type="file" id="cga-input" accept="video/*" hidden>
+          <div class="hint">MP4 or MOV · up to <span id="cga-max">500 MB</span> · it is uploaded securely and deleted once reviewed</div>
+          <input type="file" id="cga-input" accept="video/mp4,video/quicktime,.mp4,.mov" hidden>
         </div>
         <details style="margin-top:.8rem"><summary class="cg-muted" style="cursor:pointer;font-size:.8rem">Can't upload? Paste a link instead</summary>
           <input class="linkfield" id="cga-link" placeholder="https://drive.google.com/…" inputmode="url" autocomplete="off">
@@ -245,7 +250,11 @@
     /* ------------------------------------------------------------ behaviour */
     function bind(c) {
       el.querySelectorAll('[data-open]').forEach(n => {
-        const go = () => { const camp = campaigns.find(x => x.id === Number(n.dataset.open)); if (camp && !view(camp).dead) { openId = camp.id; render(); window.scrollTo({ top: 0 }); } };
+        const go = () => { const camp = campaigns.find(x => x.id === Number(n.dataset.open)); if (!camp || view(camp).dead) return;
+          // A campaign the clipper is already live on has its own full page in the
+          // host (clips, earnings); the review screen would only be in the way.
+          if (view(camp).key === 'live' && opts.onOpenLive) return opts.onOpenLive(camp);
+          openId = camp.id; render(); window.scrollTo({ top: 0 }); };
         n.addEventListener('click', go);
         n.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
       });
@@ -282,7 +291,7 @@
         showErr('');
         if (!f) return;
         const ext = (f.name.split('.').pop() || '').toLowerCase();
-        if (!ALLOWED_EXT[ext] && !/^video\//.test(f.type)) return showErr('That is not a video file. Use MP4, MOV or WebM.');
+        if (!ALLOWED_EXT[ext]) return showErr('That file type is not accepted. Use an MP4 or MOV video.');
         if (f.size > 500 * 1048576) return showErr(`That file is ${mb(f.size)}. The limit is 500 MB — trim or compress it first.`);
         file = f; refresh();
       };

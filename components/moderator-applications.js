@@ -39,6 +39,7 @@
       loadedAt = Date.now();
       if (!data.campaigns.some(c => c.campaign_id === tab)) tab = data.campaigns.length ? data.campaigns[0].campaign_id : null;
       render();
+      if (opts.onData) opts.onData(data);
     }
 
     function render() {
