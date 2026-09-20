@@ -13,7 +13,7 @@ import { handleMarketing } from './routes/marketing.js';
 import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
 import { purgeExpiredRejections } from './applications.js';
-import { driveConfigured } from './drive.js';
+import { driveConfigured, driveHealth } from './drive.js';
 import { renewInstagramTokens } from './token-renewal.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
@@ -429,6 +429,29 @@ export default {
           }
         } catch (e) {
           console.error('[cron sync] rejected-video purge failed', e && e.message);
+        }
+
+        // Once a day, prove Google Drive still accepts our login. A refresh token
+        // can die without warning (revoked, expired, wrong client), and the first
+        // sign would otherwise be a clipper's failed upload. This puts it in the
+        // Error Log -- which the admin page already badges -- the same morning,
+        // with Google's own reason attached. The token is also USED here, so it
+        // never sits idle long enough for Google to retire it.
+        try {
+          if (new Date().getUTCHours() === 3) {
+            const health = await driveHealth(env);
+            if (!health.ok) {
+              const failed = health.checks.filter(c => !c.ok);
+              await logError(wrapped, {
+                actorType: 'admin', source: 'drive', code: 'DRIVE_HEALTH',
+                message: 'Google Drive check failed: ' + failed.map(c => c.name).join('; '),
+                detail: failed.map(c => `${c.name}: ${c.detail || ''}`).join('\n'),
+                path: 'cron'
+              });
+            }
+          }
+        } catch (e) {
+          console.error('[cron sync] drive health check failed', e && e.message);
         }
 
         // error_log has no archive -- a row past 7 days is just gone (the
