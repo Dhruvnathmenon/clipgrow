@@ -1,4 +1,5 @@
 import { now, maxPayoutPerVideo } from './db.js';
+import { selectByIds, statementsByIds } from './sql-utils.js';
 import { cpmEarning, explainEarning, explainEarningText } from './earning-math.js';
 import { voidEntry, agencyAvailable, buildEntryStatement } from './finance.js';
 import { clipState, clipStateMessage, daysSince } from './clipstate.js';
@@ -219,11 +220,11 @@ export async function settlePayment(db, {
   }
 
   const allIds = [...payIds, ...offIds];
-  const placeholders = allIds.map(() => '?').join(',');
-  const { results: rows } = await db.prepare(
+  // Chunked: a payout can cover well over 100 clips, and D1 rejects a statement
+  // with more than 100 bound parameters ("too many SQL variables").
+  const rows = await selectByIds(db,
     `SELECT id, clipper_id, campaign_id, earning, clipper_earning, status, locked_at
-     FROM submissions WHERE id IN (${placeholders})`
-  ).bind(...allIds).all();
+     FROM submissions WHERE id IN ({IN})`, allIds);
 
   const found = new Map((rows || []).map(r => [r.id, r]));
 
@@ -407,12 +408,9 @@ export async function settlePayment(db, {
       // rollback left them permanently locked at zero while telling the admin
       // nothing had been charged -- clips that could never earn again. the timestamp is
       // unique to this call, so this cannot touch a concurrent settle's rows.
-      const undo = [
-        db.prepare(
-          `UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL
-           WHERE locked_at = ? AND id IN (${allIds.map(() => '?').join(',')})`
-        ).bind(ts, ...allIds)
-      ];
+      const undo = statementsByIds(db,
+        `UPDATE submissions SET locked_at = NULL, locked_earning = NULL, lock_reason = NULL, payment_id = NULL
+         WHERE locked_at = ? AND id IN ({IN})`, allIds, [ts]);
       // The ledger entry landed as part of the same batch that's now being
       // reverted -- it has to go too, or the books show a payout that was
       // just undone.

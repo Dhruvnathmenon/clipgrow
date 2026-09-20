@@ -1,3 +1,4 @@
+import { statementsByIds } from './sql-utils.js';
 import { revokeToken as revokeGoogleToken } from './youtube.js';
 
 export const now = () => Date.now();
@@ -208,7 +209,6 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
     stmts.push(db.prepare('DELETE FROM ig_api_calls WHERE social_account_id = ?').bind(accountId));
 
     if (pending.length) {
-      const ph = pending.map(() => '?').join(',');
       // submission_reviews carries a real NOT NULL FK onto submissions
       // (migration 023, added after this function was first written) --
       // the moderator/admin video-review workflow. A reviewed pending clip
@@ -216,8 +216,11 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
       // of bug the ig_api_calls comment above already covers for a
       // different table. The review verdict has no meaning once the clip
       // it was about no longer exists, so it goes with it.
-      stmts.push(db.prepare(`DELETE FROM submission_reviews WHERE submission_id IN (${ph})`).bind(...pending.map(s => s.id)));
-      stmts.push(db.prepare(`DELETE FROM submissions WHERE id IN (${ph})`).bind(...pending.map(s => s.id)));
+      // Chunked -- an account with more than 100 pending clips would otherwise
+      // hit D1's bound-parameter limit and fail the whole disconnect.
+      const pendingIds = pending.map(x => x.id);
+      stmts.push(...statementsByIds(db, 'DELETE FROM submission_reviews WHERE submission_id IN ({IN})', pendingIds));
+      stmts.push(...statementsByIds(db, 'DELETE FROM submissions WHERE id IN ({IN})', pendingIds));
 
       // "Total Views Generated" is a lifetime, never-decreasing number --
       // these clips were real and their views really happened, they're only

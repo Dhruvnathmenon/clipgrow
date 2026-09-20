@@ -27,6 +27,7 @@ import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagra
 import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { driveHealth } from '../drive.js';
+import { selectByIds } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
 import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
@@ -2101,11 +2102,9 @@ export async function handleAdmin(request, env, url) {
     const clipperIds = [...new Set(rows.filter(r => r.actor_type === 'clipper' && r.actor_id).map(r => r.actor_id))];
     let contactById = {};
     if (clipperIds.length) {
-      const ph = clipperIds.map(() => '?').join(',');
-      const { results } = await env.DB.prepare(
-        `SELECT id, contact_number, discord_username FROM clippers WHERE id IN (${ph})`
-      ).bind(...clipperIds).all();
-      contactById = Object.fromEntries((results || []).map(r => [r.id, r]));
+      const results = await selectByIds(env.DB,
+        'SELECT id, contact_number, discord_username FROM clippers WHERE id IN ({IN})', clipperIds);
+      contactById = Object.fromEntries(results.map(r => [r.id, r]));
     }
     const errors = rows.map(r => ({
       ...r,

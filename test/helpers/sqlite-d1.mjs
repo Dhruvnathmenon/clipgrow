@@ -8,13 +8,26 @@
 import { buildSchema } from './real-schema.mjs';
 
 /** @returns a D1-shaped database: prepare().bind().first()/.all()/.run(), batch(). */
+export const D1_MAX_BOUND_PARAMS = 100;
+
 export function makeSqliteD1(seed = {}) {
   const { db } = buildSchema();
 
   const wrap = (sql) => {
     let args = [];
     const stmt = {
-      bind: (...a) => { args = a.map(norm); return stmt; },
+      bind: (...a) => {
+        // Real D1 refuses a statement with more than 100 bound parameters. Plain
+        // SQLite allows tens of thousands, which is how a payout over 100 clips
+        // passed every test and then failed in production with "too many SQL
+        // variables". Enforcing D1's limit here makes that class of bug fail
+        // in the suite instead.
+        if (a.length > D1_MAX_BOUND_PARAMS) {
+          throw new Error(`D1_ERROR: too many SQL variables (${a.length} > ${D1_MAX_BOUND_PARAMS}): SQLITE_ERROR`);
+        }
+        args = a.map(norm);
+        return stmt;
+      },
       async all() {
         const rows = db.prepare(sql).all(...args);
         // SQLite has no native "rows read" concept -- row count is a
