@@ -734,8 +734,8 @@
         api, initial:resp,
         // Step 2 is the existing connect flow, untouched: the campaign page
         // already handles the access request, admin approval and OAuth.
-        onConnect:c=>openCampaign(c.id),
-        onOpenLive:c=>openCampaign(c.id),
+        onConnect:c=>openCampaignDetail(c.id),
+        onOpenLive:c=>openCampaignDetail(c.id),
         onData:list=>{
           CAMPAIGNS=list;
           document.getElementById('n-camp').textContent=list.filter(c=>c.participation&&c.participation.status!=='kicked').length;
@@ -924,7 +924,23 @@
     }
 
     /* ── campaign detail ── */
+    // Every entry point (Home cards, deep links, post-join redirects) comes
+    // through here. While the review gate is on, a campaign the clipper has not
+    // passed step 1 on belongs on the onboarding page, not the connect-account
+    // page -- whose button the server would refuse. Once approved or live, the
+    // original page is exactly right.
     window.openCampaign=function(id){
+      const c=CAMPAIGNS.find(x=>x.id===id);
+      const app=c&&c.application;
+      const live=c&&c.participation&&Object.keys(c.participation.accounts||{}).length>0;
+      if(onboarding && c && !live && !(app&&app.state==='approved')){
+        go('campaigns',document.querySelector('[data-v=campaigns]'));
+        onboarding.open(id);
+        return;
+      }
+      openCampaignDetail(id);
+    };
+    window.openCampaignDetail=function(id){
       const c=CAMPAIGNS.find(x=>x.id===id); if(!c) return;
       const b=c.blueprint||{}, p=c.participation;
       const row=(k,v)=>v?`<div class="drow"><span class="dk">${k}</span><span class="dv">${/^https?:\/\//i.test(String(v).trim())?`<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>`:esc(v)}</span></div>`:'';

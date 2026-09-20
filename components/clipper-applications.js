@@ -49,6 +49,13 @@
       return r('exhausted', 't-dead', 'Failed 3 times', `Failed ${MAX_ATTEMPTS} times, so you can't join this campaign`, { dead: true });
     }
     if (c.status === 'completed') return r('ended', '', 'Ended', 'This campaign is over');
+    // A full budget closes the campaign to anyone who has not yet been approved
+    // (the server refuses their video). Say so on the card instead of letting
+    // them open a page whose only button will fail. Reversible: the campaign
+    // reopens if budget is added, and the card follows.
+    if (c.status === 'budget_full' && !(app && app.state === 'approved') && !(part && Object.keys(part.accounts || {}).length)) {
+      return r('full', '', 'Budget full', 'Closed to new clippers for now', { dead: true, note: 'The budget for this campaign is fully allocated. It reopens if more budget is added.' });
+    }
     if (!part) return r('open', '', 'Open to join', 'Free to join · a quick video review comes first');
     const connected = Object.keys(part.accounts || {}).length > 0;
     if (connected) return r('live', 't-ok', 'Live', c.my_stats ? `${money(c.my_stats.earned)} earned so far` : 'Your account is connected');
@@ -232,7 +239,7 @@
         body = `<div class="approved-box"><b>Your video was approved.</b>${app.approved && app.approved.reviewer_note ? ' ' + esc(app.approved.reviewer_note) : ''}<br>
           Next, connect the account you'll post from.<div class="row-actions"><button class="cg-btn cg-btn-primary" id="cga-connect">Connect account</button></div></div>`;
       } else if (v.key === 'pending') {
-        body = `<div class="waiting"><b>Waiting for review.</b> Sent ${app.pending ? ago(app.pending.created_at) : ''}. You'll see the result here — you can't send another video until this one is reviewed.</div>${dots(app)}`;
+        body = `<div class="waiting"><b>Waiting for review.</b> Sent ${app.pending ? ago(app.pending.created_at) : ''}. Reviewers check every video within 24 hours. You'll see the result here — you can't send another video until this one is reviewed.</div>${dots(app)}`;
       } else if (v.key === 'ended') {
         body = '<div class="cg-panel"><h3>This campaign has ended</h3></div>';
       } else {
@@ -355,7 +362,12 @@
     }
 
     load().catch(e => { el.innerHTML = `<div class="cg-empty">Couldn't load campaigns. ${esc(e.message)}</div>`; });
-    return { reload: load };
+    return {
+      reload: load,
+      // Lets the host send a clipper straight to one campaign's page, e.g. when
+      // an old "connect" link is followed before they have passed step 1.
+      open(id) { openId = id; render(); window.scrollTo({ top: 0 }); }
+    };
   }
 
   window.CGApps = window.CGApps || {};
