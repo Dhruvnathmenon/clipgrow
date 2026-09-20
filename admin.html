@@ -268,6 +268,12 @@
           <button class="btn btn-ghost btn-sm" onclick="openModal(blankDraft(),'create')">or create one manually</button>
         </div>
       </div>
+      <div class="panel" id="drive-panel">
+        <h2 class="panel-title">Google Drive (video uploads)</h2>
+        <p class="note" style="margin-bottom:.8rem">Checks every link an upload depends on and shows exactly what Google said. Run it after changing any Google secret.</p>
+        <button class="btn btn-sm" onclick="checkDrive(this)">Check Google Drive</button>
+        <div id="drive-result" style="margin-top:.9rem"></div>
+      </div>
       <div class="panel" id="gate-panel">
         <h2 class="panel-title">Video review gate</h2>
         <p class="note" style="margin-bottom:.8rem">When ON, clippers must get a video approved by a moderator before they can connect an account, and the Campaigns tab shows the new onboarding cards. When OFF, everything works exactly as before. Switching on carries over anyone already connected or already approved to connect.</p>
@@ -1781,6 +1787,16 @@
         else { await api('/api/admin/campaigns/'+modalId,{method:'PATCH',body:JSON.stringify(p)}); toast('Campaign updated'); }
         closeModal(); loadAll();
       }catch(e){ toast(e.message,true); } finally{ btn.disabled=false; }
+    };
+
+    window.checkDrive=async function(btn){
+      const el=document.getElementById('drive-result'); btn.disabled=true; el.textContent='Checking…';
+      try{
+        const r=await api('/api/admin/drive-health');
+        el.innerHTML=(r.ok?'<div class="badge active" style="font-size:.85rem;margin-bottom:.6rem">ALL GOOD</div>':'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem;color:var(--red)">NEEDS ATTENTION</div>')
+          +r.checks.map(c=>`<div style="padding:.5rem 0;border-top:1px solid var(--border)"><strong style="color:${c.ok?'var(--neon)':'var(--red)'}">${c.ok?'✓':'✗'} ${esc(c.name)}</strong>${c.detail?`<div class="note" style="margin-top:.2rem;white-space:pre-wrap">${esc(c.detail)}</div>`:''}</div>`).join('');
+      }catch(e){ el.textContent='Could not run the check: '+e.message; }
+      finally{ btn.disabled=false; }
     };
 
     /* ---------- video review gate ---------- */

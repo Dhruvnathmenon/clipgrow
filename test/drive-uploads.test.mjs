@@ -279,3 +279,46 @@ test('the video route is for signed-in moderators only, and only for uploaded fi
     assert.equal(res.headers.get('Content-Type'), 'video/mp4');
   } finally { globalThis.fetch = realFetch; }
 });
+
+/* ------------------------------------------------------------- health check */
+import { driveHealth } from '../src/drive.js';
+
+const tokenBad = (error, description) => ({
+  ok: false, status: 401, json: async () => ({ error, error_description: description }),
+  text: async () => '', headers: { get: () => null }
+});
+const folderOk = (name = 'Pending') => ok({ id: 'x', name, mimeType: 'application/vnd.google-apps.folder', trashed: false, capabilities: { canAddChildren: true } });
+
+test('the health check names the exact broken link and never leaks a secret', async () => {
+  // A rotated client secret is the most likely real-world cause.
+  const UNIQUE = { ...ENV, GOOGLE_CLIENT_SECRET: 'zq-unique-secret-value-91', GOOGLE_REFRESH_TOKEN: 'zq-unique-refresh-value-77' };
+  let r = await driveHealth(UNIQUE, { fetchImpl: scriptedFetch([tokenBad('invalid_client', 'The OAuth client was not found.')]) });
+  assert.equal(r.ok, false);
+  const tok = r.checks.find(c => c.name.includes('refresh token'));
+  assert.match(tok.detail, /invalid_client/);
+  assert.match(tok.detail, /secret/i, 'and it says what to do about it');
+  const report = JSON.stringify(r);
+  assert.equal(report.includes('zq-unique-secret-value-91'), false, 'the secret itself is never in the report');
+  assert.equal(report.includes('zq-unique-refresh-value-77'), false, 'nor the refresh token');
+
+  r = await driveHealth(ENV, { fetchImpl: scriptedFetch([tokenBad('invalid_grant', 'Token has been expired or revoked.')]) });
+  assert.match(r.checks.find(c => c.name.includes('refresh token')).detail, /issued to a different client|expired, revoked/i);
+});
+
+test('missing secrets are listed by name, and a stray newline in one is caught', async () => {
+  let r = await driveHealth({ ...ENV, GOOGLE_REFRESH_TOKEN: undefined }, { fetchImpl: scriptedFetch([]) });
+  assert.equal(r.ok, false);
+  assert.match(r.checks[0].detail, /GOOGLE_REFRESH_TOKEN/);
+
+  r = await driveHealth({ ...ENV, GOOGLE_CLIENT_SECRET: 'secret\n' }, { fetchImpl: scriptedFetch([tokenBad('invalid_client', 'x')]) });
+  assert.ok(r.checks.some(c => /whitespace/i.test(c.name) && !c.ok), 'a trailing newline is called out');
+});
+
+test('a healthy setup passes every check, and a hand-made folder is explained', async () => {
+  let r = await driveHealth(ENV, { fetchImpl: scriptedFetch([TOKEN_OK(), folderOk('Pending'), folderOk('Rejected')]) });
+  assert.equal(r.ok, true);
+
+  r = await driveHealth(ENV, { fetchImpl: scriptedFetch([TOKEN_OK(), bad(404), folderOk('Rejected')]) });
+  assert.equal(r.ok, false);
+  assert.match(r.checks.find(c => c.name === 'Pending folder').detail, /drive\.file/);
+});

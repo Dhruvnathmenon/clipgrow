@@ -28,6 +28,7 @@ import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { flagEnabled, setFlag, APPLICATIONS_GATE } from '../feature-flags.js';
 import { grandfatherExisting, gatePreview } from '../applications.js';
+import { driveHealth } from '../drive.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
 import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
@@ -827,6 +828,11 @@ export async function handleAdmin(request, env, url) {
   }
 
   // ------------------------------------------------------------- campaigns
+  // Step-by-step check of Google Drive: secrets, the refresh token, both folders.
+  if (pathname === '/api/admin/drive-health' && method === 'GET') {
+    return json(await driveHealth(env));
+  }
+
   // ------------------------------------------- video-review gate (kill switch)
   // Admin-only on purpose: a moderator reviews videos but does not decide
   // whether the review exists.

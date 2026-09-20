@@ -246,3 +246,77 @@ export async function streamFile(env, fileId, range, { fetchImpl = fetch } = {})
   out.set('X-Content-Type-Options', 'nosniff');
   return new Response(res.body, { status: res.status, headers: out });
 }
+
+/**
+ * A step-by-step check of everything an upload depends on, for the admin page.
+ *
+ * Exists because the clipper-facing message ("Could not reach Google Drive")
+ * is deliberately vague -- and so was every diagnosis of it. This reports
+ * exactly which link in the chain is broken and what Google itself said:
+ * which secrets are missing, whether the refresh token is accepted, and
+ * whether each folder is reachable and writable. It never returns a secret
+ * or a token, only Google's own error codes.
+ */
+export async function driveHealth(env, { fetchImpl = fetch } = {}) {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || null });
+
+  const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN', 'GDRIVE_PENDING_FOLDER_ID'];
+  const missing = required.filter(k => !env[k]);
+  add('Secrets present', !missing.length, missing.length ? `Missing: ${missing.join(', ')}` : 'All four required secrets are set.');
+  if (!env.GDRIVE_REJECTED_FOLDER_ID) add('Rejected folder configured', false, 'GDRIVE_REJECTED_FOLDER_ID is not set, so rejected videos are deleted at once instead of held for 7 days.');
+  if (missing.length) return { ok: false, checks };
+
+  // Whitespace in a pasted secret is the classic silent failure.
+  const padded = required.filter(k => String(env[k]) !== String(env[k]).trim());
+  if (padded.length) add('No stray whitespace in secrets', false, `Has leading/trailing spaces or a newline: ${padded.join(', ')}. Re-set them without a trailing newline.`);
+
+  let token = null;
+  try {
+    const res = await fetchImpl(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET,
+        refresh_token: env.GOOGLE_REFRESH_TOKEN, grant_type: 'refresh_token'
+      })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && body.access_token) {
+      token = body.access_token;
+      add('Google accepts the refresh token', true, `Scope: ${body.scope || 'unknown'}`);
+    } else {
+      const code = body.error || `HTTP ${res.status}`;
+      const hints = {
+        invalid_client: 'The client ID or client secret is wrong or was rotated. Re-run: wrangler secret put GOOGLE_CLIENT_SECRET (and check GOOGLE_CLIENT_ID).',
+        invalid_grant: 'The refresh token is expired, revoked, or was issued to a different client ID/secret. Generate a new one in the OAuth Playground with the CURRENT client credentials, then re-run: wrangler secret put GOOGLE_REFRESH_TOKEN.',
+        unauthorized_client: 'This client is not allowed to use a refresh token. Re-create the token with the OAuth Playground using your own credentials.'
+      };
+      add('Google accepts the refresh token', false, `Google said: ${code}${body.error_description ? ' — ' + body.error_description : ''}. ${hints[body.error] || ''}`.trim());
+    }
+  } catch (e) {
+    add('Google accepts the refresh token', false, 'The request to Google failed: ' + (e && e.message));
+  }
+  if (!token) return { ok: false, checks };
+
+  const folder = async (label, id) => {
+    try {
+      const res = await fetchImpl(`${FILES_URL}/${encodeURIComponent(id)}?supportsAllDrives=true&fields=id,name,mimeType,trashed,capabilities(canAddChildren)`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.status === 404) return add(label, false, 'Google says this folder does not exist for this app. With the drive.file scope the app can only see folders IT created -- a folder made by hand in Drive returns 404. Create the folder via the OAuth Playground (files.create) and use that ID.');
+      if (!res.ok) return add(label, false, `Google returned HTTP ${res.status}.`);
+      const f = await res.json();
+      if (f.mimeType !== 'application/vnd.google-apps.folder') return add(label, false, 'That ID is a file, not a folder.');
+      if (f.trashed) return add(label, false, `Folder "${f.name}" is in the trash.`);
+      if (f.capabilities && f.capabilities.canAddChildren === false) return add(label, false, `Folder "${f.name}" is read-only for this app.`);
+      add(label, true, `"${f.name}" is reachable and writable.`);
+    } catch (e) {
+      add(label, false, 'The request failed: ' + (e && e.message));
+    }
+  };
+  await folder('Pending folder', env.GDRIVE_PENDING_FOLDER_ID);
+  if (env.GDRIVE_REJECTED_FOLDER_ID) await folder('Rejected folder', env.GDRIVE_REJECTED_FOLDER_ID);
+
+  return { ok: checks.every(c => c.ok), checks };
+}

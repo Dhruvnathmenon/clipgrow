@@ -28,6 +28,7 @@ import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
 import { flagEnabled, APPLICATIONS_GATE } from '../feature-flags.js';
 import { readStored } from '../campaign-sources.js';
+import { logError } from '../error-log.js';
 import {
   driveConfigured, createUploadSession, verifyUploadedFile, driveFileName,
   DriveError, MAX_UPLOAD_BYTES, ALLOWED_MIME
@@ -57,6 +58,18 @@ function detectPlatform(postUrl, fallback) {
   if (/youtube\.com|youtu\.be/i.test(s)) return 'youtube';
   if (/instagram\.com/i.test(s)) return 'instagram';
   return PLATFORMS.includes(fallback) ? fallback : null;
+}
+
+// A Drive fault the clipper cannot fix is recorded for the admin with what
+// Google actually said (e.fix), which the clipper-facing message leaves out.
+// Faults that are the clipper's own (wrong file type, too large) are not logged.
+async function driveFailureLogged(env, me, e, path) {
+  if (e.status >= 500 || e.code === 'DRIVE_AUTH') {
+    await logError(env.DB, {
+      actorType: 'clipper', actorId: me ? me.id : null, actorLabel: me && me.username ? me.username : null,
+      source: 'drive', code: e.code, message: e.message, detail: e.fix || null, path
+    });
+  }
 }
 
 export async function handleClipper(request, env, url) {
@@ -411,7 +424,7 @@ export async function handleClipper(request, env, url) {
       try {
         file = await verifyUploadedFile(env, String(drive_file_id));
       } catch (e) {
-        if (e instanceof DriveError) return json({ error: e.message, code: e.code }, e.status);
+        if (e instanceof DriveError) { await driveFailureLogged(env, me, e, pathname); return json({ error: e.message, code: e.code }, e.status); }
         throw e;
       }
     }
@@ -472,7 +485,7 @@ export async function handleClipper(request, env, url) {
       });
       return json({ ...session, max_bytes: MAX_UPLOAD_BYTES, allowed: ALLOWED_MIME });
     } catch (e) {
-      if (e instanceof DriveError) return json({ error: e.message, code: e.code }, e.status);
+      if (e instanceof DriveError) { await driveFailureLogged(env, me, e, pathname); return json({ error: e.message, code: e.code }, e.status); }
       throw e;
     }
   }
