@@ -26,7 +26,6 @@ import { captureThumbnail } from '../media.js';
 import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
-import { flagEnabled, APPLICATIONS_GATE } from '../feature-flags.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
 import {
@@ -364,12 +363,7 @@ export async function handleClipper(request, env, url) {
         }, {})
       });
     }
-    return json({
-      campaigns: out, configured_platforms: configured,
-      // Tells the page which onboarding UI to show, from the same switch the
-      // server enforces -- the two can never disagree.
-      applications_gate: await flagEnabled(env.DB, APPLICATIONS_GATE)
-    });
+    return json({ campaigns: out, configured_platforms: configured });
   }
 
   let params = matchPath('/api/clipper/campaigns/:id/join', pathname);
@@ -545,18 +539,13 @@ export async function handleClipper(request, env, url) {
     // gate that makes the video review mean anything -- without it a clipper
     // could skip straight to connecting an account, exactly as they could
     // before applications existed. Everyone already on a campaign when this
-    // shipped is carried over when the gate is switched on
-    // (grandfatherExisting), so this cannot lock out an existing clipper
-    // reconnecting an account.
-    //
-    // Only enforced while the gate is switched on (see feature-flags.js).
-    if (await flagEnabled(env.DB, APPLICATIONS_GATE)) {
-      const app = await applicationState(env.DB, clipperId, campaignId);
-      if (!app.may_connect) {
-        return err(app.state === 'pending'
-          ? 'Your video is still with a reviewer. You can connect your account once it is approved.'
-          : 'Submit your video for this campaign and get it approved before connecting an account.', 403);
-      }
+    // shipped was carried over when the review went live (grandfatherExisting),
+    // so this cannot lock out an existing clipper reconnecting an account.
+    const app = await applicationState(env.DB, clipperId, campaignId);
+    if (!app.may_connect) {
+      return err(app.state === 'pending'
+        ? 'Your video is still with a reviewer. You can connect your account once it is approved.'
+        : 'Submit your video for this campaign and get it approved before connecting an account.', 403);
     }
 
     // `ig_username` is the legacy field name; accept either so an older client

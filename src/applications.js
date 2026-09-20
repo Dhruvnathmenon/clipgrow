@@ -318,9 +318,8 @@ export async function applicationQueue(db, { limit = 300 } = {}) {
 }
 
 /**
- * Lets everyone already past step 1 in the OLD flow carry on untouched. Run at
- * the moment the gate is switched on (not at migration time -- see migration
- * 044 for why), and safe to run again: a participation that already has any
+ * Lets everyone already past step 1 in the OLD flow carry on untouched. Run once,
+ * when the review went live, and safe to run again: a participation that already has any
  * application row is skipped, so a real review is never overwritten.
  *
  * Two groups get an approval, matching how far they had actually got:
@@ -356,32 +355,4 @@ export async function grandfatherExisting(db) {
                          AND t.status = 'confirmed') )`
   ).bind(now(), now()).run();
   return { carried_over: (res.meta && res.meta.changes) || 0 };
-}
-
-/**
- * What switching the gate on would do, counted before anyone commits to it.
- * Mirrors grandfatherExisting's selection exactly (same WHERE), so the
- * numbers an admin sees are the numbers that will happen.
- */
-export async function gatePreview(db) {
-  const row = await db.prepare(
-    `SELECT
-       COUNT(*) AS total,
-       SUM(CASE WHEN EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id) THEN 1 ELSE 0 END) AS connected,
-       SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)
-                 AND EXISTS (SELECT 1 FROM tester_requests t WHERE t.clipper_id = p.clipper_id
-                              AND t.campaign_id = p.campaign_id AND t.status = 'confirmed') THEN 1 ELSE 0 END) AS awaiting_connect
-       FROM participations p
-      WHERE p.status != 'kicked'
-        AND NOT EXISTS (SELECT 1 FROM campaign_applications a
-                         WHERE a.clipper_id = p.clipper_id AND a.campaign_id = p.campaign_id)`
-  ).first();
-  const connected = (row && row.connected) || 0;
-  const awaiting = (row && row.awaiting_connect) || 0;
-  const total = (row && row.total) || 0;
-  return {
-    carried_over_connected: connected,
-    carried_over_to_connect_step: awaiting,
-    start_at_step_one: Math.max(0, total - connected - awaiting)
-  };
 }

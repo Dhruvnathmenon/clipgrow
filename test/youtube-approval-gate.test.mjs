@@ -95,6 +95,12 @@ test('OAuth start refuses to begin without an approved request, even hit directl
 
 test('OAuth start proceeds to Google once the request is confirmed', async () => {
   const env = seedEnv();
+  // The video review is part of the gate now: the request being confirmed is
+  // necessary but no longer enough on its own.
+  await env.DB.prepare(
+    `INSERT INTO campaign_applications (clipper_id, campaign_id, attempt, status, created_at, reviewed_at)
+     VALUES (1, 1, 1, 'approved', ?, ?)`
+  ).bind(NOW, NOW).run();
   await env.DB.prepare(
     `INSERT INTO tester_requests (clipper_id, ig_username, identifier, platform, status, campaign_id, requested_at)
      VALUES (1, '@mychannel', '@mychannel', 'youtube', 'confirmed', 1, ?)`

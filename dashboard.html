@@ -713,11 +713,10 @@
       const joined=campaigns.filter(c=>c.participation&&c.participation.status!=='kicked');
       document.getElementById('n-camp').textContent=joined.length;
 
-      // While the video-review gate is on, the Campaigns tab is the onboarding
-      // UI (cards, Step 1 review, submission). While it is off -- the default --
-      // this tab is exactly what it always was. The server sends the flag, so
-      // what is shown and what is enforced cannot disagree.
-      if(resp.applications_gate && window.CGApps){
+      // The Campaigns tab is the onboarding UI: cards, the Step 1 video review,
+      // submission. The old list below is only a fallback if the component
+      // script failed to load, so a network hiccup never leaves the tab blank.
+      if(window.CGApps){
         mountOnboarding(resp);
       } else {
         document.getElementById('camp-list').innerHTML=campaigns.length

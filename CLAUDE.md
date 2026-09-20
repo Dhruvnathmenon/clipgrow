@@ -34,3 +34,19 @@ financial history — it must never be silently overwritten. See
 `npm test` (schema-validated SQL, module integrity, page-function checks —
 these catch real bug classes that have shipped before). Then
 `npx wrangler deploy`.
+
+## Deploying a change that touches the database
+
+Apply the migration to production BEFORE `npx wrangler deploy`, never after.
+New code that reads a column or table the live database does not have breaks
+every request that touches it (this caused a day-long outage once). Check
+first with a read-only query, e.g.
+`npx wrangler d1 execute clipgrow --remote --json --command "SELECT name FROM pragma_table_info('campaigns')"`.
+
+## Video review (campaign onboarding)
+
+Always on -- there is no switch. A clipper must get a video approved on a
+campaign before connecting an account to it (`src/applications.js`; enforced in
+`canConnect` and the access-request route). Uploads go to the founder's Google
+Drive through `src/drive.js`; if uploads fail, run **Check Google Drive** in the
+admin Campaigns tab -- it reports exactly which link in the chain is broken.

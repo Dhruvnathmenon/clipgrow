@@ -30,10 +30,6 @@ function seedEnv() {
                   allowed_platforms: 'instagram' }],
     participations: [{ id: 1, clipper_id: 1, campaign_id: 1, status: 'active', joined_at: NOW }]
   });
-  // These tests are about the gate itself, so it is on. (The migration seeds
-  // the flag row as off; the off state has its own tests in
-  // test/applications-gate.test.mjs.)
-  db._sqlite.exec("UPDATE feature_flags SET enabled = 1 WHERE key = 'applications_gate'");
   return { DB: db, SESSION_SECRET, ADMIN_PASSWORD: 'admin-pass' };
 }
 

@@ -1,7 +1,6 @@
 import { now } from './db.js';
 import { platformLabel } from './platforms.js';
 import { applicationState } from './applications.js';
-import { flagEnabled, APPLICATIONS_GATE } from './feature-flags.js';
 
 // Account onboarding gate.
 //
@@ -207,17 +206,15 @@ export async function canConnect(db, clipperId, campaignId, platform) {
   // that clipper a working connect link with no video ever reviewed. This is
   // the one place every OAuth start passes through, so it is the one place
   // the rule cannot be walked around.
-  if (await flagEnabled(db, APPLICATIONS_GATE)) {
-    const app = await applicationState(db, clipperId, campaignId);
-    if (!app.may_connect) {
-      return {
-        allowed: false, state: 'needs_video',
-        title: 'Step 1 — video review',
-        reason: app.state === 'pending'
-          ? 'Your video is still with a reviewer. You can connect your account once it is approved.'
-          : 'Submit your video for this campaign and get it approved before connecting an account.'
-      };
-    }
+  const app = await applicationState(db, clipperId, campaignId);
+  if (!app.may_connect) {
+    return {
+      allowed: false, state: 'needs_video',
+      title: 'Step 1 — video review',
+      reason: app.state === 'pending'
+        ? 'Your video is still with a reviewer. You can connect your account once it is approved.'
+        : 'Submit your video for this campaign and get it approved before connecting an account.'
+    };
   }
   if (req && req.status === 'confirmed') return { allowed: true };
 

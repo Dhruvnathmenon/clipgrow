@@ -26,8 +26,6 @@ import { PLATFORMS, campaignPlatforms, configuredPlatforms } from '../platforms.
 import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagram.js';
 import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
-import { flagEnabled, setFlag, APPLICATIONS_GATE } from '../feature-flags.js';
-import { grandfatherExisting, gatePreview } from '../applications.js';
 import { driveHealth } from '../drive.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
@@ -833,32 +831,6 @@ export async function handleAdmin(request, env, url) {
     return json(await driveHealth(env));
   }
 
-  // ------------------------------------------- video-review gate (kill switch)
-  // Admin-only on purpose: a moderator reviews videos but does not decide
-  // whether the review exists.
-  if (pathname === '/api/admin/applications-gate' && method === 'GET') {
-    return json({ enabled: await flagEnabled(env.DB, APPLICATIONS_GATE), preview: await gatePreview(env.DB) });
-  }
-  if (pathname === '/api/admin/applications-gate' && method === 'POST') {
-    const { enabled } = await readJson(request);
-    if (typeof enabled !== 'boolean') return err('enabled must be true or false');
-    let carried = null;
-    if (enabled) {
-      // Carry everyone already past step 1 BEFORE the flag flips, so there is
-      // no instant where the gate is live and an existing clipper is not yet
-      // covered. If this throws the flag is never set, and nothing changed.
-      carried = await grandfatherExisting(env.DB);
-    }
-    await setFlag(env.DB, APPLICATIONS_GATE, enabled, 'admin');
-    await logAction(env.DB, {
-      staffType: 'admin', staffId: 0, staffName: 'Admin',
-      action: enabled ? 'applications_gate_on' : 'applications_gate_off',
-      targetType: 'setting', targetId: 0,
-      targetLabel: carried ? `${carried.carried_over} participations carried over` : null
-    });
-    return json({ ok: true, enabled, ...(carried || {}) });
-  }
-
   if (pathname === '/api/admin/campaigns' && method === 'GET') {
     const { results } = await env.DB.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();
     const out = [];
@@ -897,16 +869,12 @@ export async function handleAdmin(request, env, url) {
     // own self-promo campaigns -- no client, no fee, clipper payouts are a
     // real cost. See finance.js's header comment for the full split.
     const campaignKind = payload.campaign_kind === 'internal' ? 'internal' : 'client';
-    // What a clipper works from. Required once the video review is switched
-    // on -- a Step 1 page with nothing to copy from is a review nobody can
-    // pass -- but optional before that, so the old admin form keeps working
-    // while the feature is still dark.
+    // What a clipper works from. Always required: a Step 1 page with nothing
+    // to copy from is a review nobody can pass.
     const sources = parseSources(payload);
     if (sources.error) return err(sources.error);
-    if (await flagEnabled(env.DB, APPLICATIONS_GATE)) {
-      if (!sources.reference.length) return err('Add at least one reference video (a Drive link or an already-posted video).');
-      if (!sources.raw.length) return err('Add at least one raw footage source (a Drive link or an official page).');
-    }
+    if (!sources.reference.length) return err('Add at least one reference video (a Drive link or an already-posted video).');
+    if (!sources.raw.length) return err('Add at least one raw footage source (a Drive link or an official page).');
     const res = await env.DB.prepare(
       `INSERT INTO campaigns (name, description, cpm, budget, min_views, status, model, blueprint_json, allowed_platforms, campaign_kind, reference_links, raw_sources, created_at)
        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`

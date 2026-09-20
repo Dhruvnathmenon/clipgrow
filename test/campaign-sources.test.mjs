@@ -149,14 +149,8 @@ async function adminCall(env, path, method, body) {
 }
 const base = { name: 'New', cpm: 40, budget: 1000 };
 
-test('with the gate off a campaign can still be created without sources', async () => {
+test('a new campaign needs a reference video and a raw footage source', async () => {
   const env = world();
-  assert.equal((await adminCall(env, '/api/admin/campaigns', 'POST', base)).status, 201);
-});
-
-test('with the gate on, a new campaign needs a reference video and a raw footage source', async () => {
-  const env = world();
-  env.DB._sqlite.exec("UPDATE feature_flags SET enabled = 1");
 
   let res = await adminCall(env, '/api/admin/campaigns', 'POST', base);
   assert.equal(res.status, 400);
