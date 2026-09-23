@@ -28,6 +28,7 @@ import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { driveHealth } from '../drive.js';
 import { discordHealth } from '../discord.js';
+import { reviewerScorecard, reviewLog } from '../applications.js';
 import { selectByIds } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
@@ -582,6 +583,20 @@ export async function handleAdmin(request, env, url) {
     // uniform list. The Moderators management table filters that row out
     // client-side, since Disable/Reset Pass make no sense for it.
     return json({ moderators: await moderatorActivity(env.DB) });
+  }
+
+  // Step 1 verdicts and who gave them, so an admin can see which moderator let
+  // someone in and what became of them (later_removed). Read-only.
+  if (pathname === '/api/admin/applications' && method === 'GET') {
+    const q = url.searchParams;
+    const [score, log] = await Promise.all([
+      reviewerScorecard(env.DB),
+      reviewLog(env.DB, {
+        status: q.get('status') || 'all', reviewer: q.get('reviewer') || '',
+        campaignId: q.get('campaign_id'), limit: q.get('limit'), offset: q.get('offset')
+      })
+    ]);
+    return json({ ...score, log });
   }
 
   if (pathname === '/api/admin/moderators' && method === 'POST') {

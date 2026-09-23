@@ -246,6 +246,7 @@
       <button class="tab" data-v="clients" draggable="true" onclick="showView('clients',this)">Clients</button>
       <button class="tab" data-v="testers" draggable="true" onclick="showView('testers',this)">Authentication <span class="tab-count" id="auth-count"></span></button>
       <button class="tab" data-v="moderators" draggable="true" onclick="showView('moderators',this)">Moderators</button>
+      <button class="tab" data-v="applications" draggable="true" onclick="showView('applications',this)">Video Applications</button>
       <button class="tab" data-v="review" draggable="true" onclick="showView('review',this)">Video Review</button>
       <button class="tab" data-v="flagvideo" draggable="true" onclick="showView('flagvideo',this)">Flag Video</button>
       <button class="tab" data-v="synchealth" draggable="true" onclick="showView('synchealth',this)">Sync Health <span class="tab-count" id="sync-count"></span></button>
@@ -581,6 +582,32 @@
         <div class="table-wrap"><table>
           <thead><tr><th>Moderator</th><th>Status</th><th>Today</th><th>Lifetime Tick</th><th>Lifetime Cross</th><th>Lifetime Skip</th><th>Actions</th></tr></thead>
           <tbody id="moderators-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- VIDEO APPLICATIONS: step-1 verdicts and who gave them -->
+    <div class="view" id="v-applications">
+      <div class="panel">
+        <h2 class="panel-title">Who reviewed what</h2>
+        <p class="note" style="margin-bottom:1rem">Every step-1 verdict by reviewer. <b>Approved, later removed</b> counts approvals whose clipper was afterwards kicked from that campaign or has an account that is no longer active. It is the number to look at if the wrong people are getting in. Click a row to see only that reviewer.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Reviewer</th><th>Approved</th><th>Rejected</th><th>Approval rate</th><th>Approved, later removed</th><th>Last review</th></tr></thead>
+          <tbody id="apps-score"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+        <p class="note" id="apps-carried" style="margin-top:.6rem"></p>
+      </div>
+      <div class="panel">
+        <h2 class="panel-title">Verdicts</h2>
+        <div class="actions" style="margin-bottom:.8rem;gap:.5rem;flex-wrap:wrap">
+          <select class="form-control" id="apps-status" style="max-width:11rem" onchange="loadApplicationsAudit()">
+            <option value="all">All verdicts</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="pending">Waiting</option>
+          </select>
+          <select class="form-control" id="apps-reviewer" style="max-width:14rem" onchange="loadApplicationsAudit()"><option value="">Every reviewer</option></select>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>When</th><th>Clipper</th><th>Campaign</th><th>Try</th><th>Verdict</th><th>Reviewer</th><th>Their note</th><th>Standing now</th></tr></thead>
+          <tbody id="apps-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -966,6 +993,7 @@
       if(name==='clients') loadClients();
       if(name==='testers') loadTesters();
       if(name==='moderators') loadModerators();
+      if(name==='applications') loadApplicationsAudit();
       if(name==='review') loadReviewQueue();
       if(name==='synchealth') loadSyncHealth();
       if(name==='platformusage') loadPlatformUsage();
@@ -2280,6 +2308,43 @@
           </div></td>
         </tr>`).join(''):'<tr><td colspan="7" class="empty">No moderators yet.</td></tr>';
     }
+    /* ── Video Applications: who reviewed what ── */
+    const APP_WHEN=t=>t?new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
+    function appStanding(r){
+      if(r.clipper_status==='deleted') return '<span class="badge disabled">Account deleted</span>';
+      if(r.clipper_status!=='active') return '<span class="badge disabled">Account disabled</span>';
+      if(r.participation_status==='kicked') return '<span class="badge disabled">Removed from campaign</span>';
+      if(r.status==='approved') return r.connected?'<span class="badge active">Connected</span>':'<span class="badge">Not connected yet</span>';
+      return '<span class="muted">—</span>';
+    }
+    window.loadApplicationsAudit=async function(){
+      const status=document.getElementById('apps-status').value;
+      const sel=document.getElementById('apps-reviewer');
+      const reviewer=sel.value;
+      try{
+        const d=await api('/api/admin/applications?limit=100&status='+encodeURIComponent(status)+(reviewer?'&reviewer='+encodeURIComponent(reviewer):''));
+        const key=r=>r.reviewer_type+':'+(r.reviewer_id==null?'':r.reviewer_id);
+        // Keep the dropdown in step with the scorecard, without losing the current choice.
+        sel.innerHTML='<option value="">Every reviewer</option>'+d.reviewers.map(r=>`<option value="${esc(key(r))}">${esc(r.reviewer_name||'Unknown')}</option>`).join('');
+        sel.value=reviewer;
+        document.getElementById('apps-score').innerHTML=d.reviewers.length?d.reviewers.map(r=>{
+          const total=r.approved+r.rejected, rate=total?Math.round(100*r.approved/total):0;
+          const bad=r.later_removed>0;
+          return `<tr style="cursor:pointer" onclick="document.getElementById('apps-reviewer').value='${esc(key(r))}';loadApplicationsAudit()">
+            <td><span class="handle">${esc(r.reviewer_name||'Unknown')}</span><div class="muted" style="font-size:.72rem">${esc(r.reviewer_type)}</div></td>
+            <td>${num(r.approved)}</td><td>${num(r.rejected)}</td><td>${rate}%</td>
+            <td>${bad?`<b style="color:var(--red)">${num(r.later_removed)}</b> of ${num(r.approved)}`:'0'}</td>
+            <td>${APP_WHEN(r.last_at)}</td></tr>`;}).join(''):'<tr><td colspan="6" class="empty">No videos have been reviewed yet.</td></tr>';
+        document.getElementById('apps-carried').textContent=d.carried_over?`${d.carried_over} approvals were carried over automatically when video review started. Nobody reviewed those, so they are not counted above.`:'';
+        document.getElementById('apps-body').innerHTML=d.log.length?d.log.map(r=>`<tr>
+          <td>${APP_WHEN(r.reviewed_at||r.created_at)}</td>
+          <td>${esc(r.clipper_name)}</td><td>${esc(r.campaign_name)}</td><td>${r.attempt}</td>
+          <td><span class="badge ${r.status==='approved'?'active':(r.status==='rejected'?'disabled':'')}">${r.status==='pending'?'waiting':esc(r.status)}</span></td>
+          <td>${r.reviewer_name?esc(r.reviewer_name):'<span class="muted">—</span>'}</td>
+          <td style="max-width:22rem;white-space:normal">${r.reviewer_note?esc(r.reviewer_note):'<span class="muted">—</span>'}</td>
+          <td>${appStanding(r)}</td></tr>`).join(''):'<tr><td colspan="8" class="empty">Nothing matches.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    };
     window.setModerator=async function(id,status){
       try{ await api('/api/admin/moderators/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Updated'); loadModerators(); }
       catch(e){ toast(e.message,true); }

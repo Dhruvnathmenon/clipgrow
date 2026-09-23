@@ -356,3 +356,82 @@ export async function grandfatherExisting(db) {
   ).bind(now(), now()).run();
   return { carried_over: (res.meta && res.meta.changes) || 0 };
 }
+
+/* ---------------------------------------------------------------- admin audit
+ *
+ * The admin's view of Step 1: every verdict, and who gave it. A moderator's
+ * approval is a promise that the person is a good fit, so the admin needs to
+ * see it next to what happened afterwards -- which is what `later_removed`
+ * counts: approvals whose clipper was later kicked from that campaign or whose
+ * account is no longer active. It is read from the rows as they are now, not
+ * stored, so it cannot drift from what actually happened.
+ *
+ * Carried-over approvals (reviewer_type = 'system') are left out of both: nobody
+ * reviewed those, so they say nothing about any moderator.
+ */
+
+// Shared so the scorecard and the log can never disagree on what counts.
+const REMOVED_SQL = `(
+    EXISTS (SELECT 1 FROM participations p
+             WHERE p.clipper_id = a.clipper_id AND p.campaign_id = a.campaign_id AND p.status = 'kicked')
+    OR EXISTS (SELECT 1 FROM clippers c WHERE c.id = a.clipper_id AND c.status != 'active')
+  )`;
+
+export async function reviewerScorecard(db) {
+  const { results } = await db.prepare(
+    `SELECT a.reviewer_type, a.reviewer_id, MAX(a.reviewer_name) AS reviewer_name,
+            SUM(CASE WHEN a.status = 'approved' THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN a.status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+            SUM(CASE WHEN a.status = 'approved' AND ${REMOVED_SQL} THEN 1 ELSE 0 END) AS later_removed,
+            MAX(a.reviewed_at) AS last_at
+       FROM campaign_applications a
+      WHERE a.status IN ('approved', 'rejected') AND COALESCE(a.reviewer_type, '') != 'system'
+      GROUP BY a.reviewer_type, a.reviewer_id
+      ORDER BY last_at DESC`
+  ).all();
+  const carried = await db.prepare(
+    "SELECT COUNT(*) AS n FROM campaign_applications WHERE reviewer_type = 'system'"
+  ).first();
+  return { reviewers: results || [], carried_over: (carried && carried.n) || 0 };
+}
+
+/**
+ * One page of verdicts, newest first. `reviewer` is 'type:id' (e.g. 'moderator:3'),
+ * the same key the scorecard groups on, so a click on a scorecard row filters here.
+ */
+export async function reviewLog(db, { status = 'all', reviewer = '', campaignId = null, limit = 50, offset = 0 } = {}) {
+  const where = ["COALESCE(a.reviewer_type, '') != 'system'"];
+  const bind = [];
+  if (status === 'approved' || status === 'rejected' || status === 'pending') {
+    where.push('a.status = ?'); bind.push(status);
+  }
+  const m = /^(moderator|admin):(\d*)$/.exec(String(reviewer || ''));
+  if (m) {
+    where.push('a.reviewer_type = ?'); bind.push(m[1]);
+    if (m[2]) { where.push('a.reviewer_id = ?'); bind.push(Number(m[2])); }
+    else where.push('a.reviewer_id IS NULL');
+  }
+  if (campaignId) { where.push('a.campaign_id = ?'); bind.push(Number(campaignId)); }
+
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const off = Math.max(Number(offset) || 0, 0);
+  const { results } = await db.prepare(
+    `SELECT a.id, a.clipper_id, a.campaign_id, a.attempt, a.status,
+            a.reviewer_type, a.reviewer_id, a.reviewer_name, a.reviewer_note,
+            a.reviewed_at, a.created_at,
+            COALESCE(cl.display_name, cl.username) AS clipper_name, cl.status AS clipper_status,
+            ca.name AS campaign_name,
+            p.status AS participation_status,
+            CASE WHEN EXISTS (SELECT 1 FROM participation_accounts pa WHERE pa.participation_id = p.id)
+                 THEN 1 ELSE 0 END AS connected,
+            CASE WHEN a.status = 'approved' AND ${REMOVED_SQL} THEN 1 ELSE 0 END AS later_removed
+       FROM campaign_applications a
+       JOIN clippers cl ON cl.id = a.clipper_id
+       JOIN campaigns ca ON ca.id = a.campaign_id
+       LEFT JOIN participations p ON p.clipper_id = a.clipper_id AND p.campaign_id = a.campaign_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY COALESCE(a.reviewed_at, a.created_at) DESC, a.id DESC
+      LIMIT ? OFFSET ?`
+  ).bind(...bind, lim, off).all();
+  return results || [];
+}

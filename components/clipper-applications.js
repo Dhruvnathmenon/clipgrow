@@ -154,12 +154,10 @@
     function stepper(v) {
       const s1 = v.key === 'approved' || v.key === 'live' ? 'done' : 'on';
       const s2 = v.key === 'live' ? 'done' : (v.key === 'approved' ? 'on' : '');
-      const s3 = v.key === 'live' ? 'on' : '';
       const sub = (k, on, done) => done ? 'Done' : (on ? 'You are here' : 'Locked');
       return `<div class="cg-steps">
         <div class="step ${s1}"><div class="step-n">Step 1</div><div class="step-t">Video review</div><div class="step-s">${sub(1, s1 === 'on', s1 === 'done')}</div></div>
         <div class="step ${s2}"><div class="step-n">Step 2</div><div class="step-t">Connect your account</div><div class="step-s">${sub(2, s2 === 'on', s2 === 'done')}</div></div>
-        <div class="step ${s3}"><div class="step-n">Step 3</div><div class="step-t">Post &amp; earn</div><div class="step-s">${s3 ? 'You are earning' : 'Locked'}</div></div>
       </div>`;
     }
 
