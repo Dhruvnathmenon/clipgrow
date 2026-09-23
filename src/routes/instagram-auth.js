@@ -2,6 +2,7 @@ import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
+import { discordRequired } from '../discord.js';
 import { logError } from '../error-log.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, exchangeForLongLivedToken, fetchProfile, IgError
@@ -115,7 +116,7 @@ export async function handleInstagramAuth(request, env, url) {
     // plain link a clipper could have kept from an earlier session. Without
     // approval Instagram would reject them anyway -- this just replaces an
     // opaque platform error with an explanation of what to do next.
-    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'instagram');
+    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'instagram', { requireDiscord: discordRequired(env) });
     if (!gate.allowed) {
       return failure(env, session, campaignId, new IgError('NOT_APPROVED', gate.title, gate.reason));
     }

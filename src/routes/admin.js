@@ -27,6 +27,7 @@ import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagra
 import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { driveHealth } from '../drive.js';
+import { discordHealth } from '../discord.js';
 import { selectByIds } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
@@ -830,6 +831,10 @@ export async function handleAdmin(request, env, url) {
   // Step-by-step check of Google Drive: secrets, the refresh token, both folders.
   if (pathname === '/api/admin/drive-health' && method === 'GET') {
     return json(await driveHealth(env));
+  }
+
+  if (pathname === '/api/admin/discord-health' && method === 'GET') {
+    return json(await discordHealth(env));
   }
 
   if (pathname === '/api/admin/campaigns' && method === 'GET') {

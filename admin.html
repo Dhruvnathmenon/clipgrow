@@ -274,6 +274,12 @@
         <button class="btn btn-sm" onclick="checkDrive(this)">Check Google Drive</button>
         <div id="drive-result" style="margin-top:.9rem"></div>
       </div>
+      <div class="panel" id="discord-panel">
+        <h2 class="panel-title">Discord (connect &amp; server access)</h2>
+        <p class="note" style="margin-bottom:.8rem">Checks every link Discord connecting depends on. Until all four Discord settings are added, connecting stays off and nothing requires it.</p>
+        <button class="btn btn-sm" onclick="checkDiscord(this)">Check Discord</button>
+        <div id="discord-result" style="margin-top:.9rem"></div>
+      </div>
       <div class="panel">
         <h2 class="panel-title">All Campaigns</h2>
         <div class="table-wrap"><table>
@@ -1790,6 +1796,18 @@
         const r=await api('/api/admin/drive-health');
         el.innerHTML=(r.ok?'<div class="badge active" style="font-size:.85rem;margin-bottom:.6rem">ALL GOOD</div>':'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem;color:var(--red)">NEEDS ATTENTION</div>')
           +r.checks.map(c=>`<div style="padding:.5rem 0;border-top:1px solid var(--border)"><strong style="color:${c.ok?'var(--neon)':'var(--red)'}">${c.ok?'✓':'✗'} ${esc(c.name)}</strong>${c.detail?`<div class="note" style="margin-top:.2rem;white-space:pre-wrap">${esc(c.detail)}</div>`:''}</div>`).join('');
+      }catch(e){ el.textContent='Could not run the check: '+e.message; }
+      finally{ btn.disabled=false; }
+    };
+
+    window.checkDiscord=async function(btn){
+      const el=document.getElementById('discord-result'); btn.disabled=true; el.textContent='Checking…';
+      try{
+        const r=await api('/api/admin/discord-health');
+        const head=r.ok?'<div class="badge active" style="font-size:.85rem;margin-bottom:.6rem">ALL GOOD</div>'
+          :r.configured?'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem;color:var(--red)">NEEDS ATTENTION</div>'
+          :'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem">NOT SWITCHED ON</div>';
+        el.innerHTML=head+r.checks.map(c=>`<div style="padding:.5rem 0;border-top:1px solid var(--border)"><strong style="color:${c.ok?'var(--neon)':'var(--red)'}">${c.ok?'✓':'✗'} ${esc(c.name)}</strong>${c.detail?`<div class="note" style="margin-top:.2rem;white-space:pre-wrap">${esc(c.detail)}</div>`:''}${c.fix?`<div class="note" style="margin-top:.2rem;color:var(--red)">${esc(c.fix)}</div>`:''}</div>`).join('');
       }catch(e){ el.textContent='Could not run the check: '+e.message; }
       finally{ btn.disabled=false; }
     };

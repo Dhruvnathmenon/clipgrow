@@ -197,7 +197,21 @@ export async function submitAccessRequest(db, { clipperId, campaignId, platform,
  * simply type. An unapproved attempt would fail at the platform anyway -- this
  * just makes it fail with an explanation instead of a raw platform error.
  */
-export async function canConnect(db, clipperId, campaignId, platform) {
+export async function canConnect(db, clipperId, campaignId, platform, { requireDiscord = false } = {}) {
+  // Discord comes first: a verified identity is what one-account-per-person and
+  // every Discord message are keyed on. Only asked for once Discord linking is
+  // switched on (the caller passes discordConfigured(env)), so an unconfigured
+  // deployment never strands anyone at a step it cannot offer.
+  if (requireDiscord) {
+    const row = await db.prepare('SELECT discord_user_id FROM clippers WHERE id = ?').bind(clipperId).first();
+    if (!row || !row.discord_user_id) {
+      return {
+        allowed: false, state: 'needs_discord',
+        title: 'Connect your Discord',
+        reason: 'Connect your Discord account first. It takes a few seconds and adds you to the ClipGrow server.'
+      };
+    }
+  }
   const req = await getAccessRequest(db, clipperId, campaignId, platform);
 
   // The video review is checked HERE as well as when the request is filed.

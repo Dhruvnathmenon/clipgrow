@@ -24,7 +24,18 @@
     // byte-identical redirect_uri. Instagram compares the two and rejects the
     // exchange on any mismatch ("Error validating verification code"). Must
     // exactly equal the Redirect URI registered in the Meta app.
-    "IG_REDIRECT_URI": "https://clipgrow.in/api/auth/instagram/callback"
+    "IG_REDIRECT_URI": "https://clipgrow.in/api/auth/instagram/callback",
+    // How far Discord linking is switched on: "off" (nothing shown or enforced),
+    // "optional" (Connect Discord is offered, nothing is refused), "required"
+    // (joining, sending a video and connecting an account need it). Move up one
+    // step at a time: "optional" once Check Discord in the admin Campaigns tab is
+    // all green AND the redirect below is registered on the Discord application;
+    // "required" once enough clippers have linked. Committed on purpose, so each
+    // step is a reviewable, revertable deploy rather than a dashboard click.
+    "DISCORD_LINK": "off",
+    // Must exactly equal a Redirect registered on the Discord application
+    // (Developer Portal > OAuth2 > Redirects).
+    "DISCORD_REDIRECT_URI": "https://clipgrow.in/api/auth/discord/callback"
   },
   "d1_databases": [
     {

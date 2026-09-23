@@ -2,6 +2,7 @@ import { requireClipper, signSession, verifySession } from '../auth.js';
 import { getParticipation, getCampaignById, now, linkParticipationAccount, findAccountClash, approvedAutoImportIntent } from '../db.js';
 import { campaignPlatforms } from '../platforms.js';
 import { canConnect } from '../access.js';
+import { discordRequired } from '../discord.js';
 import { logError } from '../error-log.js';
 import {
   getAuthorizeUrl, exchangeCodeForToken, fetchChannel, YtError, YT_ERRORS
@@ -96,7 +97,7 @@ export async function handleYoutubeAuth(request, env, url) {
     // Enforced here and not only by hiding the button, for the same reason
     // instagram-auth.js enforces it: this URL is a plain link a clipper
     // could have kept from an earlier session or simply typed.
-    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'youtube');
+    const gate = await canConnect(env.DB, session.sub, Number(campaignId), 'youtube', { requireDiscord: discordRequired(env) });
     if (!gate.allowed) {
       return failure(env, session, campaignId, new YtError('NOT_APPROVED', gate.title, gate.reason));
     }

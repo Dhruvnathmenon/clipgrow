@@ -18,6 +18,7 @@
 .cga .cg-btn-danger:hover:not(:disabled){background:rgba(255,77,77,.1);border-color:var(--c-red);color:var(--c-red)}
 .cga .cg-btn-sm{font-size:.76rem;padding:.4rem .8rem}
 .cga .cg-btn:disabled{opacity:.4;cursor:not-allowed}
+.cga a.cg-btn{display:inline-block;text-decoration:none;cursor:pointer}
 .cga .cg-btn:focus-visible,.cga .camp:focus-visible,.cga .cg-tab:focus-visible,.cga .drop:focus-visible{outline:2px solid var(--c-neon);outline-offset:2px}
 .cga .cg-muted{color:var(--c-muted-l)}
 .cga .cg-sec-title{font-size:.72rem;letter-spacing:.11em;text-transform:uppercase;color:var(--c-muted-l);font-weight:700;margin:0 0 .8rem}

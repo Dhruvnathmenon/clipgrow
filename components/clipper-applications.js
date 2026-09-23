@@ -84,6 +84,9 @@
   function mount(el, opts) {
     const api = opts.api;
     const onConnect = opts.onConnect || (() => {});
+    // Whether the clipper still has to connect Discord, read live from the host so
+    // it is current the moment they come back from Discord.
+    const discordState = opts.discord || (() => null);
     // The host page can hand over the campaign list it already fetched, so the
     // first paint does not cost a second identical request.
     let initial = opts.initial || null;
@@ -269,8 +272,16 @@
       const app = c.application || { state: 'none', rejections: 0, attempts_left: MAX_ATTEMPTS, may_submit: true, history: [] };
       const joined = !!c.participation;
       let body = '';
+      const dc = discordState();
+      const needDiscord = !!(dc && dc.required && !dc.linked) && v.key !== 'live' && v.key !== 'ended';
 
-      if (!joined) {
+      if (needDiscord) {
+        // Step 0, ahead of everything else: joining, sending a video and connecting
+        // an account all need it, so nothing else is offered until it is done.
+        body = `<div class="cg-panel"><h3>Connect your Discord first</h3>
+          <div class="sub">One quick step before you start. Connecting adds you to the ClipGrow server and lets us reach you about this campaign. It takes a few seconds and you only do it once.</div>
+          <div class="row-actions"><a class="cg-btn cg-btn-primary" id="cga-discord" href="/api/auth/discord/start?campaign_id=${c.id}">Connect Discord</a></div></div>`;
+      } else if (!joined) {
         body = `<div class="cg-panel"><h3>Join this campaign</h3><div class="sub">Joining is free. You'll send a short video for review before you connect an account.</div>
           <button class="cg-btn cg-btn-primary" id="cga-join">Join campaign</button><div class="err" id="cga-err" role="alert" hidden></div></div>`;
       } else if (v.key === 'live') {

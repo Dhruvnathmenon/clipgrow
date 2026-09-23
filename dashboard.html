@@ -361,7 +361,7 @@
     }
     .mob-head { display:none; justify-content:space-between; align-items:center; margin-bottom:1.2rem; padding-bottom:.9rem; border-bottom:1px solid var(--border); }
   </style>
-  <link rel="stylesheet" href="/components/applications.css?v=2">
+  <link rel="stylesheet" href="/components/applications.css?v=3">
 </head>
 <body>
 
@@ -575,6 +575,7 @@
           <div class="form-group"><label for="pd-legal">Legal full name</label><input type="text" id="pd-legal" data-f="legalName" placeholder="As it appears on your ID" autocomplete="name" /><p class="fld-err" id="pd-e-legalName"></p></div>
           <div class="form-group"><label for="pd-discord">Discord username</label><input type="text" id="pd-discord" data-f="discordUsername" placeholder="e.g. yourname" autocapitalize="off" autocorrect="off" spellcheck="false" />
             <p class="note" style="margin-top:.35rem">A backup way for us to reach you if a WhatsApp message does not land. Your @username, not your display name — find it under Discord Settings → My Account.</p>
+            <div id="pd-discord-link" style="display:none;margin-top:.5rem;font-size:.8rem"></div>
             <p class="fld-err" id="pd-e-discordUsername"></p>
           </div>
           <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
@@ -589,7 +590,7 @@
 
   <div class="toast" id="toast"></div>
 
-  <script src="/components/clipper-applications.js?v=2"></script>
+  <script src="/components/clipper-applications.js?v=3"></script>
   <script>
     const money=n=>'₹'+Number(n||0).toLocaleString('en-IN');
     // Plain counts (views, videos, etc.) get standard 3-digit grouping, not
@@ -745,6 +746,7 @@
         // already handles the access request, admin approval and OAuth.
         onConnect:c=>openCampaignDetail(c.id),
         onOpenLive:c=>openCampaignDetail(c.id),
+        discord:()=>ME&&ME.clipper?ME.clipper.discord:null,
         onData:list=>{
           CAMPAIGNS=list;
           document.getElementById('n-camp').textContent=list.filter(c=>c.participation&&c.participation.status!=='kicked').length;
@@ -1469,6 +1471,15 @@
       const c=(ME&&ME.clipper)||{};
       Object.entries(PD_FIELDS).forEach(([field,[id,key]])=>{ document.getElementById(id).value=c[key]||''; pdShowError(field,''); });
       document.getElementById('pd-error').style.display='none';
+      // A verified Discord replaces the typed handle. Offered as soon as connecting
+      // works, before it is ever demanded, so people can link at their own pace.
+      const dl=document.getElementById('pd-discord-link'), dc=c.discord;
+      if(dc&&dc.available){
+        dl.style.display='block';
+        dl.innerHTML=dc.linked
+          ?'<span style="color:var(--neon);font-weight:700">✓ Verified</span> <span class="note">'+esc('@'+(dc.handle||''))+' is linked to your account.</span>'
+          :'<a class="btn btn-ghost btn-sm" href="/api/auth/discord/start">Connect Discord (verified)</a> <span class="note">Adds you to the ClipGrow server and confirms this is really you.</span>';
+      } else { dl.style.display='none'; dl.innerHTML=''; }
       const title=document.getElementById('pd-title'), intro=document.getElementById('pd-intro');
       if(pdRequired){
         // Blocking: no Cancel, no click-outside, no Escape. It names exactly
@@ -1590,10 +1601,18 @@
       // YouTube FAILURE showed nothing at all: the msg/fix the server built
       // were discarded, and the stale query string stayed in the address bar.
       const oauth=q.get('ig')?{key:'ig',label:'Instagram',thing:'Reels'}
-                 :q.get('yt')?{key:'yt',label:'YouTube',thing:'Shorts'}:null;
+                 :q.get('yt')?{key:'yt',label:'YouTube',thing:'Shorts'}
+                 :q.get('discord')?{key:'discord',label:'Discord'}:null;
       if(oauth){
         const state=q.get(oauth.key), handle=q.get('handle')||'';
-        if(state==='connected') ga.innerHTML=alertBox('ok',oauth.label+' connected',
+        if(oauth.key==='discord'){
+          // linked: they are in the server (or told how to join); error: say why.
+          if(state==='linked') ga.innerHTML=alertBox('ok','Discord connected',
+            (handle?'@'+handle+' is now linked to your account. ':'Your Discord is linked. ')
+            +(q.get('join')==='manual'?'We could not add you to the ClipGrow server automatically, so join it with the invite link in our announcements.':'You have been added to the ClipGrow server.'));
+          else ga.innerHTML=alertBox('bad','Discord connection failed',q.get('msg')||'Something went wrong.',q.get('fix')||'');
+        }
+        else if(state==='connected') ga.innerHTML=alertBox('ok',oauth.label+' connected',
           (oauth.key==='ig'?'@'+handle:handle)+' is now verified for that campaign. You can start posting '+oauth.thing+' to it.');
         else if(state==='error') ga.innerHTML=alertBox('bad',oauth.label+' connection failed',
           q.get('msg')||'Something went wrong.',q.get('fix')||'');

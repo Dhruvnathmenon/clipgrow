@@ -50,3 +50,12 @@ campaign before connecting an account to it (`src/applications.js`; enforced in
 `canConnect` and the access-request route). Uploads go to the founder's Google
 Drive through `src/drive.js`; if uploads fail, run **Check Google Drive** in the
 admin Campaigns tab -- it reports exactly which link in the chain is broken.
+
+## Discord connect (clipper identity)
+
+A clipper links a verified Discord account through OAuth run inside their logged-in
+session (`src/routes/discord-auth.js`); it never creates a session, so passwords stay
+the only way in. How far it is switched on is `DISCORD_LINK` in `wrangler.jsonc`:
+`off` -> `optional` -> `required`. Move up one step per deploy, and only after **Check
+Discord** (admin Campaigns tab) is all green. The Discord secrets can exist while it is
+`off`; never enforce on their presence alone.

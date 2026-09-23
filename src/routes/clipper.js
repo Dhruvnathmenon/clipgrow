@@ -29,6 +29,7 @@ import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
+import { discordAvailable, discordRequired as discordRequiredFor } from '../discord.js';
 import {
   driveConfigured, createUploadSession, verifyUploadedFile, driveFileName,
   DriveError, MAX_UPLOAD_BYTES, ALLOWED_MIME
@@ -118,6 +119,16 @@ export async function handleClipper(request, env, url) {
     ? null
     : err('Complete your details first (email, contact number, UPI, legal name and Discord). Open Your Details in the sidebar.', 403);
 
+  // The same idea for a verified Discord identity, but only once the gate has
+  // been switched on (DISCORD_LINK=required, and Discord configured):
+  // a deployment that cannot offer the step must never strand people at it. Reading and
+  // posting stay open either way, so a Discord outage or ban can never hide
+  // what someone has earned.
+  const discordRequired = discordRequiredFor(env);
+  const needsDiscord = () => (!discordRequired || me.discord_user_id)
+    ? null
+    : err('Connect your Discord first. Open your dashboard and choose Connect Discord.', 403);
+
   // ------------------------------------------------------------- profile
   if (pathname === '/api/clipper/me' && method === 'GET') {
     const [money, streak, totals] = await Promise.all([
@@ -143,7 +154,11 @@ export async function handleClipper(request, env, url) {
         // Which of the required details are missing or no longer valid, so the
         // dashboard can make the clipper fix exactly those on sign-in.
         profile_problems: profileProblems(me),
-        profile_complete: profileComplete(me)
+        profile_complete: profileComplete(me),
+        // available: connecting works, so the dashboard may offer it. required: the
+        // gate is enforced, so it must. Only the verified handle is shown -- never
+        // the id -- and nobody else ever sees any of it.
+        discord: { available: discordAvailable(env), required: discordRequired, linked: !!me.discord_user_id, handle: me.discord_handle || null }
       },
       money, streak, totals
     });
@@ -382,7 +397,7 @@ export async function handleClipper(request, env, url) {
 
   let params = matchPath('/api/clipper/campaigns/:id/join', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly() || needsProfile();
+    const blocked = blockIfReadOnly() || needsProfile() || needsDiscord();
     if (blocked) return blocked;
     const campaign = await getCampaignById(env.DB, params.id);
     if (!campaign) return err('Campaign not found', 404);
@@ -407,7 +422,7 @@ export async function handleClipper(request, env, url) {
   // rule, so this handler only enforces what is true of the campaign.
   params = matchPath('/api/clipper/campaigns/:id/applications', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly() || needsProfile();
+    const blocked = blockIfReadOnly() || needsProfile() || needsDiscord();
     if (blocked) return blocked;
 
     const campaign = await getCampaignById(env.DB, params.id);
@@ -458,7 +473,7 @@ export async function handleClipper(request, env, url) {
   // storage on uploads that can never be submitted.
   params = matchPath('/api/clipper/campaigns/:id/applications/upload-url', pathname);
   if (params && method === 'POST') {
-    const blocked = blockIfReadOnly() || needsProfile();
+    const blocked = blockIfReadOnly() || needsProfile() || needsDiscord();
     if (blocked) return blocked;
     if (!driveConfigured(env)) {
       return err('Video uploads are not configured yet. Contact the ClipGrow admin.', 503);
@@ -531,7 +546,7 @@ export async function handleClipper(request, env, url) {
   // use, so the admin can grant it access on the platform's side. The old
   // Instagram-only path is kept as an alias so a stale browser tab still works.
   if (pathname === '/api/clipper/access-request' && method === 'POST') {
-    const blocked = blockIfReadOnly() || needsProfile();
+    const blocked = blockIfReadOnly() || needsProfile() || needsDiscord();
     if (blocked) return blocked;
     const body = await readJson(request);
 
