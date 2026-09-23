@@ -1295,6 +1295,12 @@ export async function handleAdmin(request, env, url) {
       nextStatus, note != null ? note : reqRow.note, nextAutoImport,
       params.id
     ).run();
+    // A new rejection (not a note edited on one already rejected) is what starts, and
+    // lengthens, the wait before this clipper may ask again -- see src/backoff.js.
+    if (nextStatus === 'rejected' && reqRow.status !== 'rejected') {
+      await env.DB.prepare('UPDATE tester_requests SET rejections = rejections + 1, rejected_at = ? WHERE id = ?')
+        .bind(Date.now(), params.id).run();
+    }
     // The pre-plan toggle (migration 016 -- carries the choice into the
     // account created once the clipper connects) and the per-account
     // toggle in the Connected Accounts table are the same lever, not two

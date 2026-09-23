@@ -27,6 +27,7 @@ import { captureThumbnail } from '../media.js';
 import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
+import { waitText } from '../backoff.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
 import { discordAvailable, discordRequired as discordRequiredFor } from '../discord.js';
@@ -43,6 +44,9 @@ import {
 
 // Both platform modules raise errors carrying the same shape (code, message,
 // fix, needsReauth), so one responder serves both.
+// A 429 carries the standard Retry-After header, so anything that honours it does the right thing too.
+const retryHeader = r => (r && r.retry_in_ms) ? { 'Retry-After': String(Math.ceil(r.retry_in_ms / 1000)) } : {};
+
 function platformErrorResponse(e, status = 400) {
   if (e && e.code && e.fix !== undefined) {
     return json({ error: e.message, fix: e.fix, code: e.code, needs_reauth: !!e.needsReauth }, status);
@@ -503,7 +507,7 @@ export async function handleClipper(request, env, url) {
     const r = await submitApplication(env.DB, {
       clipperId, campaignId: Number(params.id), videoUrl: video_url, file
     });
-    if (r.error) return json({ error: r.error }, r.status || 400);
+    if (r.error) return json({ error: r.error, retry_in_ms: r.retry_in_ms || null }, r.status || 400, retryHeader(r));
     return json(r, 201);
   }
 
@@ -536,6 +540,12 @@ export async function handleClipper(request, env, url) {
     if (part.status === 'kicked') return err('You have been removed from this campaign.', 403);
 
     const state = await applicationState(env.DB, clipperId, campaignId);
+    if (state.retry_in_ms) {
+      // Refused before any bytes are uploaded: the wait applies to sending a new
+      // video, so there is no point letting them spend storage on one now.
+      return json({ error: `You can send another video in ${waitText(state.retry_in_ms)}.`, retry_in_ms: state.retry_in_ms },
+        429, { 'Retry-After': String(Math.ceil(state.retry_in_ms / 1000)) });
+    }
     if (!state.may_submit) {
       return err(state.state === 'pending'
         ? 'Your video is already with a reviewer.'
@@ -633,6 +643,7 @@ export async function handleClipper(request, env, url) {
     if (invalid) return err(invalid);
 
     const result = await submitAccessRequest(env.DB, { clipperId, campaignId, platform, identifier });
+    if (result.error) return json({ error: result.error, retry_in_ms: result.retry_in_ms || null }, result.status || 400, retryHeader(result));
     return json(result, 201);
   }
 

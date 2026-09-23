@@ -15,6 +15,7 @@
 
 import { now } from './db.js';
 import { deleteFile, moveToRejected, DRIVE_REJECTED_RETENTION_MS } from './drive.js';
+import { retryWindow, waitText } from './backoff.js';
 
 // Three tries per campaign, then the clipper is removed from that campaign.
 // Deliberately per campaign, not lifetime: a clipper who cannot hit one
@@ -62,17 +63,25 @@ export async function applicationState(db, clipperId, campaignId) {
   else if (rows.length) state = 'rejected';
   else state = 'none';
 
+  // After a rejection the next try has to wait, and the wait doubles each time
+  // (src/backoff.js). Measured from when the reviewer said no, not from when the
+  // clipper read it, so a slow reviewer never adds to the wait.
+  const lastRejected = rows.find(r => r.status === 'rejected') || null;
+  const wait = state === 'rejected' ? retryWindow(rejections, lastRejected && lastRejected.reviewed_at) : null;
+
   return {
     state,
     approved,
     pending,
     rejections,
+    // null when the clipper may send another video now.
+    retry_in_ms: wait ? wait.retry_in_ms : null,
     attempts_used: attemptsUsed,
     attempts_left: Math.max(0, MAX_ATTEMPTS - rejections),
     // The single question the connect-account gate asks.
     may_connect: !!approved,
     // Whether Submit should be offered at all.
-    may_submit: !approved && !pending && rejections < MAX_ATTEMPTS,
+    may_submit: !approved && !pending && rejections < MAX_ATTEMPTS && !wait,
     history: rows
   };
 }
@@ -101,6 +110,12 @@ export async function submitApplication(db, { clipperId, campaignId, videoUrl, f
   if (state.pending) return { error: 'Your video is already with a reviewer. You will hear back on this one before you can send another.', status: 409 };
   if (state.rejections >= MAX_ATTEMPTS) {
     return { error: `You have used all ${MAX_ATTEMPTS} attempts for this campaign.`, status: 403 };
+  }
+  if (state.retry_in_ms) {
+    return {
+      error: `Give it a little time before trying again. You can send another video in ${waitText(state.retry_in_ms)} -- use it to work through the reviewer's notes.`,
+      status: 429, retry_in_ms: state.retry_in_ms
+    };
   }
 
   const attempt = state.rejections + 1;

@@ -1,6 +1,7 @@
 import { now } from './db.js';
 import { platformLabel } from './platforms.js';
 import { applicationState } from './applications.js';
+import { retryWindow, waitText } from './backoff.js';
 
 // Account onboarding gate.
 //
@@ -172,6 +173,17 @@ export async function submitAccessRequest(db, { clipperId, campaignId, platform,
     // vetted and the account they connect are different ones.
     if (existing.status === 'confirmed') {
       return { ok: true, request: existing, already: true };
+    }
+    // Asked again after a rejection: the wait doubles with every rejection, so a
+    // handle cannot be re-sent over and over until one is waved through.
+    if (existing.status === 'rejected') {
+      const wait = retryWindow(existing.rejections, existing.rejected_at);
+      if (wait) {
+        return {
+          error: `That account was not approved. You can ask again in ${waitText(wait.retry_in_ms)} -- check the note from the team first.`,
+          status: 429, retry_in_ms: wait.retry_in_ms
+        };
+      }
     }
     await db.prepare(
       `UPDATE tester_requests

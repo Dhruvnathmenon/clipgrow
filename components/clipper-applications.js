@@ -105,12 +105,17 @@
       // parallel, and only for campaigns the clipper is actually in.
       await Promise.all(campaigns.filter(c => c.participation && !c.application).map(async c => {
         try { c.application = await api(`/api/clipper/campaigns/${c.id}/applications`); } catch (e) { c.application = null; }
+        // The server sends how long is left, not a clock time, so a wrong clock on the
+        // clipper's phone cannot shorten or stretch the wait. Fixed once, here.
+        if (c.application && c.application.retry_in_ms) c.application.retry_until = Date.now() + c.application.retry_in_ms;
       }));
       render();
       if (opts.onData) opts.onData(campaigns);
     }
 
+    let coolTimer = null;
     function render() {
+      clearInterval(coolTimer);
       const c = campaigns.find(x => x.id === openId);
       el.innerHTML = c ? detail(c) : list();
       bind(c);
@@ -237,6 +242,18 @@
       </div>`;
     }
 
+    function waitText(ms) {
+      const sec = Math.max(1, Math.ceil(ms / 1000));
+      if (sec < 60) return sec + 's';
+      const m = Math.ceil(sec / 60);
+      if (m < 60) return m + 'm';
+      return Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+    }
+
+    function cooldown(app) {
+      return `<div class="waiting" role="status"><b>Take a moment before your next try.</b> You can send another video in <b id="cga-cool-t">${waitText(app.retry_until - Date.now())}</b>. Use the time to work through the notes above — each rejection doubles the wait, so a fix now saves you time later.</div>`;
+    }
+
     function submitPanel(app) {
       const attempt = app.rejections + 1;
       const final = app.attempts_left === 1;
@@ -292,7 +309,10 @@
       } else if (v.key === 'ended') {
         body = '<div class="cg-panel"><h3>This campaign has ended</h3></div>';
       } else {
-        body = feedback(app) + dots(app) + (app.may_submit ? submitPanel(app) : '');
+        // A rejected clipper waits before the next try, and the wait doubles each
+        // time. It is shown as a countdown rather than a disabled button so the
+        // reason and the time left are both in front of them.
+        body = feedback(app) + dots(app) + (app.retry_until && app.retry_until > Date.now() ? cooldown(app) : (app.may_submit ? submitPanel(app) : ''));
       }
 
       const heroBadge = `<span class="tc-badge ${v.tone}">${esc(v.head)}</span>`;
@@ -324,6 +344,19 @@
         catch (e) { showErr(e.message); b.disabled = false; }
       };
       if ($('cga-drop')) bindSubmit(c);
+      const cool = $('cga-cool-t');
+      if (cool && c.application && c.application.retry_until) {
+        const app = c.application;
+        coolTimer = setInterval(() => {
+          const left = app.retry_until - Date.now();
+          if (left > 0) { cool.textContent = waitText(left); return; }
+          // Time is up: open the submit panel. The server checks again on send, so a
+          // clock that ran fast can at worst show the panel a moment early.
+          clearInterval(coolTimer);
+          app.retry_until = null; app.retry_in_ms = null; app.may_submit = true;
+          render();
+        }, 1000);
+      }
     }
 
     function showErr(msg) {

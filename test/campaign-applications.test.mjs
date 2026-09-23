@@ -60,6 +60,14 @@ const connect = (env) =>
     method: 'POST', body: { campaign_id: 1, platform: 'instagram', identifier: 'my.handle' }
   });
 
+// A rejection now starts a wait before the next try (src/backoff.js). Tests about
+// what happens across several attempts are not about that wait, so they let it
+// pass by ageing every verdict past the longest wait there is. The wait itself
+// is pinned in retry-backoff.test.mjs.
+const waitItOut = env => env.DB._sqlite
+  .prepare('UPDATE campaign_applications SET reviewed_at = reviewed_at - ? WHERE reviewed_at IS NOT NULL')
+  .run(25 * 60 * 60 * 1000);
+
 async function reviewLatest(env, verdict, note = 'Looks good.') {
   const q = await (await asModerator(env, '/api/moderator/applications')).json();
   const id = q.applications[0].id;
@@ -106,8 +114,12 @@ test('a rejection costs one attempt and lets the clipper try again', async () =>
   const state = await (await asClipper(env, '/api/clipper/campaigns/1/applications')).json();
   assert.equal(state.state, 'rejected');
   assert.equal(state.attempts_left, MAX_ATTEMPTS - 1);
-  assert.equal(state.may_submit, true, 'they can send a revised video');
-  assert.equal(state.may_connect, false, 'but still cannot skip ahead to connecting');
+  assert.equal(state.may_submit, false, 'not this minute: a rejection starts a wait before the next try');
+  assert.ok(state.retry_in_ms > 0, 'and the screen is told how long');
+  assert.equal(state.may_connect, false, 'and they still cannot skip ahead to connecting');
+  waitItOut(env);
+  const later = await (await asClipper(env, '/api/clipper/campaigns/1/applications')).json();
+  assert.equal(later.may_submit, true, 'once the wait is over they can send a revised video');
   assert.equal(state.history[0].reviewer_note, 'Captions are out of sync.',
     'the reason reaches the clipper -- that is what makes the next attempt usable');
 });
@@ -119,6 +131,7 @@ test(`${MAX_ATTEMPTS} rejections removes the clipper from that campaign`, async 
     const r = await (await reviewLatest(env, 'rejected', `Not there yet (${i}).`)).json();
     assert.equal(r.removed_from_campaign, i === MAX_ATTEMPTS,
       `removal happens on attempt ${MAX_ATTEMPTS}, not before`);
+    waitItOut(env);
   }
 
   const part = await env.DB.prepare('SELECT status, status_note FROM participations WHERE id = 1').first();
@@ -163,8 +176,10 @@ test('the queue tells a reviewer when their verdict is the one that removes some
   const env = seedEnv();
   await submit(env);
   await reviewLatest(env, 'rejected', 'First pass.');
+  waitItOut(env);
   await submit(env);
   await reviewLatest(env, 'rejected', 'Second pass.');
+  waitItOut(env);
   await submit(env);
 
   const q = await (await asModerator(env, '/api/moderator/applications')).json();
