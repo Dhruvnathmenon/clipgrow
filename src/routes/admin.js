@@ -29,6 +29,8 @@ import { logAction, listAuditLog } from '../audit.js';
 import { driveHealth } from '../drive.js';
 import { discordHealth, discordConfigured } from '../discord.js';
 import { archiveClipper, dormantAccounts, DORMANT_AFTER_MS, GRACE_MS } from '../account-lifecycle.js';
+import { duplicateField, DUPLICATE_MESSAGES } from '../identity.js';
+import { emailKey, phoneKey, discordKey } from '../../components/profile-validation.js';
 import { reviewerScorecard, reviewLog } from '../applications.js';
 import { selectByIds } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
@@ -769,7 +771,21 @@ export async function handleAdmin(request, env, url) {
       if (clash) return err('That username is already taken', 409);
       await env.DB.prepare('UPDATE clippers SET username = ? WHERE id = ?').bind(clean, params.id).run();
     }
-    if (status) await env.DB.prepare('UPDATE clippers SET status = ? WHERE id = ?').bind(status, params.id).run();
+    if (status) {
+      try {
+        await env.DB.prepare('UPDATE clippers SET status = ? WHERE id = ?').bind(status, params.id).run();
+      } catch (e) {
+        // Restoring an archived account brings its email, number and Discord back into
+        // the one-account-per-person rule. If someone signed up with one of them in the
+        // meantime, the restore has to wait until that detail is changed.
+        const f = duplicateField(e);
+        if (f) {
+          const what = { email: 'email', phone: 'phone number', discord: 'Discord username' }[f];
+          return err(`This account's ${what} is now used by another account, so it cannot be restored until you change it here first.`, 409);
+        }
+        throw e;
+      }
+    }
     if (display_name != null) await env.DB.prepare('UPDATE clippers SET display_name = ? WHERE id = ?').bind(display_name, params.id).run();
     if (password) {
       if (String(password).length < 6) return err('Password must be at least 6 characters');
@@ -796,13 +812,19 @@ export async function handleAdmin(request, env, url) {
     if (contact_number != null) {
       const invalid = validateContactNumber(contact_number);
       if (invalid) return err(invalid);
-      await env.DB.prepare('UPDATE clippers SET contact_number = ? WHERE id = ?')
-        .bind(normaliseContactNumber(contact_number), params.id).run();
+      const number = normaliseContactNumber(contact_number);
+      try {
+        await env.DB.prepare('UPDATE clippers SET contact_number = ?, phone_key = ? WHERE id = ?')
+          .bind(number, phoneKey(number), params.id).run();
+      } catch (e) { const f = duplicateField(e); if (f) return err(DUPLICATE_MESSAGES[f], 409); throw e; }
     }
     if (email != null) {
       const invalid = validateEmail(email);
       if (invalid) return err(invalid);
-      await env.DB.prepare('UPDATE clippers SET email = ? WHERE id = ?').bind(normaliseEmail(email), params.id).run();
+      const address = normaliseEmail(email);
+      try {
+        await env.DB.prepare('UPDATE clippers SET email = ?, email_key = ? WHERE id = ?').bind(address, emailKey(address), params.id).run();
+      } catch (e) { const f = duplicateField(e); if (f) return err(DUPLICATE_MESSAGES[f], 409); throw e; }
     }
     if (legal_name != null) {
       await env.DB.prepare('UPDATE clippers SET legal_name = ? WHERE id = ?').bind(String(legal_name).trim(), params.id).run();
@@ -814,8 +836,11 @@ export async function handleAdmin(request, env, url) {
     if (discord_username != null) {
       const invalid = validateDiscordUsername(discord_username);
       if (invalid) return err(invalid);
-      await env.DB.prepare('UPDATE clippers SET discord_username = ? WHERE id = ?')
-        .bind(normaliseDiscordUsername(discord_username) || null, params.id).run();
+      const handle = normaliseDiscordUsername(discord_username) || null;
+      try {
+        await env.DB.prepare('UPDATE clippers SET discord_username = ?, discord_key = ? WHERE id = ?')
+          .bind(handle, discordKey(handle), params.id).run();
+      } catch (e) { const f = duplicateField(e); if (f) return err(DUPLICATE_MESSAGES[f], 409); throw e; }
     }
     return json({ ok: true });
   }

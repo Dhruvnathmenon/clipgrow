@@ -15,6 +15,7 @@ import {
   DORMANT_AFTER_MS, GRACE_MS, SEEN_EVERY_MS
 } from '../src/account-lifecycle.js';
 import { COMPLETE_PROFILE } from './helpers/profile.mjs';
+import { identityKeys } from '../src/identity.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.now();
@@ -45,7 +46,10 @@ function fakeDiscord({ dmOk = true } = {}) {
 
 const clipper = (id, extra = {}) => ({
   id, username: `c${id}`, password_hash: 'h', password_salt: 's', status: 'active', created_at: LONG_AGO,
-  last_seen_at: LONG_AGO, ...COMPLETE_PROFILE, ...extra
+  last_seen_at: LONG_AGO, ...COMPLETE_PROFILE,
+  // Each fixture clipper needs keys of its own: they are held unique across accounts.
+  email_key: `e${id}@example.com`, phone_key: `9${String(id).padStart(9, '0')}`, discord_key: `d${id}`,
+  ...extra
 });
 
 function world(extra = {}) {
@@ -229,7 +233,8 @@ async function call(e, path, { method = 'GET', body, id = 1 } = {}) {
 async function loginWorld(extra = {}) {
   const { hash, salt } = await hashPassword('correct horse');
   return env(makeSqliteD1({
-    clippers: [{ ...clipper(1, { last_seen_at: NOW, discord_user_id: '111', discord_username: 'me' }), password_hash: hash, password_salt: salt }],
+    // The real keys for this profile, so deleting the account visibly frees them.
+    clippers: [{ ...clipper(1, { last_seen_at: NOW, discord_user_id: '111', ...identityKeys(COMPLETE_PROFILE) }), password_hash: hash, password_salt: salt }],
     campaigns: [{ id: 1, name: 'C', description: '', cpm: 40, budget: 100000, status: 'active', created_at: NOW,
                   model: 'cpm', min_views: 0, allowed_platforms: 'instagram' }],
     ...extra
@@ -264,9 +269,11 @@ test('the username of a deleted account can be taken by someone new', async () =
   e.DB._sqlite.prepare("UPDATE clippers SET username = 'sam.k'").run();   // long enough to pass the sign-up rules
   await call(e, '/api/clipper/me/delete', { method: 'POST', body: { password: 'correct horse' } });
   const req = new Request('https://clipgrow.in/api/clipper/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'sam.k', password: 'a-long-password-9' }) });
+    // The same email, number and Discord as the account just deleted: all free again.
+    body: JSON.stringify({ username: 'sam.k', password: 'a-long-password-9', email: COMPLETE_PROFILE.email,
+      contactNumber: COMPLETE_PROFILE.contact_number, discordUsername: COMPLETE_PROFILE.discord_username }) });
   const res = await handleClipper(req, e, new URL(req.url));
-  assert.equal(res.status, 201, 'the name is free');
+  assert.equal(res.status, 201, 'the name, email, number and Discord are all free');
 });
 
 test('money still owed blocks deleting, and says why before a password is typed', async () => {

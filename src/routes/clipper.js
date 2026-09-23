@@ -29,6 +29,7 @@ import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
 import { waitText } from '../backoff.js';
 import { touchLastSeen, archiveClipper, selfDeleteBlockers } from '../account-lifecycle.js';
+import { identityKeys, identityConflict, duplicateField, DUPLICATE_MESSAGES } from '../identity.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
 import { discordAvailable, discordRequired as discordRequiredFor } from '../discord.js';
@@ -114,10 +115,27 @@ export async function handleClipper(request, env, url) {
     const body = await readJson(request);
     // A field no person ever sees. A script that fills in every input does.
     if (body.website) return err('Could not create the account.', 400);
+    // Which field a refusal is about travels with it, so the form can put the message
+    // under the right box instead of a generic banner.
+    const refuse = (field, message, status = 400) => json({ error: message, field }, status);
     const problem = validateUsername(body.username) || validatePassword(body.password, body.username);
-    if (problem) return err(problem);
+    if (problem) return refuse(validateUsername(body.username) ? 'username' : 'password', problem);
+    // The details ClipGrow needs to reach someone, asked for up front and each one
+    // held to one account per person. The payout details come later, in the
+    // dashboard, once there is something to pay.
+    const emailProblem = validateEmail(body.email);
+    if (emailProblem) return refuse('email', emailProblem);
+    const phoneProblem = validateContactNumber(body.contactNumber);
+    if (phoneProblem) return refuse('phone', phoneProblem);
+    const discordName = normaliseDiscordUsername(body.discordUsername);
+    const discordProblem = discordName ? validateDiscordUsername(body.discordUsername) : 'Enter your Discord username';
+    if (discordProblem) return refuse('discord', discordProblem);
+    const details = {
+      email: normaliseEmail(body.email), contact_number: normaliseContactNumber(body.contactNumber), discord_username: discordName
+    };
+    const keys = identityKeys(details);
     const username = normalizeUsername(body.username);
-    const taken = () => err('That username is already taken. Try another.', 409);
+    const taken = () => refuse('username', 'That username is already taken. Try another.', 409);
     if (await env.DB.prepare('SELECT id FROM clippers WHERE username = ? COLLATE NOCASE').bind(username).first()) return taken();
 
     // The limit is checked BEFORE the password is hashed: hashing is the
@@ -131,15 +149,32 @@ export async function handleClipper(request, env, url) {
         429, { 'Retry-After': String(blocked.minutes * 60) });
     }
 
+    // Already in use by someone else? A refusal that names what was taken tells a
+    // stranger which emails and numbers have accounts, so it counts against the
+    // same per-address limit as a sign-up that succeeds: enough for a person who
+    // mistyped, useless for probing a list.
+    const clash = await identityConflict(env.DB, keys);
+    if (clash) {
+      await recordSignup(env.DB, ipHash);
+      return refuse(clash, DUPLICATE_MESSAGES[clash], 409);
+    }
+
     const { hash, salt } = await hashPassword(body.password);
+    const at = now();
     let res;
     try {
       res = await env.DB.prepare(
-        `INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at, created_by_type, created_by_name)
-         VALUES (?, ?, ?, ?, 'active', ?, 'self', 'Self sign-up')`
-      ).bind(username, hash, salt, defaultDisplayName(username), now()).run();
+        `INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at, created_by_type, created_by_name,
+                               email, contact_number, discord_username, email_key, phone_key, discord_key, last_seen_at)
+         VALUES (?, ?, ?, ?, 'active', ?, 'self', 'Self sign-up', ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(username, hash, salt, defaultDisplayName(username), at,
+             details.email, details.contact_number, details.discord_username,
+             keys.email_key, keys.phone_key, keys.discord_key, at).run();
     } catch (e) {
-      // Two people choosing the same name at the same moment: the unique index decides.
+      // Two people choosing the same name, email, number or Discord at the same
+      // moment: the unique indexes decide, and this says which one lost.
+      const field = duplicateField(e);
+      if (field) return refuse(field, DUPLICATE_MESSAGES[field], 409);
       if (/UNIQUE/i.test(String(e && e.message))) return taken();
       throw e;
     }
@@ -283,14 +318,29 @@ export async function handleClipper(request, env, url) {
     const legalInvalid = validatePersonName(legalName, 'legal name');
     if (legalInvalid) return err(legalInvalid);
     const legal = normaliseName(legalName);
-    await env.DB.prepare(
-      `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_username = ?,
-         legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
-       WHERE id = ?`
-    ).bind(
-      normaliseEmail(email), normaliseContactNumber(contactNumber), normaliseUpiId(upiId), name, discord,
-      legal, legal, clipperId
-    ).run();
+    // One account per person: the email, number and Discord username each belong to
+    // at most one live account. Someone keeping what they already have is fine.
+    const mail = normaliseEmail(email), phone = normaliseContactNumber(contactNumber);
+    const keys = identityKeys({ email: mail, contact_number: phone, discord_username: discord });
+    const clash = await identityConflict(env.DB, keys, clipperId);
+    if (clash) return json({ error: DUPLICATE_MESSAGES[clash], field: clash }, 409);
+    try {
+      await env.DB.prepare(
+        `UPDATE clippers SET email = ?, contact_number = ?, upi_id = ?, upi_account_name = ?, discord_username = ?,
+           email_key = ?, phone_key = ?, discord_key = ?,
+           legal_name = CASE WHEN ? != '' THEN ? ELSE legal_name END
+         WHERE id = ?`
+      ).bind(
+        mail, phone, normaliseUpiId(upiId), name, discord,
+        keys.email_key, keys.phone_key, keys.discord_key,
+        legal, legal, clipperId
+      ).run();
+    } catch (e) {
+      // Someone else saved the same detail a moment ago; the index caught it.
+      const field = duplicateField(e);
+      if (field) return json({ error: DUPLICATE_MESSAGES[field], field }, 409);
+      throw e;
+    }
     return json({ ok: true });
   }
 

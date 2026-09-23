@@ -22,7 +22,16 @@ async function call(env, path, { method = 'GET', body, ip = '203.0.113.7', cooki
   const request = new Request(`https://clipgrow.in${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return handleClipper(request, env, new URL(request.url));
 }
-const signup = (env, body, opts) => call(env, '/api/clipper/signup', { method: 'POST', body, ...opts });
+// Every sign-up needs an email, a phone number and a Discord username, each one
+// account only (see one-account-per-person.test.mjs). These tests are about the
+// switch, the limits and the credentials, so unless a test says otherwise each
+// call gets details of its own and can never collide with another.
+let serial = 0;
+const uniqueDetails = () => {
+  serial++;
+  return { email: `person${serial}@example.com`, contactNumber: `98765${String(10000 + serial)}`, discordUsername: `person_${serial}` };
+};
+const signup = (env, body, opts) => call(env, '/api/clipper/signup', { method: 'POST', body: { ...uniqueDetails(), ...body }, ...opts });
 const clippers = env => env.DB._sqlite.prepare('SELECT * FROM clippers').all();
 const GOOD = { username: 'ravi.kumar', password: 'correct-horse-9' };
 

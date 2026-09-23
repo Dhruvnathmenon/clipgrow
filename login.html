@@ -78,6 +78,16 @@
       <div class="form-group"><label for="su-confirm">Repeat the password</label>
         <input type="password" id="su-confirm" autocomplete="new-password" maxlength="128" />
         <p class="fld-err" id="su-e-confirm"></p></div>
+      <p class="note" style="margin:.4rem 0 .7rem;font-size:.8rem;opacity:.75">How ClipGrow reaches you. Each email, phone number and Discord username can be used on one account only.</p>
+      <div class="form-group"><label for="su-email">Email</label>
+        <input type="email" id="su-email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="name@example.com" maxlength="254" />
+        <p class="fld-err" id="su-e-email"></p></div>
+      <div class="form-group"><label for="su-phone">Phone number (WhatsApp)</label>
+        <input type="tel" id="su-phone" autocomplete="tel" inputmode="tel" placeholder="9876543210" maxlength="20" />
+        <p class="fld-err" id="su-e-phone"></p></div>
+      <div class="form-group"><label for="su-discord">Discord username</label>
+        <input type="text" id="su-discord" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="e.g. yourname" maxlength="33" />
+        <p class="fld-err" id="su-e-discord"></p></div>
       <div class="trap" aria-hidden="true"><label>Website <input type="text" id="su-website" tabindex="-1" autocomplete="off" /></label></div>
       <button type="submit" class="btn" id="su-btn">Create account</button>
       <p class="error" id="su-error" role="alert" style="display:none"></p>
@@ -113,6 +123,8 @@
     let signupOpen = false, mode = 'login', RULES = null;
     const $ = id => document.getElementById(id);
     const loadRules = async () => RULES || (RULES = await import('/components/account-validation.js?v=1'));
+    let PROFILE = null;
+    const loadProfile = async () => PROFILE || (PROFILE = await import('/components/profile-validation.js?v=2'));
 
     window.renderChrome = function () {
       const creating = role === 'clipper' && signupOpen && mode === 'signup';
@@ -146,6 +158,12 @@
     }
     async function checkUsername() { const R = await loadRules(); return fieldError('username', R.validateUsername($('su-username').value)); }
     async function checkPassword() { const R = await loadRules(); return fieldError('password', R.validatePassword($('su-password').value, $('su-username').value)); }
+    async function checkEmail() { const R = await loadProfile(); return fieldError('email', R.validateEmail($('su-email').value)); }
+    async function checkPhone() { const R = await loadProfile(); return fieldError('phone', R.validateContactNumber($('su-phone').value)); }
+    async function checkDiscord() {
+      const R = await loadProfile(), v = $('su-discord').value;
+      return fieldError('discord', R.normaliseDiscordUsername(v) ? R.validateDiscordUsername(v) : 'Enter your Discord username');
+    }
     function checkConfirm() { return fieldError('confirm', $('su-confirm').value !== $('su-password').value ? 'The two passwords do not match.' : null); }
 
     // Check a field when the person leaves it, and re-check on each keystroke only
@@ -156,22 +174,37 @@
     $('su-username').addEventListener('input', () => { if ($('su-username').classList.contains('invalid')) checkUsername(); });
     $('su-password').addEventListener('input', () => { if ($('su-password').classList.contains('invalid')) checkPassword(); });
     $('su-confirm').addEventListener('input', () => { if ($('su-confirm').classList.contains('invalid')) checkConfirm(); });
+    for (const [id, check] of [['email', checkEmail], ['phone', checkPhone], ['discord', checkDiscord]]) {
+      $('su-' + id).addEventListener('blur', () => { if ($('su-' + id).value) check(); });
+      $('su-' + id).addEventListener('input', () => { if ($('su-' + id).classList.contains('invalid')) check(); });
+    }
 
     $('signup-form').addEventListener('submit', async e => {
       e.preventDefault();
       const errorEl = $('su-error'), btn = $('su-btn');
       errorEl.style.display = 'none';
-      const bad = [await checkUsername(), await checkPassword(), checkConfirm()];
-      if (bad.some(Boolean)) { (bad[0] ? $('su-username') : bad[1] ? $('su-password') : $('su-confirm')).focus(); return; }
+      const order = ['username', 'password', 'confirm', 'email', 'phone', 'discord'];
+      const bad = [await checkUsername(), await checkPassword(), checkConfirm(), await checkEmail(), await checkPhone(), await checkDiscord()];
+      // Every problem is shown at once, and focus goes to the first, not one round trip per mistake.
+      if (bad.some(Boolean)) { $('su-' + order[bad.findIndex(Boolean)]).focus(); return; }
       btn.disabled = true; btn.textContent = 'Creating…';
       try {
         const res = await fetch('/api/clipper/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: $('su-username').value.trim(), password: $('su-password').value, website: $('su-website').value })
+          body: JSON.stringify({
+            username: $('su-username').value.trim(), password: $('su-password').value,
+            email: $('su-email').value.trim(), contactNumber: $('su-phone').value.trim(), discordUsername: $('su-discord').value.trim(),
+            website: $('su-website').value
+          })
         });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || 'Could not create the account. Try again.');
+        if (!res.ok) {
+          // The server says which detail was refused (already used, or invalid): put it
+          // under that box. Anything without a field (busy, too many attempts) is the banner.
+          if (body.field && $('su-e-' + body.field)) { fieldError(body.field, body.error); $('su-' + body.field).focus(); btn.disabled = false; btn.textContent = 'Create account'; return; }
+          throw new Error(body.error || 'Could not create the account. Try again.');
+        }
         location.href = '/dashboard';
       } catch (err) {
         errorEl.textContent = err.message;

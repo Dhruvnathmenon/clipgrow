@@ -1,5 +1,6 @@
 import { requireClipper, signSession, verifySession } from '../auth.js';
 import { normaliseDiscordUsername, validateDiscordUsername, now } from '../db.js';
+import { discordKey } from '../../components/profile-validation.js';
 import { logError } from '../error-log.js';
 import {
   discordAvailable, getAuthorizeUrl, exchangeCode, fetchUser, addToGuild, DiscordError
@@ -151,7 +152,15 @@ export async function handleDiscordAuth(request, env, url) {
       // never disagree.
       const handle = normaliseDiscordUsername(user.handle);
       if (!validateDiscordUsername(handle)) {
-        await env.DB.prepare('UPDATE clippers SET discord_username = ? WHERE id = ?').bind(handle, session.sub).run();
+        try {
+          await env.DB.prepare('UPDATE clippers SET discord_username = ?, discord_key = ? WHERE id = ?')
+            .bind(handle, discordKey(handle), session.sub).run();
+        } catch (e) {
+          // Another account typed this same name into its own profile. The verified
+          // link above (discord_user_id) is what counts, and it has already
+          // succeeded, so the link must stand rather than fail over a typed value.
+          if (!/UNIQUE/i.test(String(e && e.message))) throw e;
+        }
       }
 
       if (joinProblem) {

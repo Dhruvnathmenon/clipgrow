@@ -73,6 +73,7 @@ export async function archiveClipper(env, clipperId, { reason, scrub = false } =
              deleted_at = ?, deleted_reason = ?`;
   if (scrub) {
     sql += `, email = NULL, contact_number = NULL, discord_username = NULL,
+             email_key = NULL, phone_key = NULL, discord_key = NULL,
              display_name = 'Deleted clipper', password_hash = 'deleted', password_salt = '00'`;
     if (!hasMoney) sql += ', upi_id = NULL, upi_account_name = NULL, legal_name = NULL';
   }

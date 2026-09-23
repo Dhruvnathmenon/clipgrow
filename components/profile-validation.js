@@ -169,3 +169,44 @@ export function profileProblems(clipper) {
 export function profileComplete(clipper) {
   return profileProblems(clipper).length === 0;
 }
+
+/* ------------------------------------------------- one account per person
+ *
+ * "Is this the same person's email / number / Discord?" is not the same question
+ * as "is this the same string?". Someone determined to make a second account
+ * types name@gmail.com again as n.a.m.e@gmail.com or name+2@gmail.com, which
+ * Gmail delivers to the same inbox. These keys collapse every spelling of the
+ * same address to one value, and that value -- never the typed text -- is what
+ * the database holds unique.
+ *
+ * null means "nothing to compare" (empty or not a real value), and the database
+ * lets any number of rows have a null key.
+ */
+
+// Gmail ignores dots in the name and treats googlemail.com as gmail.com. A "+tag"
+// after the name is delivered to the same mailbox on nearly every provider, so it
+// is dropped everywhere: the rare address where "+" is a real part of the name is
+// a far smaller loss than an open door to unlimited accounts.
+export function emailKey(input) {
+  const v = normaliseEmail(input);
+  const at = v.lastIndexOf('@');
+  if (at < 1) return null;
+  let name = v.slice(0, at);
+  let domain = v.slice(at + 1);
+  const plus = name.indexOf('+');
+  if (plus >= 0) name = name.slice(0, plus);
+  if (domain === 'googlemail.com') domain = 'gmail.com';
+  if (domain === 'gmail.com') name = name.replace(/\./g, '');
+  return name && domain ? `${name}@${domain}` : null;
+}
+
+// The normalised ten digits, so +91 98765 43210, 098765 43210 and 9876543210
+// are one number. Anything that is not a plausible number has no key.
+export function phoneKey(input) {
+  const v = normaliseContactNumber(input);
+  return /^[6-9]\d{9}$/.test(v) ? v : null;
+}
+
+export function discordKey(input) {
+  return normaliseDiscordUsername(input) || null;
+}
