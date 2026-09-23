@@ -120,7 +120,7 @@ Three changes, each applied to the live database **before** the code that needs 
 |---|---|---|---|
 | 049 | `migrations/049_retry_backoff.sql` | how many times, and when, an account request was rejected | 2 columns present; the 28 old rejected requests were back-filled so nobody waits retroactively |
 | 050 | `migrations/050_account_lifecycle.sql` | last-seen date, warning date and channel, "keep this one", when and why an account ended | 6 columns present; all 60 live accounts had their clock started; the 9 already-archived accounts were tagged |
-| 051 | `migrations/051_one_account_per_person.sql` | the three comparison keys and three "no duplicates" rules | 3 columns and 3 rules present; keys filled in for all 60 live accounts, then re-checked against the stored details: 177 checks, 0 mismatches |
+| 051 | `migrations/051_one_account_per_person.sql` | the three comparison keys and three "no duplicates" rules | 3 columns and 3 rules present; keys filled in for every live account that has the detail (41 emails, 41 phones, 40 Discord names), then all 60 re-checked against their stored details: 177 checks, 0 mismatches |
 
 **Bookmarks in GitHub (any one can be returned to):**
 `checkpoint/17-review-log`, `18-retry-backoff`, `19-account-lifecycle`,
