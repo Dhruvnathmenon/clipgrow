@@ -4,6 +4,17 @@ High-level, dated. For exact detail read the actual commit
 (`git show <hash>`) rather than trusting this summary as complete — this
 exists to answer "have we already done X" quickly, not to replace git log.
 
+## 2026-09-24
+- **Account lifecycle, retries, one-account-per-person** (checkpoints 17-20, migrations 049-051).
+  Admin "Video Applications" tab (who approved/rejected each video, and how many of a
+  moderator's approvals were later removed); Step 3 tile dropped from the onboarding stepper;
+  exponential back-off after each rejected video or account request (1h doubling to 24h,
+  `src/backoff.js`); clippers can delete their own account (password + blocked while money is
+  owed) and never-used accounts are warned on Discord then removed after 14 days
+  (`src/account-lifecycle.js`, daily cron at 04:00 UTC); email, phone and Discord username are
+  unique per live account on a normalised key (`src/identity.js`, sign-up now asks for all three).
+  Sign-up and Discord link are still switched OFF in `wrangler.jsonc`.
+
 ## 2026-09-14
 - **Self-tracked D1 usage tracking + a manual "pause heavy sync" control**
   (`src/d1-usage.js`, migration 042). Built after realizing the 2026-09-13

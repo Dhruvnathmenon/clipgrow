@@ -60,6 +60,16 @@ the only way in. How far it is switched on is `DISCORD_LINK` in `wrangler.jsonc`
 Discord** (admin Campaigns tab) is all green. The Discord secrets can exist while it is
 `off`; never enforce on their presence alone.
 
+## Account lifecycle and one account per person
+
+`src/account-lifecycle.js` is the only place an account ends (admin archive, the clipper deleting
+their own, and the daily unused-account clean-up all call `archiveClipper`). The clean-up only touches
+accounts with no activity at all, only after a Discord warning has actually arrived, and never more than
+25 per run; an account nobody can warn is listed in the admin Clippers tab, never removed. Email, phone
+and Discord username are held unique on `email_key`/`phone_key`/`discord_key` (migration 051): any
+statement that writes one of those three columns must write its key too (a test reads the source and
+fails if one does not). Retries after a rejection wait 1h, 2h, 4h... up to a day (`src/backoff.js`).
+
 ## Self-serve sign-up
 
 Anyone can create a clipper account only while `CLIPPER_SIGNUP` is `open` in `wrangler.jsonc`
