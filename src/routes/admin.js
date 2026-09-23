@@ -27,7 +27,8 @@ import { debugMediaInsights, debugListMedia, fetchMediaViews } from '../instagra
 import { makeCallCounter, MANUAL_REFRESH_COOLDOWN_MS } from '../rate-budget.js';
 import { logAction, listAuditLog } from '../audit.js';
 import { driveHealth } from '../drive.js';
-import { discordHealth } from '../discord.js';
+import { discordHealth, discordConfigured } from '../discord.js';
+import { archiveClipper, dormantAccounts, DORMANT_AFTER_MS, GRACE_MS } from '../account-lifecycle.js';
 import { reviewerScorecard, reviewLog } from '../applications.js';
 import { selectByIds } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
@@ -839,29 +840,31 @@ export async function handleAdmin(request, env, url) {
   // clipper back under the suffixed name; edit it back explicitly if the
   // original is still free.
   if (params && method === 'DELETE') {
-    const clipper = await env.DB.prepare('SELECT id, status, username FROM clippers WHERE id = ?').bind(params.id).first();
-    if (!clipper) return err('Not found', 404);
-    if (clipper.status === 'deleted') return json({ ok: true, already: true });
+    // The ending itself lives in src/account-lifecycle.js, shared with a clipper
+    // deleting their own account and with the unused-account clean-up, so the
+    // three cannot disagree about what deleted means. An admin archive is not
+    // scrubbed: it can be restored.
+    const r = await archiveClipper(env, params.id, { reason: 'admin' });
+    if (r.error) return err(r.error, r.status || 400);
+    return json(r.already ? { ok: true, already: true } : { ok: true, freed_username: r.freed_username });
+  }
 
-    const { results: accounts } = await env.DB.prepare(
-      'SELECT id FROM social_accounts WHERE clipper_id = ?').bind(params.id).all();
-    const touchedCampaigns = new Set();
-    for (const a of accounts || []) {
-      // preserveClips: archiving must not destroy unpaid work. See the
-      // comment in disconnectSocialAccount -- this used to delete every
-      // unlocked clip while the confirm dialog promised the opposite.
-      const result = await disconnectSocialAccount(env.DB, a.id, { preserveClips: true });
-      for (const cid of (result ? result.campaigns : [])) touchedCampaigns.add(cid);
-    }
-    for (const cid of touchedCampaigns) await reallocateCampaign(env.DB, cid);
-
-    await env.DB.prepare(
-      // The Discord link is freed with the username: it is UNIQUE, so an archived
-      // account would otherwise hold that Discord identity forever and its owner
-      // could never link it to a new account.
-      "UPDATE clippers SET status = 'deleted', username = username || '_deleted' || id, discord_user_id = NULL, discord_handle = NULL, discord_linked_at = NULL WHERE id = ?"
-    ).bind(params.id).run();
-    return json({ ok: true, freed_username: clipper.username });
+  // Accounts made and never used, and where each stands in the warn-then-remove
+  // process. Read-only; the daily pass (worker.js) does the work.
+  if (pathname === '/api/admin/dormant-accounts' && method === 'GET') {
+    const accounts = await dormantAccounts(env.DB);
+    return json({
+      accounts, after_days: DORMANT_AFTER_MS / 86400000, grace_days: GRACE_MS / 86400000,
+      can_warn: discordConfigured(env)
+    });
+  }
+  params = matchPath('/api/admin/dormant-accounts/:id/keep', pathname);
+  if (params && method === 'POST') {
+    const { keep } = await readJson(request);
+    const res = await env.DB.prepare("UPDATE clippers SET dormant_exempt = ? WHERE id = ? AND status != 'deleted'")
+      .bind(keep === false ? 0 : 1, params.id).run();
+    if (!(res.meta && res.meta.changes)) return err('Not found', 404);
+    return json({ ok: true, kept: keep !== false });
   }
 
   // ------------------------------------------------------------- campaigns

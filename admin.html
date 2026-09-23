@@ -335,6 +335,14 @@
           </table></div>
         </div>
       </div>
+      <div class="panel">
+        <h2 class="panel-title">Unused accounts <span class="tab-count" id="dormant-count"></span></h2>
+        <p class="note" style="margin-bottom:1rem" id="dormant-note">Accounts that were made and never used: no connected account, no clip, no video in review, no payment, and not opened for a while. Each is warned on Discord first and removed only after the grace period, and only if the warning arrived. One with no way to be warned is never removed automatically.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Clipper</th><th>Made by</th><th>Last opened</th><th>Where it stands</th><th>Actions</th></tr></thead>
+          <tbody id="dormant-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
     </div>
 
     <!-- PAYOUTS -->
@@ -993,6 +1001,7 @@
       if(name==='clients') loadClients();
       if(name==='testers') loadTesters();
       if(name==='moderators') loadModerators();
+      if(name==='clippers') loadDormant();
       if(name==='applications') loadApplicationsAudit();
       if(name==='review') loadReviewQueue();
       if(name==='synchealth') loadSyncHealth();
@@ -2308,6 +2317,33 @@
           </div></td>
         </tr>`).join(''):'<tr><td colspan="7" class="empty">No moderators yet.</td></tr>';
     }
+    /* ── Unused accounts: where each stands in the warn-then-remove process ── */
+    function dormantStanding(a,d){
+      const day=t=>new Date(t).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+      if(a.state==='ready') return '<span class="badge disabled">Removal due at the next daily run</span>';
+      if(a.state==='warned') return `<span class="badge">Warned · removed ${day(a.remove_after)} unless they log in</span>`;
+      if(a.state==='unwarned') return d.can_warn?'<span class="badge">Will be warned at the next daily run</span>':'<span class="badge disabled">Discord is not set up, so nobody can be warned</span>';
+      return '<span class="badge disabled">Cannot be warned (no Discord linked). Never removed automatically</span>';
+    }
+    window.loadDormant=async function(){
+      try{
+        const d=await api('/api/admin/dormant-accounts');
+        document.getElementById('dormant-count').textContent=d.accounts.length?d.accounts.length:'';
+        document.getElementById('dormant-body').innerHTML=d.accounts.length?d.accounts.map(a=>`<tr>
+          <td><span class="handle">${esc(a.display_name||a.username)}</span><div class="muted" style="font-size:.72rem">@${esc(a.username)}</div></td>
+          <td>${a.created_by_type==='self'?'Signed up themselves':'Created by the team'}</td>
+          <td>${APP_WHEN(a.last_active)}</td>
+          <td style="white-space:normal">${dormantStanding(a,d)}</td>
+          <td><div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="keepDormant(${a.id})">Keep</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteClipper(${a.id})">Delete now</button>
+          </div></td></tr>`).join(''):'<tr><td colspan="5" class="empty">No unused accounts. Everyone here has done something, or logged in recently.</td></tr>';
+      }catch(e){ toast(e.message,true); }
+    };
+    window.keepDormant=async function(id){
+      try{ await api('/api/admin/dormant-accounts/'+id+'/keep',{method:'POST',body:JSON.stringify({keep:true})}); toast('Kept. The clean-up will never touch this account.'); loadDormant(); }
+      catch(e){ toast(e.message,true); }
+    };
     /* ── Video Applications: who reviewed what ── */
     const APP_WHEN=t=>t?new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
     function appStanding(r){
@@ -2977,6 +3013,7 @@ Use this when their Discord was hacked, banned or deleted. Nothing else changes:
         toast(res.freed_username?`Clipper archived — "${res.freed_username}" is free to use again`:'Clipper archived — videos and earnings kept');
         loadClippers();
         loadDeletedClippers();
+        loadDormant();
       }catch(e){ toast(e.message,true); }
     };
 

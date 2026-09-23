@@ -116,6 +116,31 @@ export async function addToGuild(env, userId, accessToken) {
   throw new DiscordError('JOIN_FAILED', `Discord would not add you to the ClipGrow server (${res.status}).`, 'Join with the invite link in the ClipGrow announcements.');
 }
 
+// A direct message from the bot. Needs only the bot token, not the Clipcore bot
+// process, so it works while the bot host is down. Best effort by design: the
+// person must share a server with the bot and must not have closed their DMs, so a
+// failure is an ordinary answer, returned as { ok: false, reason } rather than
+// thrown. Nothing may depend on a message having arrived.
+export async function sendDirectMessage(env, userId, content) {
+  if (!discordConfigured(env)) return { ok: false, reason: 'NOT_CONFIGURED' };
+  const headers = { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' };
+  try {
+    const ch = await fetch(`${API}/users/@me/channels`, { method: 'POST', headers, body: JSON.stringify({ recipient_id: String(userId) }) });
+    if (ch.status === 429) return { ok: false, reason: 'RATE_LIMITED' };
+    if (!ch.ok) return { ok: false, reason: `CHANNEL_${ch.status}` };
+    const { id } = await readJson(ch);
+    if (!id) return { ok: false, reason: 'CHANNEL_MISSING' };
+    const res = await fetch(`${API}/channels/${id}/messages`, { method: 'POST', headers, body: JSON.stringify({ content: String(content).slice(0, 2000) }) });
+    if (res.ok) return { ok: true };
+    if (res.status === 429) return { ok: false, reason: 'RATE_LIMITED' };
+    const body = await readJson(res);
+    // 50007: the person has closed DMs from server members.
+    return { ok: false, reason: body.code === 50007 ? 'DMS_CLOSED' : `SEND_${res.status}` };
+  } catch {
+    return { ok: false, reason: 'NETWORK' };
+  }
+}
+
 // Reports which link in the chain is broken, in plain words, without ever
 // showing a secret. Mirrors driveHealth().
 export async function discordHealth(env) {

@@ -16,6 +16,7 @@ import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
 import { purgeExpiredRejections } from './applications.js';
 import { driveConfigured, driveHealth } from './drive.js';
+import { runDormantSweep } from './account-lifecycle.js';
 import { renewInstagramTokens } from './token-renewal.js';
 import { getSession } from './auth.js';
 import { err } from './http.js';
@@ -454,6 +455,20 @@ export default {
           }
         } catch (e) {
           console.error('[cron sync] drive health check failed', e && e.message);
+        }
+
+        // Once a day, clear out accounts that were made and never used: warn first,
+        // remove only after the grace period, only if the warning arrived, and never
+        // more than a handful in one run (src/account-lifecycle.js has the rules).
+        try {
+          if (new Date().getUTCHours() === 4) {
+            const swept = await runDormantSweep({ ...env, DB: wrapped });
+            if (swept.warned || swept.removed || swept.failed) {
+              console.log(`[cron sync] unused accounts: ${swept.warned} warned, ${swept.removed} removed, ${swept.unreachable} could not be reached, ${swept.failed} failed`);
+            }
+          }
+        } catch (e) {
+          console.error('[cron sync] unused-account clean-up failed', e && e.message);
         }
 
         // error_log has no archive -- a row past 7 days is just gone (the

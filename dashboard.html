@@ -316,8 +316,13 @@
     .pf-foot { padding:.9rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:.6rem; }
 
     /* Password-change modal (reuses .pf/.pf-inner/.pf-foot shell) */
-    #pw-back, #pd-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
-    #pw-back.open, #pd-back.open { display:flex; }
+    #pw-back, #pd-back, #del-back { position:fixed; inset:0; background:rgba(4,8,4,.84); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:9500; padding:1.2rem; }
+    #pw-back.open, #pd-back.open, #del-back.open { display:flex; }
+    .btn-danger { background:var(--red); color:#fff; }
+    .btn-danger:disabled { opacity:.45; cursor:not-allowed; }
+    .link-danger { background:none; border:0; padding:0; color:var(--muted); font-size:.78rem; text-decoration:underline; cursor:pointer; font-family:'Inter',sans-serif; }
+    .link-danger:hover { color:var(--red); }
+    .del-list { margin:.2rem 0 1rem 1.1rem; padding:0; color:var(--muted); font-size:.85rem; line-height:1.55; }
     .fld-err { display:none; color:var(--red); font-size:.76rem; margin-top:.3rem; }
     input.pd-invalid { border-color:var(--red) !important; }
     .form-group { margin-bottom:.9rem; }
@@ -397,6 +402,7 @@
       <button class="sb-out" onclick="openPayoutModal(false)">Your Details</button>
       <button class="sb-out" onclick="openPasswordModal()">Change Password</button>
       <button class="sb-out" onclick="logout()">Log out</button>
+      <button class="sb-out" onclick="openDeleteModal()">Delete Account</button>
     </div>
   </aside>
 
@@ -562,6 +568,33 @@
     </div>
   </div>
 
+  <div id="del-back" onclick="if(event.target.id==='del-back')closeDeleteModal()">
+    <div class="pf" role="dialog" aria-modal="true" aria-labelledby="del-title">
+      <div class="pf-inner">
+        <h3 id="del-title" style="margin-bottom:.6rem">Delete your ClipGrow account?</h3>
+        <div id="del-blocked" class="note" style="display:none;color:var(--text);line-height:1.55"></div>
+        <div id="del-form-wrap">
+          <ul class="del-list">
+            <li>This closes your account for good. You will not be able to log in again.</li>
+            <li>Your username becomes available for anyone else to take.</li>
+            <li>Any Instagram or YouTube account you connected is disconnected from ClipGrow.</li>
+            <li>Your contact details are erased. Records of payments already made are kept.</li>
+            <li><b>This cannot be undone.</b></li>
+          </ul>
+          <form id="del-form" onsubmit="return false" autocomplete="off">
+            <div class="form-group"><label for="del-pass">Your password</label><input type="password" id="del-pass" autocomplete="current-password" oninput="updateDeleteBtn()" /></div>
+            <label style="display:flex;gap:.55rem;align-items:flex-start;font-size:.84rem;margin-top:.8rem;cursor:pointer"><input type="checkbox" id="del-ok" onchange="updateDeleteBtn()" style="margin-top:.2rem" /> <span>I understand this cannot be undone.</span></label>
+          </form>
+          <p class="error" id="del-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
+        </div>
+      </div>
+      <div class="pf-foot">
+        <button class="btn btn-ghost btn-sm" onclick="closeDeleteModal()" type="button">Keep my account</button>
+        <button class="btn btn-danger btn-sm" id="del-submit" onclick="submitDelete()" type="button" disabled>Delete my account</button>
+      </div>
+    </div>
+  </div>
+
   <div id="pd-back" onclick="if(event.target.id==='pd-back')closePayoutModal()">
     <div class="pf" role="dialog" aria-modal="true" aria-labelledby="pd-title">
       <div class="pf-inner">
@@ -580,6 +613,7 @@
           </div>
           <p class="error" id="pd-error" role="alert" style="display:none;color:var(--red);font-size:.82rem;margin-top:.7rem"></p>
         </form>
+        <div id="pd-danger" style="margin-top:1.1rem;padding-top:.9rem;border-top:1px solid var(--border-s)"><button type="button" class="link-danger" onclick="openDeleteModal()">Delete my account</button></div>
       </div>
       <div class="pf-foot">
         <button class="btn btn-ghost btn-sm" id="pd-cancel" onclick="closePayoutModal()" type="button">Cancel</button>
@@ -1408,6 +1442,40 @@
     };
     window.closeProfile=function(){ document.getElementById('pf-back').classList.remove('open'); };
 
+    /* ── Delete account: explained first, password to confirm, blocked while money is owed ── */
+    window.openDeleteModal=async function(){
+      const $=id=>document.getElementById(id);
+      if($('pd-back').classList.contains('open')) closePayoutModal(true);
+      $('del-pass').value=''; $('del-ok').checked=false; $('del-error').style.display='none';
+      $('del-blocked').style.display='none'; $('del-form-wrap').style.display='';
+      $('del-submit').style.display=''; $('del-submit').disabled=true;
+      $('del-back').classList.add('open');
+      try{
+        // Asked up front so the reason (money still owed) is the first thing they read,
+        // not something found out after typing a password. The server re-checks on delete.
+        const d=await api('/api/clipper/me/delete');
+        if(d.blocked){
+          $('del-blocked').textContent=d.reason; $('del-blocked').style.display='block';
+          $('del-form-wrap').style.display='none'; $('del-submit').style.display='none';
+        }else $('del-pass').focus();
+      }catch(e){ $('del-pass').focus(); }
+    };
+    window.closeDeleteModal=function(){ document.getElementById('del-back').classList.remove('open'); };
+    window.updateDeleteBtn=function(){
+      document.getElementById('del-submit').disabled=!(document.getElementById('del-ok').checked&&document.getElementById('del-pass').value);
+    };
+    window.submitDelete=async function(){
+      const btn=document.getElementById('del-submit'), errorEl=document.getElementById('del-error');
+      errorEl.style.display='none'; btn.disabled=true; btn.textContent='Deleting…';
+      try{
+        await api('/api/clipper/me/delete',{method:'POST',body:JSON.stringify({password:document.getElementById('del-pass').value})});
+        toast('Your account has been deleted');
+        setTimeout(()=>{ location.href='/'; },1200);
+      }catch(e){
+        errorEl.textContent=e.message||'Could not delete the account.'; errorEl.style.display='block';
+        btn.disabled=false; btn.textContent='Delete my account';
+      }
+    };
     window.openPasswordModal=function(){
       document.getElementById('pw-current').value='';
       document.getElementById('pw-new').value='';
@@ -1493,6 +1561,9 @@
         intro.textContent='How ClipGrow reaches and pays you. Only you and the ClipGrow admin ever see this — never another clipper. Editable any time.';
       }
       document.getElementById('pd-cancel').style.display=pdRequired?'none':'';
+      // Not offered while the details are still being asked for: someone who has just
+      // signed in should not meet a delete button before they have seen the dashboard.
+      document.getElementById('pd-danger').style.display=pdRequired?'none':'';
       document.getElementById('pd-back').classList.add('open');
       // Show what is wrong with values already on file (e.g. entered under the
       // older, looser rules) straight away rather than only after a failed save.

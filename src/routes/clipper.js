@@ -28,6 +28,7 @@ import { syncAccountClips, reallocateCampaign } from '../earnings.js';
 import { getBudget, CLIP_COOLDOWN_MS } from '../rate-budget.js';
 import { submitApplication, applicationState } from '../applications.js';
 import { waitText } from '../backoff.js';
+import { touchLastSeen, archiveClipper, selfDeleteBlockers } from '../account-lifecycle.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
 import { discordAvailable, discordRequired as discordRequiredFor } from '../discord.js';
@@ -156,6 +157,10 @@ export async function handleClipper(request, env, url) {
   const me = await getClipperById(env.DB, clipperId);
   if (!me || me.status === 'deleted') return json({ error: 'Account no longer exists' }, 401, { 'Set-Cookie': clearCookieHeader('cg_session') });
 
+  // Using the dashboard is what keeps an account from being treated as unused (and
+  // cancels any warning already sent). Written at most every few hours.
+  await touchLastSeen(env.DB, me);
+
   // A disabled account keeps read access to its own numbers but cannot act.
   const readOnly = me.status !== 'active';
   const blockIfReadOnly = () => readOnly
@@ -180,6 +185,28 @@ export async function handleClipper(request, env, url) {
   const needsDiscord = () => (!discordRequired || me.discord_user_id)
     ? null
     : err('Connect your Discord first. Open your dashboard and choose Connect Discord.', 403);
+
+  // ------------------------------------------------------- delete account
+  // A clipper can close their own account. The GET tells the screen whether it is
+  // allowed right now (money still owed blocks it) so the explanation comes first;
+  // the POST re-checks everything, because a screen is not a security boundary.
+  // Needs the password again: a session left open on a shared phone must not be
+  // enough to erase someone.
+  if (pathname === '/api/clipper/me/delete' && method === 'GET') {
+    if (readOnly) return json({ blocked: true, reason: 'Your account is disabled. Contact the ClipGrow admin.' });
+    return json(await selfDeleteBlockers(env.DB, clipperId));
+  }
+  if (pathname === '/api/clipper/me/delete' && method === 'POST') {
+    if (readOnly) return err('Your account is disabled, so it cannot be deleted from here. Contact the ClipGrow admin.', 403);
+    const { password } = await readJson(request);
+    if (!password) return err('Enter your password to confirm.');
+    if (!(await verifyPassword(String(password), me.password_hash, me.password_salt))) return err('That password is not right.', 403);
+    const blockers = await selfDeleteBlockers(env.DB, clipperId);
+    if (blockers.blocked) return err(blockers.reason, 409);
+    const r = await archiveClipper(env, clipperId, { reason: 'self', scrub: true });
+    if (r.error) return err(r.error, r.status || 400);
+    return json({ ok: true }, 200, { 'Set-Cookie': clearCookieHeader('cg_session') });
+  }
 
   // ------------------------------------------------------------- profile
   if (pathname === '/api/clipper/me' && method === 'GET') {
