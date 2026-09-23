@@ -5,6 +5,7 @@ import { handleClient } from './routes/client.js';
 import { handleInstagramAuth } from './routes/instagram-auth.js';
 import { handleYoutubeAuth } from './routes/youtube-auth.js';
 import { handleDiscordAuth } from './routes/discord-auth.js';
+import { handleBot } from './bot-api.js';
 import { handlePublic } from './routes/public.js';
 import { handleMedia } from './routes/media.js';
 import { handleCampaignPage } from './routes/campaigns.js';
@@ -44,7 +45,7 @@ async function resolveActor(env, session) {
   return { actorType: 'anonymous', actorId: null, actorLabel: null };
 }
 
-const handlers = [handleInstagramAuth, handleYoutubeAuth, handleDiscordAuth, handleAdmin, handleClipper, handleModerator, handleClient, handlePublic, handleMedia];
+const handlers = [handleInstagramAuth, handleYoutubeAuth, handleDiscordAuth, handleBot, handleAdmin, handleClipper, handleModerator, handleClient, handlePublic, handleMedia];
 
 // One "Log In" link on the homepage points at /clipper -- both this and
 // /client serve the same unified login page (login.html), which has a

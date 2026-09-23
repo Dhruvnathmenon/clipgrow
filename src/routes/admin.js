@@ -537,7 +537,9 @@ export async function handleAdmin(request, env, url) {
         // Same admin-only boundary, migration 030.
         contact_number: c.contact_number || null, email: c.email || null, legal_name: c.legal_name || null,
         // Fallback contact channel, migration 035/039 -- same boundary again.
-        discord_username: c.discord_username || null
+        discord_username: c.discord_username || null,
+        // Whether a verified Discord is linked, and which handle. Admin-only, same boundary.
+        discord_linked: !!c.discord_user_id, discord_handle: c.discord_handle || null
       };
     });
     return json({ clippers: out });
@@ -620,6 +622,23 @@ export async function handleAdmin(request, env, url) {
       const { hash, salt } = await hashPassword(password);
       await env.DB.prepare('UPDATE moderators SET password_hash = ?, password_salt = ? WHERE id = ?').bind(hash, salt, params.id).run();
     }
+    return json({ ok: true });
+  }
+
+  // A verified Discord is not something a clipper can change themselves, or one
+  // person could keep re-pointing an account at whichever Discord suits them. But a
+  // Discord that is hacked, banned or deleted would leave them with no way back, so
+  // the admin can release it and the clipper links a new one.
+  params = matchPath('/api/admin/clippers/:id/discord-unlink', pathname);
+  if (params && method === 'POST') {
+    const c = await env.DB.prepare('SELECT id, username, discord_user_id FROM clippers WHERE id = ?').bind(params.id).first();
+    if (!c) return err('Not found', 404);
+    if (!c.discord_user_id) return err('This clipper has no Discord linked.', 409);
+    await env.DB.prepare('UPDATE clippers SET discord_user_id = NULL, discord_handle = NULL, discord_linked_at = NULL WHERE id = ?').bind(c.id).run();
+    await logAction(env.DB, {
+      staffType: 'admin', staffName: 'Admin', action: 'discord_unlinked',
+      targetType: 'clipper', targetId: c.id, targetLabel: c.username
+    });
     return json({ ok: true });
   }
 
@@ -822,7 +841,10 @@ export async function handleAdmin(request, env, url) {
     for (const cid of touchedCampaigns) await reallocateCampaign(env.DB, cid);
 
     await env.DB.prepare(
-      "UPDATE clippers SET status = 'deleted', username = username || '_deleted' || id WHERE id = ?"
+      // The Discord link is freed with the username: it is UNIQUE, so an archived
+      // account would otherwise hold that Discord identity forever and its owner
+      // could never link it to a new account.
+      "UPDATE clippers SET status = 'deleted', username = username || '_deleted' || id, discord_user_id = NULL, discord_handle = NULL, discord_linked_at = NULL WHERE id = ?"
     ).bind(params.id).run();
     return json({ ok: true, freed_username: clipper.username });
   }
@@ -834,7 +856,13 @@ export async function handleAdmin(request, env, url) {
   }
 
   if (pathname === '/api/admin/discord-health' && method === 'GET') {
-    return json(await discordHealth(env));
+    const health = await discordHealth(env);
+    // Beside the Discord checks: is the bot itself talking to us, and is the door
+    // it uses switched on. "Never" is normal until the bot is pointed at this API.
+    const last = await env.DB.prepare('SELECT MAX(ts) AS last_at, COUNT(*) AS calls FROM bot_api_calls WHERE ts > ?')
+      .bind(Date.now() - 60 * 60 * 1000).first();
+    const ever = await env.DB.prepare('SELECT MAX(ts) AS last_at FROM bot_api_calls').first();
+    return json({ ...health, bot_api: { enabled: !!env.BOT_API_TOKEN, last_call_at: (ever && ever.last_at) || null, calls_last_hour: (last && last.calls) || 0 } });
   }
 
   if (pathname === '/api/admin/campaigns' && method === 'GET') {

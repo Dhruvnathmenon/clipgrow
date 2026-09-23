@@ -342,6 +342,19 @@ one account) as the duplicate-account backstop. Andrig's ticket-based review and
 "auth code" idea are deliberately NOT adopted: the website review already
 exists, is tested, and unlocks Step 2 automatically.
 
+**Phase 5 - Bot API (built, checkpoint 16; inert until BOT_API_TOKEN is set).**
+`src/bot-api.js`, migration 048, contract in `docs/bot-api-contract.md`. One intent
+(`status`), the public campaign list, a ping. No money, nothing about anyone but the
+asker, a volume breaker that reports to the admin's Error Log, and a "Bot connection"
+line in Check Discord. Also: archiving a clipper frees their Discord; admins can
+"Unlink Discord" (a hacked/banned/deleted Discord otherwise strands the person, since
+a verified link cannot be changed from the dashboard). Bot side lives in Andrig's repo
+(`clipgrow-integration.md` there): `/mystatus`, the live campaign-list message, and a
+redirect of personal questions to private answers, all off until configured.
+
+**Not built yet:** Worker -> Discord DMs (Phase 4, needs a new Queue), referrals into
+D1 (Phase 6), and reading the bot token rotation into a runbook.
+
 ## 7. Open decisions (blocking Phase 3+)
 
 1. Discord-first vs Discord-only — recommendation above is Discord-first.

@@ -1808,6 +1808,11 @@
           :r.configured?'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem;color:var(--red)">NEEDS ATTENTION</div>'
           :'<div class="badge paused" style="font-size:.85rem;margin-bottom:.6rem">NOT SWITCHED ON</div>';
         el.innerHTML=head+r.checks.map(c=>`<div style="padding:.5rem 0;border-top:1px solid var(--border)"><strong style="color:${c.ok?'var(--neon)':'var(--red)'}">${c.ok?'✓':'✗'} ${esc(c.name)}</strong>${c.detail?`<div class="note" style="margin-top:.2rem;white-space:pre-wrap">${esc(c.detail)}</div>`:''}${c.fix?`<div class="note" style="margin-top:.2rem;color:var(--red)">${esc(c.fix)}</div>`:''}</div>`).join('');
+        const ba=r.bot_api;
+        if(ba){
+          const when=ba.last_call_at?new Date(ba.last_call_at).toLocaleString():'never';
+          el.innerHTML+=`<div style="padding:.5rem 0;border-top:1px solid var(--border)"><strong style="color:${ba.enabled?'var(--neon)':'var(--muted-l)'}">${ba.enabled?'✓':'–'} Bot connection</strong><div class="note" style="margin-top:.2rem">${ba.enabled?'The bot API is switched on.':'The bot API is off until a BOT_API_TOKEN is set.'} Last request from the bot: ${esc(when)}. Requests in the last hour: ${ba.calls_last_hour}.</div></div>`;
+        }
       }catch(e){ el.textContent='Could not run the check: '+e.message; }
       finally{ btn.disabled=false; }
     };
@@ -2148,7 +2153,7 @@
     }
     function clipperRow(c,tierBadge){
       return `<tr class="row-click" onclick="toggleClipper(${c.id})">
-          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div></td>
+          <td><span class="handle">${esc(c.display_name)}</span><div class="muted" style="font-size:.72rem">@${esc(c.username)}</div>${c.discord_linked?`<div class="muted" style="font-size:.7rem;color:var(--neon)" title="Verified through Discord login">Discord ✓ ${c.discord_handle?'@'+esc(c.discord_handle):''}</div>`:''}</td>
           <td>${num(c.campaigns)}</td>
           <td>${num(c.accounts)}${c.accounts_unhealthy>0?` <span class="badge needs_reauth">${c.accounts_unhealthy} issue</span>`:''}${c.accounts_mismatched>0?` <span class="badge needs_reauth" title="Connected account doesn't match what was approved">⚠ mismatch</span>`:''}</td>
           <td title="${c.quality.tick} tick, ${c.quality.cross} cross, ${c.quality.skip} skip">${c.quality.quality_pct==null?'—':c.quality.quality_pct+'%'}</td>
@@ -2161,6 +2166,7 @@
           <td onclick="event.stopPropagation()"><div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="refreshClipper(${c.id})" title="Refresh every video on every account this clipper has">↻ Refresh</button>
             <button class="btn btn-ghost btn-sm" onclick="openEditModal('clipper',${c.id})">Edit</button>
+            ${c.discord_linked?`<button class="btn btn-ghost btn-sm" onclick="unlinkDiscord(${c.id})" title="Release this clipper's verified Discord so they can link a different one">Unlink Discord</button>`:''}
             <button class="btn ${c.status==='active'?'btn-warn':'btn-ghost'} btn-sm" onclick="setClipper(${c.id},'${c.status==='active'?'disabled':'active'}')">${c.status==='active'?'Disable':'Enable'}</button>
             <button class="btn btn-danger btn-sm" onclick="deleteClipper(${c.id})">Delete</button>
           </div></td>
@@ -2888,6 +2894,17 @@
       try{ await api('/api/admin/clippers/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Clipper updated'); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
+    window.unlinkDiscord=async function(id){
+      if(!confirm('Unlink this clipper\x27s Discord?
+
+Use this when their Discord was hacked, banned or deleted. Nothing else changes: they keep their account, campaigns and earnings, and can connect a Discord again from their dashboard.')) return;
+      try{
+        await api('/api/admin/clippers/'+id+'/discord-unlink',{method:'POST'});
+        toast('Discord unlinked — they can connect it again');
+        loadClippers();
+      }catch(e){ toast(e.message,true); }
+    };
+
     window.deleteClipper=async function(id){
       if(!confirm('Archive this clipper?\n\nEvery video, earning and payment stays on record — nothing is deleted. They drop out of the active roster, lose login access, and their social accounts are disconnected (tokens revoked), so nothing new syncs in. Their username is freed for a new clipper to use.\n\nRestore them from Deleted Clippers below; they will need to reconnect their account to resume syncing.')) return;
       try{
