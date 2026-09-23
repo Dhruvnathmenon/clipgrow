@@ -1,7 +1,7 @@
 import { json, err, readJson, matchPath } from '../http.js';
 import { createSessionCookie, requireClipper, verifyPassword, hashPassword, clearCookieHeader } from '../auth.js';
 import {
-  now, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
+  now, normalizeUsername, defaultDisplayName, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
   unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
@@ -30,6 +30,8 @@ import { submitApplication, applicationState } from '../applications.js';
 import { readStored } from '../campaign-sources.js';
 import { logError } from '../error-log.js';
 import { discordAvailable, discordRequired as discordRequiredFor } from '../discord.js';
+import { validateUsername, validatePassword } from '../../components/account-validation.js';
+import { signupOpen, hashIp, signupBlockedFor, recordSignup } from '../signup.js';
 import {
   driveConfigured, createUploadSession, verifyUploadedFile, driveFileName,
   DriveError, MAX_UPLOAD_BYTES, ALLOWED_MIME
@@ -93,6 +95,52 @@ export async function handleClipper(request, env, url) {
 
   if (pathname === '/api/clipper/logout' && method === 'POST') {
     return json({ ok: true }, 200, { 'Set-Cookie': clearCookieHeader('cg_session') });
+  }
+
+  // ------------------------------------------------------------- sign-up
+  // Public, like login. The GET lets the login page decide whether to offer the
+  // form at all. An account made here can do nothing by itself: it still needs
+  // complete details, a verified Discord (once required) and an approved video.
+  if (pathname === '/api/clipper/signup' && method === 'GET') {
+    return json({ open: signupOpen(env) });
+  }
+  if (pathname === '/api/clipper/signup' && method === 'POST') {
+    if (!signupOpen(env)) return err('Sign-ups are not open yet. Ask the ClipGrow team for an account.', 403);
+    const body = await readJson(request);
+    // A field no person ever sees. A script that fills in every input does.
+    if (body.website) return err('Could not create the account.', 400);
+    const problem = validateUsername(body.username) || validatePassword(body.password, body.username);
+    if (problem) return err(problem);
+    const username = normalizeUsername(body.username);
+    const taken = () => err('That username is already taken. Try another.', 409);
+    if (await env.DB.prepare('SELECT id FROM clippers WHERE username = ? COLLATE NOCASE').bind(username).first()) return taken();
+
+    // The limit is checked BEFORE the password is hashed: hashing is the
+    // expensive step, and a flood should be turned away without paying for it.
+    const ipHash = await hashIp(request.headers.get('CF-Connecting-IP') || 'unknown', env.SESSION_SECRET);
+    const blocked = await signupBlockedFor(env.DB, ipHash);
+    if (blocked) {
+      return json({ error: blocked.scope === 'site'
+        ? 'A lot of people are signing up right now. Try again in half an hour.'
+        : 'Too many accounts were created from your connection. Try again later.' },
+        429, { 'Retry-After': String(blocked.minutes * 60) });
+    }
+
+    const { hash, salt } = await hashPassword(body.password);
+    let res;
+    try {
+      res = await env.DB.prepare(
+        `INSERT INTO clippers (username, password_hash, password_salt, display_name, status, created_at, created_by_type, created_by_name)
+         VALUES (?, ?, ?, ?, 'active', ?, 'self', 'Self sign-up')`
+      ).bind(username, hash, salt, defaultDisplayName(username), now()).run();
+    } catch (e) {
+      // Two people choosing the same name at the same moment: the unique index decides.
+      if (/UNIQUE/i.test(String(e && e.message))) return taken();
+      throw e;
+    }
+    await recordSignup(env.DB, ipHash);
+    const cookie = await createSessionCookie('clipper', res.meta.last_row_id, env.SESSION_SECRET);
+    return json({ ok: true }, 201, { 'Set-Cookie': cookie });
   }
 
   if (!pathname.startsWith('/api/clipper/')) return null;

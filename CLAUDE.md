@@ -59,3 +59,10 @@ the only way in. How far it is switched on is `DISCORD_LINK` in `wrangler.jsonc`
 `off` -> `optional` -> `required`. Move up one step per deploy, and only after **Check
 Discord** (admin Campaigns tab) is all green. The Discord secrets can exist while it is
 `off`; never enforce on their presence alone.
+
+## Self-serve sign-up
+
+Anyone can create a clipper account only while `CLIPPER_SIGNUP` is `open` in `wrangler.jsonc`
+(shipped `off`). The route is public and rate-limited (`src/signup.js`, table `signup_attempts`);
+an account it makes can do nothing until its details are complete, Discord is linked (once
+`required`) and a video is approved. Open it only after `DISCORD_LINK` is at least `optional`.

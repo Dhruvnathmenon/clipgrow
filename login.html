@@ -42,6 +42,13 @@
     .btn:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
     .error { color: var(--red); font-size: 0.83rem; margin-top: 1rem; text-align: center; }
     .hint { font-size: 0.78rem; color: var(--muted); text-align: center; margin-top: 1.5rem; line-height: 1.6; }
+    .fld-err { display: none; color: var(--red); font-size: 0.78rem; margin-top: 0.35rem; }
+    input.invalid { border-color: var(--red); }
+    .switch { font-size: 0.85rem; text-align: center; margin-top: 1.2rem; display: none; }
+    .switch a { color: var(--neon); text-decoration: none; font-weight: 600; }
+    .switch a:hover { text-decoration: underline; }
+    .switch a:focus-visible { outline: 2px solid var(--neon); outline-offset: 3px; border-radius: 3px; }
+    .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
   </style>
 </head>
 <body>
@@ -61,7 +68,22 @@
       <button type="submit" class="btn" id="submit-btn">Log In</button>
       <p class="error" id="error" role="alert" style="display:none">Invalid username or password</p>
     </form>
+    <form id="signup-form" novalidate style="display:none">
+      <div class="form-group"><label for="su-username">Choose a username</label>
+        <input type="text" id="su-username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="24" />
+        <p class="fld-err" id="su-e-username"></p></div>
+      <div class="form-group"><label for="su-password">Choose a password</label>
+        <input type="password" id="su-password" autocomplete="new-password" maxlength="128" />
+        <p class="fld-err" id="su-e-password"></p></div>
+      <div class="form-group"><label for="su-confirm">Repeat the password</label>
+        <input type="password" id="su-confirm" autocomplete="new-password" maxlength="128" />
+        <p class="fld-err" id="su-e-confirm"></p></div>
+      <div class="trap" aria-hidden="true"><label>Website <input type="text" id="su-website" tabindex="-1" autocomplete="off" /></label></div>
+      <button type="submit" class="btn" id="su-btn">Create account</button>
+      <p class="error" id="su-error" role="alert" style="display:none"></p>
+    </form>
     <p class="hint" id="hint">Don't have an account? Your ClipGrow admin creates it for you and shares the credentials directly.</p>
+    <p class="switch" id="switch"><a href="#" id="switch-link">New here? Create an account</a></p>
   </div>
   <script>
     const COPY = {
@@ -80,8 +102,83 @@
       document.title = 'ClipGrow — ' + COPY[role].title;
       document.getElementById('error').style.display = 'none';
       history.replaceState(null, '', role === 'client' ? '/client' : '/clipper');
+      if (window.renderChrome) renderChrome();
     }
     setRole(role);
+
+    /* ── Create an account ──
+       Offered only to clippers, and only when the server says sign-up is open.
+       The rules come from the same file the server uses, so what is shown while
+       typing is what will be enforced. */
+    let signupOpen = false, mode = 'login', RULES = null;
+    const $ = id => document.getElementById(id);
+    const loadRules = async () => RULES || (RULES = await import('/components/account-validation.js?v=1'));
+
+    window.renderChrome = function () {
+      const creating = role === 'clipper' && signupOpen && mode === 'signup';
+      if (role !== 'clipper') mode = 'login';
+      $('login-form').style.display = creating ? 'none' : '';
+      $('signup-form').style.display = creating ? '' : 'none';
+      $('form-title').textContent = creating ? 'Create your clipper account' : COPY[role].title;
+      // The line about an admin creating accounts is only true while sign-up is closed.
+      $('hint').textContent = (role === 'clipper' && signupOpen) ? '' : COPY[role].hint;
+      $('hint').style.display = (role === 'clipper' && signupOpen) ? 'none' : '';
+      const sw = $('switch');
+      sw.style.display = (role === 'clipper' && signupOpen) ? 'block' : 'none';
+      $('switch-link').textContent = creating ? 'Already have an account? Log in' : 'New here? Create an account';
+    };
+
+    $('switch-link').addEventListener('click', e => {
+      e.preventDefault();
+      mode = mode === 'signup' ? 'login' : 'signup';
+      renderChrome();
+      (mode === 'signup' ? $('su-username') : $('username')).focus();
+    });
+
+    fetch('/api/clipper/signup').then(r => r.json()).then(d => { signupOpen = !!d.open; renderChrome(); }).catch(() => {});
+
+    function fieldError(id, msg) {
+      const out = $('su-e-' + id), inp = $('su-' + id);
+      out.textContent = msg || ''; out.style.display = msg ? 'block' : 'none';
+      inp.classList.toggle('invalid', !!msg);
+      inp.setAttribute('aria-invalid', msg ? 'true' : 'false');
+      return msg;
+    }
+    async function checkUsername() { const R = await loadRules(); return fieldError('username', R.validateUsername($('su-username').value)); }
+    async function checkPassword() { const R = await loadRules(); return fieldError('password', R.validatePassword($('su-password').value, $('su-username').value)); }
+    function checkConfirm() { return fieldError('confirm', $('su-confirm').value !== $('su-password').value ? 'The two passwords do not match.' : null); }
+
+    // Check a field when the person leaves it, and re-check on each keystroke only
+    // once it is already showing a problem, so nobody is nagged mid-word.
+    $('su-username').addEventListener('blur', () => { if ($('su-username').value) checkUsername(); });
+    $('su-password').addEventListener('blur', () => { if ($('su-password').value) checkPassword(); });
+    $('su-confirm').addEventListener('blur', () => { if ($('su-confirm').value) checkConfirm(); });
+    $('su-username').addEventListener('input', () => { if ($('su-username').classList.contains('invalid')) checkUsername(); });
+    $('su-password').addEventListener('input', () => { if ($('su-password').classList.contains('invalid')) checkPassword(); });
+    $('su-confirm').addEventListener('input', () => { if ($('su-confirm').classList.contains('invalid')) checkConfirm(); });
+
+    $('signup-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const errorEl = $('su-error'), btn = $('su-btn');
+      errorEl.style.display = 'none';
+      const bad = [await checkUsername(), await checkPassword(), checkConfirm()];
+      if (bad.some(Boolean)) { (bad[0] ? $('su-username') : bad[1] ? $('su-password') : $('su-confirm')).focus(); return; }
+      btn.disabled = true; btn.textContent = 'Creating…';
+      try {
+        const res = await fetch('/api/clipper/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: $('su-username').value.trim(), password: $('su-password').value, website: $('su-website').value })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Could not create the account. Try again.');
+        location.href = '/dashboard';
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Create account';
+      }
+    });
 
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();

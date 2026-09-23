@@ -328,7 +328,12 @@ authenticated session and never creates one.
   `https://clipgrow.in/api/auth/discord/callback` registered under
   OAuth2 > Redirects, and the bot allowed to create invites (auto-join).
 
-**Phase 3b - Self-serve signup (NOT yet built).** Found while re-reading
+**Phase 3b - Self-serve signup (built, checkpoint 15; ships CLOSED).**
+`CLIPPER_SIGNUP` in `wrangler.jsonc` is `off` | `open`. `POST /api/clipper/signup`
+(`clipper.js`), rules in `components/account-validation.js` (shared with the login
+page), brake in `src/signup.js` + migration 047 (6/hour and 15/day per hashed
+address, 200/hour site-wide, checked BEFORE the password is hashed; honeypot field).
+Open it only after `DISCORD_LINK` is at least `optional`. Original finding, while re-reading
 Andrig's `verification-process-proposal.md`: accounts are still created only by
 an admin (`src/routes/admin.js`, `POST /api/admin/clippers`). Needed:
 `POST /api/clipper/signup` (clipper picks username + password), with per-IP

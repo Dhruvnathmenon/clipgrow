@@ -33,6 +33,11 @@
     // "required" once enough clippers have linked. Committed on purpose, so each
     // step is a reviewable, revertable deploy rather than a dashboard click.
     "DISCORD_LINK": "off",
+    // Whether anyone can create a clipper account themselves ("open") or only an
+    // admin can ("off"). Open it once Discord linking is at least "optional", so a
+    // second account for the same person can be caught. Committed on purpose, so
+    // opening it is a reviewable, revertable deploy.
+    "CLIPPER_SIGNUP": "off",
     // Must exactly equal a Redirect registered on the Discord application
     // (Developer Portal > OAuth2 > Redirects).
     "DISCORD_REDIRECT_URI": "https://clipgrow.in/api/auth/discord/callback"
