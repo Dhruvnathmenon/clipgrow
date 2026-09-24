@@ -19,7 +19,8 @@ top to bottom by a person, not a programmer. Nothing here needs you to run anyth
   channels. Section 4 is the full picture.
 - **Everything is saved in GitHub with a bookmark after each step**, so any step can be
   undone on its own (section 3).
-- **One decision is waiting on you**: two accounts share every contact detail (section 7).
+- **The one duplicate account was removed at your request** (section 7). Every remaining
+  account is now unique.
 
 ---
 
@@ -225,8 +226,9 @@ also does nothing until someone restarts it.
   and ran its checks: a mistyped email gets "Did you mean ravi@gmail.com?", a bad number and
   a bad Discord name each get their own message, corrected values pass, and there were **no
   errors in the browser console**.
-- Live data: 60 accounts, keys match details exactly, and the only account without keys is the
-  duplicate described in section 7.
+- Live data, re-checked after the duplicate was removed: 59 live accounts; 0 duplicate emails,
+  phones or Discord names (worked out again from the typed details, not just the stored keys);
+  0 stored keys that disagree with their details.
 
 ### Not verified, and why you should know
 - **The new admin panels and the Delete Account pop-up were not looked at on screen while
@@ -262,11 +264,11 @@ also does nothing until someone restarts it.
 
 ## 7. Waiting on you
 
-1. **Two accounts share every contact detail.** `ranjith` (an old, real clipper: 58 clips, 2
-   payments) and `manu` (made by an admin on 20 Sep: no clips, no connected accounts). Same
-   email, phone and Discord. I changed nothing. `ranjith` holds the details; `manu` is simply
-   exempt until they save their profile again, at which point they will be told the details
-   are taken. Tell me which to keep.
+1. **Done (24 Sep): `manu` removed, `ranjith` kept.** `manu` had no clips, payments or
+   connected accounts, and two rejected videos. It was archived the same way the admin Delete
+   does it, with its email, phone and Discord erased (they were identical to `ranjith`'s, so
+   nothing was lost) so a restore cannot quietly bring the duplicate back. It is recorded in the
+   audit log as `remove_duplicate_account`. Nothing on `ranjith` changed.
 2. **Switch-on order, when you are ready** (each is one small change and one deploy, checked
    before the next):
    1. Set `BOT_API_TOKEN` on the website and the same value as `CLIPGROW_BOT_TOKEN` in the bot,
