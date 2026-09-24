@@ -219,9 +219,21 @@ restored later takes its old place in front of newer ones. That is the rule as b
 consistent. The consequence is the surprise you hit: a campaign that reopens because budget was
 freed can have less headroom than it looks like, since clips already inside their 7-day window keep
 growing into it, and new clips may still end up at ₹0 legitimately. The message now says so
-truthfully. If you want a different rule, the options are: reserve a share for clips still growing
-before reopening the campaign, or order by post time instead of arrival time. Neither is needed for
-this bug.
+truthfully.
+
+If you want a different rule, the options are: reserve a share for clips still growing before
+reopening the campaign, or order by **post time** instead of the moment ClipGrow found the clip.
+Neither is needed for this bug. To help you choose, this is what the difference is on Mali today:
+
+- The typical clip is found **1.7 hours** after it was posted. One in ten waits more than 5.3 hours,
+  and the slowest waited 10.8. 151 of the 347 automatically found clips waited over 2 hours. Part of
+  that is the normal hourly rhythm, and part is the outage.
+- Ordering by post time would put **395 of 462 clips in a different place** in line (121 of them by
+  more than 10 places). It would only matter when the budget is nearly gone: Mali has about ₹3,900 free
+  today, so nobody is short.
+- I lean towards post time. It is the moment a clipper controls and can see, whereas the moment we find
+  a clip depends on where their account happens to sit in the hourly list. The cost is that it changes
+  who is funded in a tight campaign after the fact, so it should be announced, not slipped in.
 
 ---
 
@@ -232,5 +244,20 @@ this bug.
 - The cause was proved from a live production log, not inferred.
 - Mali was corrected with the real allocator and re-checked: no clip is priced differently from what
   the allocator says now.
-- Deployed as `f0afdabe`. **Result of the first hourly run on the new code is recorded at the end of
-  this file once it has happened** (see below).
+- Deployed in three small steps (the last is version `2747e7c8`), checkpoints 23 to 26.
+
+### The first hourly run on the new code (18:01 UTC), watched live
+
+| | Before (17:01 run) | After (18:01 run) |
+|---|---|---|
+| Outcome | `exception`: "Too many API requests by single Worker invocation" | **`ok`** |
+| Wall time / processor time | 5.7 min / 0.6 s | 5.3 min / 0.66 s |
+| Job | killed part-way, marked failed 1 hour later | **done in one pass**: 147 clips refreshed, 9 new clips imported, nothing left over |
+| Requests used | over 1,000 (killed) | **2,117**, against 10,000 allowed and an 8,000 stop-early budget |
+| Dead job from the hour before | left as "running" until reaped, silently | reaped, and written to the Error Log as `JOB_ABANDONED` (entry 151) |
+| Pricing | not done | all 5 open campaigns match the allocator exactly (HeySchool, Clipgrow and Rishabh had small drifts an hour earlier, fixed by the run itself) |
+
+One thing this run did not exercise: the hand-off to a second step. The whole job fitted in one step this
+hour, so that path is verified by the tests (including the one that runs several steps under a ceiling), not
+yet by a production run. It will be the first time it is used in production the next time a run has more than
+200 platform calls of work.

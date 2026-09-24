@@ -5,6 +5,19 @@ letting it grow into a full history (that's what changelog.md is for).
 
 ## Pending on the founder's side
 
+- **Wallet ledger is missing every payout since 6 Sep** (found 24 Sep 2026): 30 of 38 settlements,
+  Rs 51,505, have no `ledger_entries` row, because the Payouts "Pay & Lock" form sends no wallet
+  (it lost that in the 5 Sep "Finance tab reinstated" admin.html change, commit 25ce33d). Until fixed
+  the wallet balance, the "cannot send money you do not have" check, funding headroom and agency P&L
+  are overstated by that amount. Proposed, NOT done: (1) back-fill the 30 entries as one tagged,
+  voidable batch, (2) default the payout to the agency wallet server-side, (3) add a "pay anyway"
+  tick, because after back-fill the ledger says only ~Rs 1,050 is available (59,000 received less
+  57,950 paid) and the guard would start refusing payouts. Advances and bonuses also never reach the
+  ledger. Detail: docs/pricing-and-budget-audit.md section 6.
+- **Who gets budget when it is freed**: first-come-first-served is by the moment ClipGrow found a clip
+  (median 1.7 h after posting on Mali), not post time; ordering by post time would move 395 of 462 Mali
+  clips. Founder's call. Same doc, section 6.
+
 - **Meta Business Verification** is blocked on: (1) registering ClipGrow
   as a legal business entity — Udyam/MSME registration recommended as the
   fastest path — and (2) a working `support@clipgrow.in` mailbox
