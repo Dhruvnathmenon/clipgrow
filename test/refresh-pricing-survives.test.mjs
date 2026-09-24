@@ -1,4 +1,4 @@
-// 24 Sep 2026: for 13 hourly runs in a row, the refresh job was killed part-way and
+// 24 Sep 2026: for 14 hourly runs in a row, the refresh job was killed part-way and
 // nothing was priced. A clip that had just been imported sat at Rs 0 while its views
 // climbed past 10,000, under a message saying the campaign's budget had run out --
 // on a campaign with about Rs 3,900 unallocated.
@@ -167,7 +167,7 @@ test('the guard budget stays tied to the limit wrangler.jsonc pins, with room to
   assert.ok(m, 'wrangler.jsonc must pin limits.subrequests explicitly');
   const pinned = Number(m[1]);
   assert.ok(pinned >= 10_000,
-    `limits.subrequests is ${pinned}: D1 queries count against it, and 1,000 is what killed 13 runs in a row`);
+    `limits.subrequests is ${pinned}: D1 queries count against it, and 1,000 is what killed 14 runs in a row`);
   assert.ok(SUBREQUEST_BUDGET + 1500 <= pinned,
     `SUBREQUEST_BUDGET (${SUBREQUEST_BUDGET}) leaves under 1,500 of the pinned ${pinned} for the end of a chunk`);
 });

@@ -2,7 +2,7 @@
 //
 // It used to be written out five times (the hourly cron, the queue consumer,
 // and three admin buttons), each as "re-price everything when the job finishes".
-// A job that never finished -- and for 13 hourly runs in a row on 24 Sep 2026
+// A job that never finished -- and for 14 hourly runs in a row on 24 Sep 2026
 // none did -- therefore priced nothing, so a clip that had just arrived stayed
 // at Rs 0 while its views climbed, under a message claiming the campaign's budget
 // had run out. Pricing is now tied to the thing that changes it (views), not to

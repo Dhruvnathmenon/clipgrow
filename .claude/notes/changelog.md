@@ -5,6 +5,17 @@ High-level, dated. For exact detail read the actual commit
 exists to answer "have we already done X" quickly, not to replace git log.
 
 ## 2026-09-24
+- **Earnings stuck at Rs 0 / hourly refresh being killed** (checkpoint 23). Root cause proved from
+  a production `wrangler tail`: every refresh run since 03:00 UTC ended in "Too many API requests by
+  single Worker invocation" because D1 queries count as subrequests and `limits.subrequests` was pinned at
+  1000 (a chunk needs ~1,300). Prices were only re-computed when a whole job finished, so nothing was
+  priced and a clip with 10,800 views showed Rs 0 under a false "budget ran out". Fixed: limit 10,000, a
+  subrequest guard in `runChunk`, pricing after every leg and at each cron start (`src/refresh-hooks.js`),
+  per-campaign isolation in `reallocateAll`, honest `explainEarning` (takes `budgetLeft`), `settlePayment`
+  prices before locking, Error Log entries for abandoned jobs and pricing failures, and stricter campaign
+  create/edit (no Infinity, no silent removal of the per-video cap, CPM > 0, budget not below what is paid,
+  status reconciled, impact of an edit reported). New read-only `scripts/pricing-drift.mjs`.
+  Audit write-up: `docs/pricing-and-budget-audit.md`.
 - **Account lifecycle, retries, one-account-per-person** (checkpoints 17-20, migrations 049-051).
   Admin "Video Applications" tab (who approved/rejected each video, and how many of a
   moderator's approvals were later removed); Step 3 tile dropped from the onboarding stepper;

@@ -70,6 +70,14 @@ and Discord username are held unique on `email_key`/`phone_key`/`discord_key` (m
 statement that writes one of those three columns must write its key too (a test reads the source and
 fails if one does not). Retries after a rejection wait 1h, 2h, 4h... up to a day (`src/backoff.js`).
 
+## Refresh jobs, pricing and the request limit
+
+Every D1 query is a subrequest, so a refresh leg costs ~6 per clip and `wrangler.jsonc` pins
+`limits.subrequests` at 10,000; `SUBREQUEST_BUDGET` (src/refresh-jobs.js) must stay 1,500+ under it (a
+test checks). Earnings are stored, so they are re-priced after EVERY leg and at the start of every hourly
+run (`src/refresh-hooks.js`), never only when a job finishes. A dead job writes `JOB_ABANDONED` to the
+Error Log. To check production pricing at any time: `node scripts/pricing-drift.mjs` (read-only).
+
 ## Self-serve sign-up
 
 Anyone can create a clipper account only while `CLIPPER_SIGNUP` is `open` in `wrangler.jsonc`

@@ -190,3 +190,57 @@ or object where an id belongs (the router maps D1's type error to a 400).
 
 **Guard:** that test reads the routes out of the source, so a new route is attacked
 automatically. Anything it reports is a real unhandled exception.
+
+## Cloudflare counts every D1 query as a subrequest
+
+**Symptom (24 Sep 2026):** a clip with 10,000+ views shown at Rs 0, telling its clipper
+"the campaign budget ran out" while the campaign had thousands unallocated. Behind it, 13
+hourly refresh jobs in a row were "Abandoned: no progress for over 30 minutes".
+
+**Cause:** `wrangler.jsonc` pinned `limits.subrequests` at 1000 on the belief that only
+`fetch()` calls count. Cloudflare's docs say otherwise: "a subrequest is any request a Worker
+makes ... to Cloudflare services like R2, KV, or D1". A refresh chunk costs ~6 D1 queries per
+clip plus the platform call, so ~170 clips is ~1,300 subrequests. The invocation was killed
+mid-item (`Too many API requests by single Worker invocation`, CPU time 0.6 s of a 5.7-minute
+run), before it wrote its final state, queued its next leg or priced a clip.
+
+**How it was proved, not guessed:** `wrangler tail` through the next hourly run. The scheduled
+event's outcome was `exception` with that message. A run that fits under the limit looks
+"done"; the ones that do not look "failed", so the job table alternated done/failed for days
+before it went to failed every hour.
+
+**Fix / guard:** limit raised to 10,000; `wrapD1` counts every statement; `runChunk` stops at
+`SUBREQUEST_BUDGET` (8,000) with room left to finish, hand off and price. A test ties the two
+numbers together, and another runs the real runner against a database that enforces a ceiling
+(`test/refresh-pricing-survives.test.mjs`, which includes a control that reproduces the death).
+Any new per-item D1 work in a job makes a leg more expensive: measure with `r.subrequests`.
+
+## A stored value that is only recomputed when a long job finishes
+
+**Symptom:** the number on screen is wrong (a price, a status, a count) and stays wrong until
+"something happens to run".
+
+**Cause:** `submissions.earning` is a function of views and the campaign's budget, but it was
+stored and recomputed only at the END of a refresh job (plus a list of admin actions). Anything
+that stopped the job from finishing stopped every price in the system moving, and nothing said so.
+
+**Fix / guard:** pricing follows the thing that changes it. `refreshHooks()` (src/refresh-hooks.js)
+re-prices after EVERY leg and the cron re-prices at the start of every hourly run; `reallocateAll`
+prices each campaign independently so one failure cannot freeze the rest; failures and abandoned jobs
+go to the Error Log (`REPRICE_FAILED`, `JOB_ABANDONED`). Payout locking (`settlePayment`) prices
+first, because locking freezes whatever is stored. `node scripts/pricing-drift.mjs` (read-only) says
+whether production is priced the way the allocator would price it now.
+
+When adding a stored derived value, list every event that changes its inputs, and give it a repair
+path that does not depend on a long job finishing.
+
+## An explanation that assumes a cause
+
+**Symptom:** the app says WHY something is so, confidently, and is wrong ("the campaign budget
+ran out").
+
+**Cause:** `explainEarning` inferred "budget" from `amount < views x cpm`, but a price that is
+merely behind its views looks identical. Deriving a reason from the outcome alone is a guess.
+
+**Fix / guard:** it now takes the campaign's remaining budget (`budgetLeft`); with budget left,
+or unknown, it says the price is being added up, and never claims the budget is gone.

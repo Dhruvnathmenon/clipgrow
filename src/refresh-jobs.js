@@ -50,7 +50,7 @@ export const CALLS_PER_INVOCATION = 200;
 // work under. wrangler.jsonc pins limits.subrequests at 10,000; when it was 1,000
 // this file assumed D1 did not count, so a chunk that had only spent ~140 clips'
 // worth ran into the ceiling, was killed mid-item, never wrote its final state,
-// never queued its continuation and never re-priced anything -- for 13 hourly runs
+// never queued its continuation and never re-priced anything -- for 14 hourly runs
 // in a row (24 Sep 2026) while clippers' new clips sat at Rs 0 with a message
 // saying the budget had run out. Stopping 2,000 short of the ceiling leaves room
 // for what a chunk still has to do after its last item: flush every account's

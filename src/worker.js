@@ -411,7 +411,7 @@ export default {
           if (reaped.length) {
             console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
             // A job that dies is a real incident, and this is the only place that
-            // ever learns of it. It went unnoticed for 13 hourly runs (24 Sep 2026)
+            // ever learns of it. It went unnoticed for 14 hourly runs (24 Sep 2026)
             // because the reaper only wrote a line to a log nobody reads: the job
             // row said "failed" and every screen carried on. The Error Log is what
             // the admin page already badges.
