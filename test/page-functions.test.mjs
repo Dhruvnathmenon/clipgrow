@@ -153,3 +153,28 @@ for (const page of PAGES) {
     );
   });
 }
+
+/*
+ * A single syntax error anywhere in a page's inline script stops the WHOLE
+ * script from running, so no function on the page is ever defined and every
+ * button is dead. That is how the admin login went unclickable: a newline typed
+ * inside a quoted string in one unrelated handler. The check above only looks at
+ * names, so it passed. This one actually parses every inline script on every
+ * page, without running it.
+ */
+import { readdirSync } from 'node:fs';
+
+for (const page of readdirSync(new URL('../', import.meta.url)).filter(f => f.endsWith('.html'))) {
+  test(`${page}: every inline script is valid JavaScript`, () => {
+    const html = readFileSync(new URL(`../${page}`, import.meta.url), 'utf8');
+    let n = 0;
+    for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+      if (/\bsrc\s*=/.test(m[1]) || /type\s*=\s*["'](?:application\/(?:ld\+)?json|importmap)["']/i.test(m[1])) continue;
+      n++;
+      const module = /type\s*=\s*["']module["']/i.test(m[1]);
+      const body = module ? m[2].replace(/^\s*import[^\n]*$/gm, '') : m[2];
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      assert.doesNotThrow(() => new AsyncFunction(body), SyntaxError, `${page}: inline script #${n} has a syntax error and would not run at all`);
+    }
+  });
+}

@@ -2996,9 +2996,7 @@
       catch(e){ toast(e.message,true); }
     };
     window.unlinkDiscord=async function(id){
-      if(!confirm('Unlink this clipper\x27s Discord?
-
-Use this when their Discord was hacked, banned or deleted. Nothing else changes: they keep their account, campaigns and earnings, and can connect a Discord again from their dashboard.')) return;
+      if(!confirm('Unlink this clipper\'s Discord?\n\nUse this when their Discord was hacked, banned or deleted. Nothing else changes: they keep their account, campaigns and earnings, and can connect a Discord again from their dashboard.')) return;
       try{
         await api('/api/admin/clippers/'+id+'/discord-unlink',{method:'POST'});
         toast('Discord unlinked — they can connect it again');
