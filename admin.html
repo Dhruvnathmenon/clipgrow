@@ -2525,8 +2525,10 @@
     // Same as errActor/errorRow always distinguishing 'clipper' rows for the
     // WhatsApp/Discord buttons -- source names the SYSTEM that failed, not
     // who hit it.
-    const ERROR_SOURCE_LABEL={ instagram_oauth:'Instagram connect', youtube_oauth:'YouTube connect', api:'Site error' };
-    const ERROR_SOURCE_BADGE={ instagram_oauth:'neutral', youtube_oauth:'budget_full', api:'needs_reauth' };
+    // refresh / pricing: a view refresh that died, or campaigns whose earnings could not be brought
+    // up to date. Both mean numbers clippers see may be behind, so they read as attention, not noise.
+    const ERROR_SOURCE_LABEL={ instagram_oauth:'Instagram connect', youtube_oauth:'YouTube connect', api:'Site error', refresh:'View refresh', pricing:'Earnings pricing' };
+    const ERROR_SOURCE_BADGE={ instagram_oauth:'neutral', youtube_oauth:'budget_full', api:'needs_reauth', refresh:'needs_reauth', pricing:'needs_reauth' };
     let ERROR_SHOW_ALL=false;
     function setErrorCount(n){
       const el=document.getElementById('error-count');
