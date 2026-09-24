@@ -43,9 +43,20 @@ export function cpmEarning(views, cpm) {
  *   below_min   has not reached the campaign's minimum view count yet
  *   capped      hit the campaign's maximum payout per video
  *   budget      the campaign's remaining budget ran out before this clip
+ *   pending_price  the clip is worth more than it is currently credited with, yet
+ *               the campaign still has budget to give -- so the price has simply
+ *               not caught up with the views yet
  *   cpm         the plain views x cpm figure, nothing reduced it
+ *
+ * `budgetLeft` is what the campaign has not yet allocated, from the stored figures
+ * (budget minus everything spent or pending). It is what separates "the budget ran
+ * out" from "the price is behind", which look identical on the clip itself: both
+ * are an earning below views x cpm. Without it the first was assumed every time, so
+ * a clip that had merely not been re-priced told its clipper the budget was gone
+ * while the campaign had thousands of rupees free. Left out, it is treated as
+ * unknown, and unknown never claims the budget ran out.
  */
-export function explainEarning(row, { cpm, minViews = 0, maxPerVideo = 0 } = {}) {
+export function explainEarning(row, { cpm, minViews = 0, maxPerVideo = 0, budgetLeft = null } = {}) {
   const views = Number(row.views || 0);
   const locked = !!row.locked_at;
   const amount = locked ? Number(row.locked_earning || 0) : Number(row.earning || 0);
@@ -70,8 +81,13 @@ export function explainEarning(row, { cpm, minViews = 0, maxPerVideo = 0 } = {})
     return { ...base, reason: 'below_min', views_needed: Math.max(0, minViews - views) };
   }
   // The allocator applies the per-video cap first, then clamps to whatever
-  // budget is left. Comparing against both tells us which one actually bit.
-  if (amount < ceiling) return { ...base, reason: 'budget' };
+  // budget is left. Comparing against both tells us which one actually bit --
+  // but only if the budget really is gone. A clip below its ceiling in a
+  // campaign that still has budget was never clamped by anything.
+  if (amount < ceiling) {
+    const spentUp = budgetLeft != null && Number(budgetLeft) <= 0;
+    return { ...base, reason: spentUp ? 'budget' : 'pending_price' };
+  }
   if (ceiling < full) return { ...base, reason: 'capped' };
   return { ...base, reason: 'cpm' };
 }
@@ -100,6 +116,11 @@ export function explainEarningText(x) {
     case 'budget':
       return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.capped_earning)}, ` +
              `but the campaign budget ran out — this clip earned ${RS(x.amount)} of it.`;
+    case 'pending_price':
+      // No claim about the budget: the campaign still has some. The only thing
+      // that is true is that the figure has not been brought up to date yet.
+      return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.capped_earning)}. ` +
+             `The campaign still has budget, so this is being added up — it will show in your earnings after the next refresh.`;
     default:
       return `${NUM(x.views)} views at ${RS(x.cpm)} per 1,000 = ${RS(x.amount)}.`;
   }

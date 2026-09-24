@@ -1,11 +1,15 @@
 // Chained refresh jobs.
 //
 // A refresh used to be one flat pass that had to fit inside a single Worker
-// invocation. It did not: Cloudflare caps EXTERNAL subrequests (fetch() to
-// Instagram/YouTube -- D1 does not count toward it) per invocation, and a full
+// invocation. It did not: Cloudflare caps SUBREQUESTS per invocation, and a full
 // sweep of every account exceeds that. The accounts unlucky enough to be last
 // in the loop simply got cut off, which is confirmed in production as clips
 // carrying sync_error = 'SUBREQUEST_LIMIT'.
+//
+// Every D1 query counts as a subrequest, not just the fetch() calls to
+// Instagram/YouTube. This header used to say D1 did not, and that mistaken belief
+// is what let the limit be pinned at 1,000 while a chunk needed ~1,300: see
+// SUBREQUEST_BUDGET below and the note beside `limits` in wrangler.jsonc.
 //
 // So a refresh is now a JOB: an explicit work list consumed across as many
 // invocations as it takes. Each invocation spends up to CALLS_PER_INVOCATION
@@ -30,16 +34,29 @@ import { isPaused } from './d1-usage.js';
 import { recordViewSnapshot } from './view-snapshots.js';
 import { parseStored } from './sql-utils.js';
 
-// Cloudflare's per-invocation external-subrequest cap is no longer the real
-// ceiling here (Workers Paid defaults to 10,000/invocation, configurable via
-// wrangler.jsonc's `limits.subrequests`, pinned there to 1000) -- this constant's
-// job now is purely to bound how much work one chain hop covers. Each hop costs
-// a real round trip (persist pending_json, enqueue, queue latency, dequeue,
-// re-read), so fewer/bigger hops means less wall-clock time lost to that
+// How many PLATFORM calls (Instagram / YouTube fetches) one chain hop may spend.
+// This does not bound the database side, which is the larger half: Cloudflare
+// counts every D1 query as a subrequest too ("a subrequest is any request a
+// Worker makes ... to Cloudflare services like R2, KV, or D1"), and a clip costs
+// about five of them (claim, write views, read and write the snapshot, record the
+// outcome) against one platform call. That is why SUBREQUEST_BUDGET below exists.
+// Each hop costs a real round trip (persist pending_json, enqueue, queue latency,
+// dequeue, re-read), so fewer/bigger hops means less wall-clock time lost to that
 // overhead alone. 200 keeps a full Instagram account's hourly ceiling
-// (rate-budget.js's HOURLY_LIMIT) coverable in one hop, with 5x headroom under
-// the pinned subrequest limit for a retrying item to not tip the invocation over.
+// (rate-budget.js's HOURLY_LIMIT) coverable in one hop.
 export const CALLS_PER_INVOCATION = 200;
+
+// The most subrequests (platform calls PLUS every D1 query) a chunk starts new
+// work under. wrangler.jsonc pins limits.subrequests at 10,000; when it was 1,000
+// this file assumed D1 did not count, so a chunk that had only spent ~140 clips'
+// worth ran into the ceiling, was killed mid-item, never wrote its final state,
+// never queued its continuation and never re-priced anything -- for 13 hourly runs
+// in a row (24 Sep 2026) while clippers' new clips sat at Rs 0 with a message
+// saying the budget had run out. Stopping 2,000 short of the ceiling leaves room
+// for what a chunk still has to do after its last item: flush every account's
+// ledger, write the job's state, queue the next leg, and re-price. A test ties
+// this number to the pinned limit, so raising one without the other fails.
+export const SUBREQUEST_BUDGET = 8000;
 
 // How many work items may be completed before progress is written back.
 // pending_json used to be persisted only after the whole loop, so an
@@ -287,7 +304,7 @@ export async function releaseAccounts(db, jobId) {
  * put a continuation message on the queue. Enqueueing is left to the caller so
  * this stays a pure state machine that tests can drive without a queue binding.
  */
-export async function runChunk(db, env, jobId, { adapters = null } = {}) {
+export async function runChunk(db, env, jobId, { adapters = null, subrequestBudget = SUBREQUEST_BUDGET } = {}) {
   const job = await getJob(db, jobId);
   if (!job) return { error: 'Job not found', done: true };
   if (!ACTIVE.includes(job.status)) return { done: true, alreadyFinished: true };
@@ -316,14 +333,28 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   let calls = 0;
   let doneSinceCheckpoint = 0;
   let blockedThisRound = false;
+  let outOfRoom = false;
   // Accounts already pushed to the back of the queue this invocation, so the
   // loop can tell "try the next account" from "we have cycled the whole list".
   const deferredAccounts = new Set();
+
+  // Everything this invocation has sent so far that Cloudflare counts against
+  // limits.subrequests: the D1 queries the wrapper has seen (src/d1-usage.js,
+  // which also covers whatever ran before this chunk in the same invocation,
+  // e.g. the cron's own housekeeping) plus the platform calls made here. A
+  // database without the wrapper (a test double) reports none, and only the
+  // call budget applies.
+  const subrequestsUsed = () =>
+    (db && typeof db._usage === 'function' ? (db._usage().queries || 0) : 0) + calls;
 
   while (pending.length) {
     const item = pending[0];
     const cost = ITEM_COST[item.t] || 1;
     if (calls + cost > CALLS_PER_INVOCATION) break;   // hand off, item untouched
+    // Out of subrequest room: stop BEFORE the item, while there is still room to
+    // finish properly (write state, queue the next leg, re-price). Handing off
+    // here costs one queue hop; not doing so costs the whole job.
+    if (subrequestsUsed() >= subrequestBudget) { outOfRoom = true; break; }
 
     const account = await loadAccount(db, item.a, accountCache);
 
@@ -527,6 +558,11 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
     itemsDone: startedWith - pending.length,
     remaining: pending.length,
     blocked: blockedThisRound,
+    // True when the chunk stopped because it was running out of subrequests
+    // rather than out of work -- worth seeing in the log, since a job that keeps
+    // doing this is one whose budget needs a second look.
+    outOfRoom,
+    subrequests: subrequestsUsed(),
     enqueue: !finished,
     stats
   };
@@ -546,6 +582,22 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
  */
 export async function advanceJob(db, env, jobId, opts = {}) {
   const r = await runChunk(db, env, jobId, opts);
+
+  // Prices follow views on EVERY leg, not only when the whole job finishes. A
+  // clip's earning is a function of its views and the campaign's budget, and the
+  // chunk that just ran changed the views. Waiting for the job's last leg to
+  // re-price meant a job that never finished (a killed invocation, a lost queue
+  // message, a leg that never ran) left every clip it had already refreshed
+  // priced on old numbers -- including brand-new clips at Rs 0. Runs BEFORE the
+  // continuation is queued so it never overlaps this job's own next leg, and a
+  // failure here must not cost the job its continuation.
+  if (typeof opts.afterChunk === 'function' && !r.error && !r.alreadyFinished) {
+    try {
+      await opts.afterChunk(jobId, r);
+    } catch (e) {
+      console.error(`[refresh] job ${jobId}: could not re-price after this leg:`, e && e.message);
+    }
+  }
 
   if (r.enqueue && env && env.REFRESH_QUEUE) {
     await env.REFRESH_QUEUE.send({ jobId },

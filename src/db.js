@@ -555,6 +555,23 @@ export async function campaignWithSpend(db, row) {
   return publicCampaign(row, await campaignSpend(db, row.id));
 }
 
+/**
+ * What each of these campaigns has not yet allocated -- budget minus everything
+ * spent or pending -- as a Map of campaign id to rupees, floored at zero. Read
+ * from the stored figures, the same ones every screen shows. It is what
+ * explainEarning needs to tell "the budget ran out" from "the price has not
+ * caught up with the views": both leave a clip earning less than views x cpm.
+ */
+export async function budgetLeftByCampaign(db, campaignIds) {
+  const out = new Map();
+  for (const id of new Set((campaignIds || []).map(Number).filter(Boolean))) {
+    const c = await db.prepare('SELECT budget FROM campaigns WHERE id = ?').bind(id).first();
+    if (!c) continue;
+    out.set(id, Math.max(0, (c.budget || 0) - await campaignSpend(db, id)));
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- money
 
 /**

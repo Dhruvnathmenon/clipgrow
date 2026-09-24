@@ -51,6 +51,14 @@ export const monthUTC = (day = todayUTC()) => day.slice(0, 7);
  */
 export function wrapD1(db) {
   let rowsRead = 0, rowsWritten = 0;
+  // Every statement sent is one subrequest as far as Cloudflare is concerned
+  // (docs: "a subrequest is any request a Worker makes ... to Cloudflare
+  // services like R2, KV, or D1"), and the invocation is cut off when the count
+  // passes limits.subrequests. Counted here, at the one place every query goes
+  // through, so a long job can see how close it is BEFORE the cut-off instead
+  // of learning about it from a job that just stops. A batch counts once per
+  // statement: over-counting only makes the guard earlier, never later.
+  let queries = 0;
 
   const absorb = (meta) => {
     if (!meta) return;
@@ -60,9 +68,9 @@ export function wrapD1(db) {
 
   const wrapStatement = (stmt) => ({
     bind: (...a) => wrapStatement(stmt.bind(...a)),
-    async all() { const r = await stmt.all(); absorb(r.meta); return r; },
-    first: (...a) => stmt.first(...a),
-    async run() { const r = await stmt.run(); absorb(r.meta); return r; },
+    async all() { queries++; const r = await stmt.all(); absorb(r.meta); return r; },
+    first: (...a) => { queries++; return stmt.first(...a); },
+    async run() { queries++; const r = await stmt.run(); absorb(r.meta); return r; },
     // Exposed so the wrapped .batch() below can hand the real statements
     // to the real db.batch() -- D1 has no idea what to do with our shape.
     _unwrap: stmt
@@ -71,12 +79,13 @@ export function wrapD1(db) {
   return {
     prepare(sql) { return wrapStatement(db.prepare(sql)); },
     async batch(stmts) {
+      queries += stmts.length;
       const real = stmts.map(s => (s && s._unwrap) ? s._unwrap : s);
       const results = await db.batch(real);
       for (const r of results) absorb(r && r.meta);
       return results;
     },
-    _usage: () => ({ rowsRead, rowsWritten }),
+    _usage: () => ({ rowsRead, rowsWritten, queries }),
     // The original, unwrapped binding -- used for the flush write itself
     // so that write is never recursively counted.
     _raw: db

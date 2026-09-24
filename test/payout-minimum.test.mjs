@@ -29,9 +29,11 @@ function sub(o = {}) {
   // clipper_earning defaults to match earning (no margin gap) -- this suite
   // is about the payout minimum, not the fractional-margin mechanism.
   const earning = o.earning ?? 200;
+  // Views that make `earning` the true price at cpm 100 (see settle-money.test.mjs).
+  const views = o.views ?? Math.round(earning * 1000 / 100);
   return {
     id: 1, clipper_id: 1, campaign_id: 1, account_id: null,
-    permalink: 'https://x/1', views: 5000, earning, clipper_earning: earning,
+    permalink: 'https://x/1', views, earning, clipper_earning: earning,
     status: 'active', sync_error: null, source: 'manual', platform: 'instagram',
     duration_seconds: null, is_short: null, eligible: 1,
     created_at: NOW, posted_at: NOW, last_synced_at: NOW, last_ok_sync_at: NOW,

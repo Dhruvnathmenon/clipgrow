@@ -77,17 +77,47 @@ test('a clip stopped by the per-video cap says which cap and what it would have 
 test('a clip clamped by the campaign budget is distinguishable from a small clip', () => {
   // This is the gap that existed: 400 earned nothing but 90 because the budget
   // ran dry, and the clip looked exactly like one with a quarter of the views.
-  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000 });
+  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, budgetLeft: 0 });
   assert.equal(x.reason, 'budget');
   assert.equal(x.full_earning, 400);
   assert.equal(x.amount, 90);
   assert.match(explainEarningText(x), /budget ran out/);
 });
 
+// 24 Sep 2026, the Mali campaign: a clip with 10,797 views showed Rs 0 and told its
+// clipper "the campaign budget ran out" while the campaign had about Rs 3,900 unallocated.
+// The clip had simply never been re-priced. Both cases leave an earning below views x cpm;
+// only the campaign's remaining budget says which one it is.
+test('a clip below its worth in a campaign that still has budget is NOT told the budget ran out', () => {
+  const x = explainEarning(clip({ views: 10797, earning: 0 }), { cpm: 50, minViews: 1000, budgetLeft: 3893 });
+  assert.equal(x.reason, 'pending_price');
+  assert.equal(x.capped_earning, 539);
+  const text = explainEarningText(x);
+  assert.doesNotMatch(text, /budget ran out/, 'must not claim the budget is gone when it is not');
+  assert.match(text, /10,797 views/);
+  assert.match(text, /still has budget/);
+});
+
+test('when the remaining budget is unknown, nothing claims it ran out', () => {
+  // A caller that does not pass budgetLeft must never produce the alarming claim.
+  assert.equal(explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000 }).reason, 'pending_price');
+  assert.equal(explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, budgetLeft: null }).reason, 'pending_price');
+});
+
+test('budget genuinely spent to the last rupee still says so', () => {
+  assert.equal(explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, budgetLeft: 0 }).reason, 'budget');
+});
+
+test('a fully credited clip is never reported as behind, whatever the budget', () => {
+  // 10,000 views at 40 = 400, credited 400: nothing was reduced.
+  assert.equal(explainEarning(clip({ earning: 400 }), { cpm: 40, minViews: 1000, budgetLeft: 0 }).reason, 'cpm');
+  assert.equal(explainEarning(clip({ earning: 400 }), { cpm: 40, minViews: 1000, budgetLeft: 5000 }).reason, 'cpm');
+});
+
 test('the cap is checked before the budget, matching the allocator order', () => {
   // Capped to 250, then the budget only allowed 90. The binding constraint the
   // clipper needs told about is the budget, not the cap.
-  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, maxPerVideo: 250 });
+  const x = explainEarning(clip({ earning: 90 }), { cpm: 40, minViews: 1000, maxPerVideo: 250, budgetLeft: 0 });
   assert.equal(x.reason, 'budget');
   assert.equal(x.capped_earning, 250);
 });
@@ -121,6 +151,7 @@ test('every reason produces a sentence, never an empty string', () => {
     clip({ views: 100, earning: 0 }),
     clip({ earning: 250 }),
     clip({ earning: 90 }),
+    clip({ earning: 90 }),
     clip({ eligible: 0 }),
     clip({ status: 'paused' }),
     clip({ status: 'disqualified' }),
@@ -128,7 +159,9 @@ test('every reason produces a sentence, never an empty string', () => {
     clip({ locked_at: 1, locked_earning: 0, lock_reason: 'below_min' })
   ];
   for (const c of cases) {
-    const text = explainEarningText(explainEarning(c, { cpm: 40, minViews: 1000, maxPerVideo: 250 }));
+    // budgetLeft 0 for one copy of the 90 case and unknown for the other, so both
+    // the "ran out" and the "behind" wording are exercised.
+    const text = explainEarningText(explainEarning(c, { cpm: 40, minViews: 1000, maxPerVideo: 250, budgetLeft: cases.indexOf(c) === 3 ? 0 : undefined }));
     assert.ok(text && text.length > 10, `empty explanation for ${JSON.stringify(c)}`);
   }
 });

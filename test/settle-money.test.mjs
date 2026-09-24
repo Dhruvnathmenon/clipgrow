@@ -24,9 +24,13 @@ function sub(o = {}) {
   // so clipper_earning defaults to match earning (no margin gap) unless a
   // test explicitly overrides it.
   const earning = o.earning ?? 200;
+  // Settlement prices a clip from its views before it locks it, so a fixture
+  // whose earning does not follow from its views would be quietly corrected.
+  // The views here are the ones that make `earning` the true price at cpm 40.
+  const views = o.views ?? Math.round(earning * 1000 / 40);
   return {
     id: 1, clipper_id: 1, campaign_id: 1, account_id: null,
-    permalink: 'https://x/1', views: 5000, earning, clipper_earning: earning,
+    permalink: 'https://x/1', views, earning, clipper_earning: earning,
     status: 'active', sync_error: null, source: 'manual', platform: 'instagram',
     duration_seconds: null, is_short: null, eligible: 1,
     created_at: now, posted_at: now, last_synced_at: now, last_ok_sync_at: now,

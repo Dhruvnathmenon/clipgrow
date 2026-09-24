@@ -12,7 +12,6 @@ import { handleCampaignPage } from './routes/campaigns.js';
 import { handleSitemap } from './routes/sitemap.js';
 import { handleGuide } from './routes/guides.js';
 import { handleMarketing } from './routes/marketing.js';
-import { reallocateAll } from './earnings.js';
 import { createRefreshJob, advanceJob, reapStalledJobs, removeInactiveJoins } from './refresh-jobs.js';
 import { purgeExpiredRejections } from './applications.js';
 import { driveConfigured, driveHealth } from './drive.js';
@@ -22,7 +21,7 @@ import { getSession } from './auth.js';
 import { err } from './http.js';
 import { logError, pruneErrorLog } from './error-log.js';
 import { wrapD1, flushUsage } from './d1-usage.js';
-import { scoreRecentSubmissions } from './bot-scoring.js';
+import { refreshHooks, repriceAll } from './refresh-hooks.js';
 
 // A session only ever carries a role + a bare id (auth.js's signSession
 // payload) -- never a name -- so resolving a human-readable actor_label for
@@ -370,10 +369,9 @@ export default {
       const jobId = message.body && message.body.jobId;
       if (!jobId) { message.ack(); continue; }
       try {
-        const r = await advanceJob(wrapped, wrappedEnv, jobId, {
-          onFinish: async () => { await reallocateAll(wrapped); await scoreRecentSubmissions(wrapped); }
-        });
+        const r = await advanceJob(wrapped, wrappedEnv, jobId, refreshHooks(wrapped));
         if (r.error) console.error(`[refresh-queue] job ${jobId}: ${r.error}`);
+        else console.log(`[refresh-queue] job ${jobId}: ${r.itemsDone} item(s), ${r.remaining} left, ${r.subrequests} subrequests${r.outOfRoom ? ' (stopped for room)' : ''}`);
         message.ack();
       } catch (e) {
         console.error(`[refresh-queue] job ${jobId} leg failed:`, e.stack || e.message);
@@ -410,7 +408,20 @@ export default {
         // single lost invocation blocks every future sync permanently.
         try {
           const reaped = await reapStalledJobs(wrapped);
-          if (reaped.length) console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
+          if (reaped.length) {
+            console.log(`[cron sync] reaped abandoned job(s): ${reaped.join(', ')}`);
+            // A job that dies is a real incident, and this is the only place that
+            // ever learns of it. It went unnoticed for 13 hourly runs (24 Sep 2026)
+            // because the reaper only wrote a line to a log nobody reads: the job
+            // row said "failed" and every screen carried on. The Error Log is what
+            // the admin page already badges.
+            await logError(wrapped, {
+              actorType: 'system', source: 'refresh', code: 'JOB_ABANDONED',
+              message: `A refresh job stopped part-way and was abandoned (job ${reaped.join(', ')}). Clips it had not reached were not refreshed.`,
+              detail: 'The job made no progress for 30 minutes, so it was released. If this repeats every hour, a run is being cut off by a platform limit: compare subrequests spent with limits.subrequests in wrangler.jsonc.',
+              path: 'cron'
+            });
+          }
         } catch (e) {
           console.error('[cron sync] reaper failed', e && e.message);
         }
@@ -502,6 +513,13 @@ export default {
           console.error('[cron sync] IG token renewal failed', e && e.message);
         }
 
+        // Price whatever is already stored before starting the next sweep. Every
+        // leg re-prices after itself now, so this normally changes nothing; it is
+        // here for the case where the previous hour's invocation was cut off after
+        // it wrote views and before it could price them. Clips are never left
+        // waiting on a job that may not finish.
+        await repriceAll(wrapped, 'cron');
+
         // Takes createRefreshJob's default cooldown -- the full hour. Without
         // it an account with 60 clips would need 240 calls/hour from routine
         // syncing alone, past Instagram's own 200/hour ceiling before anyone
@@ -519,10 +537,8 @@ export default {
           console.log(`[cron sync] skipped: ${created.error}`);
           return;
         }
-        const r = await advanceJob(wrapped, wrappedEnv, created.job_id, {
-          onFinish: async () => { await reallocateAll(wrapped); await scoreRecentSubmissions(wrapped); }
-        });
-        console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} calls, ${r.remaining} remaining`);
+        const r = await advanceJob(wrapped, wrappedEnv, created.job_id, refreshHooks(wrapped));
+        console.log(`[cron sync] job ${created.job_id}: ${created.total_items} items, first chunk spent ${r.calls} platform calls and ${r.subrequests} subrequests in all, ${r.remaining} remaining${r.outOfRoom ? ' (stopped for room)' : ''}`);
       } finally {
         await flushUsage(rawDB, wrapped._usage());
       }

@@ -135,12 +135,17 @@ test('settling a clip with a real margin gap writes both entries in one batch, l
   // so seed a clip whose billable amount does NOT land on a clean multiple.
   const db = seed();
   await db.prepare('UPDATE submissions SET earning = 8020, clipper_earning = 8000 WHERE id = 101').run();
+  // reprice: false -- this test forges a margin gap (billed 8020, paid 8000), a
+  // state the allocator can no longer produce since the floor model was reverted on
+  // 8 Sep 2026. Settlement now prices a clip from its views before locking it, which
+  // would erase the gap, so it is told not to; every other test here runs the real path.
   const agency = (await walletOfKind(db, 'agency')).id;
   await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
                        category: 'client_payment', campaign_id: 7 });
 
   const r = await settlePayment(db, {
-    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency,
+    reprice: false
   });
   assert.equal(r.ok, true);
 
@@ -164,7 +169,8 @@ test('reversing a settlement voids the margin entry too, not just the clipper_pa
   await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
                        category: 'client_payment', campaign_id: 7 });
   await settlePayment(db, {
-    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency,
+    reprice: false
   });
 
   const paymentId = db._rows('payments')[0].id;
@@ -205,7 +211,8 @@ test('agencyPnL reports view_margin_captured, and it is never counted as profit'
   await addEntry(db, { direction: 'in', amount: 40000, wallet_id: agency,
                        category: 'client_payment', campaign_id: 7 });
   await settlePayment(db, {
-    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency
+    clipperId: 1, submissionIds: [101], amount: 8000, campaignId: 7, walletId: agency,
+    reprice: false
   });
 
   const pnl = await agencyPnL(db);

@@ -1802,6 +1802,18 @@
     window.closeModal=function(){document.getElementById('modal-back').classList.remove('open');};
     document.getElementById('modal-back').addEventListener('click',e=>{if(e.target.id==='modal-back')closeModal();});
 
+    // A change to CPM, budget, the minimum or the cap re-prices every UNPAID clip in the
+    // campaign at once (paid clips never move). Said out loud, so a slip of the finger
+    // is seen the moment it is saved, not when a clipper asks why their number changed.
+    function repriceNote(r){
+      const x=r&&r.repriced; if(!x) return '';
+      let note='';
+      if(x.pending_before!==x.pending_after) note+=` — ${x.clips} unpaid clip${x.clips===1?'':'s'} re-priced: ${money(x.pending_before)} → ${money(x.pending_after)}`;
+      // Clips already closed at ₹0 stay closed when the minimum is lowered; they can be reopened from Payouts.
+      if(x.closed_now_eligible) note+=` — ${x.closed_now_eligible} closed clip${x.closed_now_eligible===1?'':'s'} now meet${x.closed_now_eligible===1?'s':''} the minimum: reopen ${x.closed_now_eligible===1?'it':'them'} in Payouts`;
+      return note;
+    }
+
     window.saveModal=async function(){
       const p={};
       TEXT_FIELDS.forEach(k=>p[k]=document.getElementById('f-'+k).value.trim());
@@ -1823,7 +1835,7 @@
       const btn=document.getElementById('modal-save'); btn.disabled=true;
       try{
         if(modalMode==='create'){ await api('/api/admin/campaigns',{method:'POST',body:JSON.stringify(p)}); toast('Campaign created and live'); }
-        else { await api('/api/admin/campaigns/'+modalId,{method:'PATCH',body:JSON.stringify(p)}); toast('Campaign updated'); }
+        else { const r=await api('/api/admin/campaigns/'+modalId,{method:'PATCH',body:JSON.stringify(p)}); toast('Campaign updated'+repriceNote(r)); }
         closeModal(); loadAll();
       }catch(e){ toast(e.message,true); } finally{ btn.disabled=false; }
     };
@@ -2098,7 +2110,7 @@
       }catch(e){ toast(e.message,true); }
     };
     window.setCampaignStatus=async function(id,status){
-      try{ await api('/api/admin/campaigns/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Campaign updated'); loadAll(); }
+      try{ const r=await api('/api/admin/campaigns/'+id,{method:'PATCH',body:JSON.stringify({status})}); toast('Campaign updated'+repriceNote(r)); loadAll(); }
       catch(e){ toast(e.message,true); }
     };
     // Enter the amount to add to the campaign's clipper-payable budget --

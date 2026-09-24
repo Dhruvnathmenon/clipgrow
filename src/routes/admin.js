@@ -9,9 +9,9 @@ import {
   normaliseDiscordUsername, validateDiscordUsername,
   ACTIVE_WINDOW_MS, pendingClipperExpr, SUBMISSION_CHILD_TABLES
 } from '../db.js';
-import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
+import { reallocateCampaign, syncAccountClips } from '../earnings.js';
 import { createRefreshJob, startJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
-import { scoreRecentSubmissions } from '../bot-scoring.js';
+import { refreshHooks } from '../refresh-hooks.js';
 import { tierForScore } from '../bot-detection.js';
 import { jobEvents, jobFailureSummary } from '../refresh-events.js';
 import {
@@ -71,6 +71,23 @@ function numOr(value, fallback) {
   if (value == null) return fallback;
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+// A count (views) sent as a value that is not a whole-ish number of 0 or more.
+function badCount(v) {
+  const n = Number(v);
+  return v === '' || !Number.isFinite(n) || n < 0;
+}
+
+// The per-video ceiling lives in the blueprint, and maxPayoutPerVideo() reads a
+// value it cannot use as "no cap". So "2,000", "-5" or "abc" typed there silently
+// REMOVED the cap and re-priced the whole campaign without one. Empty (or null)
+// still means no cap, on purpose; anything else must be a positive number.
+function maxPayoutProblem(payload) {
+  const v = payload.max_payout;
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? null : 'Maximum payout per video must be a number above 0, or left empty for no limit.';
 }
 
 function normalisePlatforms(input) {
@@ -933,11 +950,18 @@ export async function handleAdmin(request, env, url) {
     const payload = await readJson(request);
     const name = String(payload.name ?? '').trim();
     if (!name) return err('Campaign name is required');
-    const cpm = Number(payload.cpm) || 0;
-    const budget = Number(payload.budget) || 0;
-    if (cpm <= 0) return err('CPM must be greater than 0');
-    if (budget <= 0) return err('Budget must be greater than 0');
-    // Views a clip must reach before it earns anything. Defaults to 1,000.
+    // Number(x) || 0 let "1e999" through as Infinity, which is not a budget or a
+    // rate and poisons every sum it later touches. A value that is not a finite
+    // number above zero is refused, not quietly turned into something else.
+    const cpm = Number(payload.cpm);
+    const budget = Number(payload.budget);
+    if (!Number.isFinite(cpm) || cpm <= 0) return err('CPM must be a number greater than 0');
+    if (!Number.isFinite(budget) || budget <= 0) return err('Budget must be a number greater than 0');
+    // Views a clip must reach before it earns anything. Defaults to 1,000 when
+    // left out; a value that was typed but is unusable is an error, not the default.
+    if (payload.min_views != null && badCount(payload.min_views)) return err('Minimum views must be 0 or more');
+    const capProblem = maxPayoutProblem(payload);
+    if (capProblem) return err(capProblem);
     const minViews = numOr(payload.min_views, 1000);
     const platforms = normalisePlatforms(payload.allowed_platforms);
     // Whether this campaign charges the 20% agency fee. Defaults to charging
@@ -1094,6 +1118,30 @@ export async function handleAdmin(request, env, url) {
     if (payload.status && !CAMPAIGN_STATUSES.includes(payload.status)) {
       return err(`'${payload.status}' is not a valid campaign status. Accepted: ${CAMPAIGN_STATUSES.join(', ')}.`);
     }
+    // Numbers that were sent must be usable. numOr() quietly kept the old value for
+    // one that was not, so a typo answered "Campaign updated" and changed nothing;
+    // and it accepted 0, so a CPM of 0 wiped every unpaid clip's earning at once.
+    // (To stop a campaign earning, mark it over: that is what the status is for.)
+    if (payload.cpm != null && !(Number.isFinite(Number(payload.cpm)) && Number(payload.cpm) > 0)) {
+      return err('CPM must be a number greater than 0. To stop a campaign earning, mark it as over.');
+    }
+    if (payload.budget != null && !(Number.isFinite(Number(payload.budget)) && Number(payload.budget) > 0)) {
+      return err('Budget must be a number greater than 0. To stop a campaign earning, mark it as over.');
+    }
+    if (payload.min_views != null && badCount(payload.min_views)) return err('Minimum views must be 0 or more');
+    const capProblem = maxPayoutProblem(payload);
+    if (capProblem) return err(capProblem);
+    // What has already been paid out is spent for good. A budget below it would
+    // leave the campaign having paid out more than it ever had, and the allocator
+    // would answer by pricing every unpaid clip at nothing.
+    if (payload.budget != null) {
+      const paid = await env.DB.prepare(
+        'SELECT COALESCE(SUM(locked_earning), 0) AS paid FROM submissions WHERE campaign_id = ? AND locked_at IS NOT NULL'
+      ).bind(params.id).first();
+      if (Number(payload.budget) < (paid ? paid.paid : 0)) {
+        return err(`₹${Number(paid.paid).toLocaleString('en-IN')} of this campaign's budget has already been paid out, so the budget cannot be set below that.`, 409);
+      }
+    }
     // Validated up front so a bad link cannot leave the campaign half-updated.
     const sources = parseSources(payload);
     if (sources.error) return err(sources.error);
@@ -1146,9 +1194,39 @@ export async function handleAdmin(request, env, url) {
     if (sources.raw_sent) {
       await env.DB.prepare('UPDATE campaigns SET raw_sources = ? WHERE id = ?').bind(JSON.stringify(sources.raw), params.id).run();
     }
-    // CPM, budget or threshold changes re-price every submission in this campaign.
-    if (payload.cpm != null || payload.budget != null || payload.min_views != null || capChanged) {
+    // CPM, budget, threshold, cap AND status changes re-price every submission in
+    // this campaign. Status is here because whether a campaign is open is derived
+    // from its budget (budget_full <-> active), so a status set by hand has to be
+    // reconciled with the arithmetic now, not whenever the next refresh happens to
+    // finish -- and a campaign that was marked over and is reopened has clips whose
+    // prices stood still the whole time.
+    if (payload.cpm != null || payload.budget != null || payload.min_views != null || payload.status || capChanged) {
+      const unpaid = () => env.DB.prepare(
+        "SELECT COUNT(*) AS clips, COALESCE(SUM(clipper_earning), 0) AS pending FROM submissions WHERE campaign_id = ? AND locked_at IS NULL AND status = 'active'"
+      ).bind(params.id).first();
+      const was = await unpaid();
       await reallocateCampaign(env.DB, params.id);
+      const now2 = await unpaid();
+      // Said back to the admin, because a change to CPM, budget or the minimum moves
+      // what every unpaid clip is worth, retroactively and at once. Paid clips are
+      // never touched.
+      // A clip closed at Rs 0 for missing an older, higher minimum stays closed when the
+      // minimum is lowered: closed is history, like paid. Counted so the admin knows
+      // there are clips that would now qualify and can be reopened on purpose.
+      let closedNowEligible = 0;
+      if (payload.min_views != null) {
+        const c = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM submissions WHERE campaign_id = ? AND locked_at IS NOT NULL AND lock_reason = 'below_min' AND views >= ? AND views > 0"
+        ).bind(params.id, Number(payload.min_views)).first();
+        closedNowEligible = (c && c.n) || 0;
+      }
+      return json({
+        ok: true,
+        repriced: {
+          clips: now2.clips, pending_before: was.pending, pending_after: now2.pending,
+          ...(closedNowEligible ? { closed_now_eligible: closedNowEligible } : {})
+        }
+      });
     }
     return json({ ok: true });
   }
@@ -2041,7 +2119,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await startJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const first = await startJob(env.DB, env, created.job_id, refreshHooks(env.DB));
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'global', targetLabel: 'All clippers'
@@ -2066,7 +2144,7 @@ export async function handleAdmin(request, env, url) {
     });
     if (created.error) return json({ error: created.error, job_id: created.job_id }, created.status || 409);
 
-    const first = await startJob(env.DB, env, created.job_id, { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const first = await startJob(env.DB, env, created.job_id, refreshHooks(env.DB));
     await logAction(env.DB, {
       staffType: 'admin', staffName: 'Admin', action: 'refresh_triggered',
       targetType: 'clipper', targetId: Number(params.id), targetLabel: clipper.username
@@ -2108,7 +2186,7 @@ export async function handleAdmin(request, env, url) {
   if (params && method === 'POST') {
     const r = await retryJob(env.DB, Number(params.jobId));
     if (r.error) return err(r.error, r.status || 400);
-    const after = await startJob(env.DB, env, Number(params.jobId), { onFinish: async () => { await reallocateAll(env.DB); await scoreRecentSubmissions(env.DB); } });
+    const after = await startJob(env.DB, env, Number(params.jobId), refreshHooks(env.DB));
     return json({ ok: true, job: publicJob(await getJob(env.DB, Number(params.jobId))), calls: after.calls });
   }
 

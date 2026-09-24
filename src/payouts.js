@@ -1,4 +1,4 @@
-import { now, maxPayoutPerVideo } from './db.js';
+import { now, maxPayoutPerVideo, budgetLeftByCampaign } from './db.js';
 import { selectByIds, statementsByIds } from './sql-utils.js';
 import { cpmEarning, explainEarning, explainEarningText } from './earning-math.js';
 import { voidEntry, agencyAvailable, buildEntryStatement } from './finance.js';
@@ -72,13 +72,17 @@ export async function payableClips(db, clipperId, { days = 30, campaignId = null
      ORDER BY COALESCE(s.posted_at, s.created_at) DESC`
   ).bind(...(campaignId ? [clipperId, since, campaignId] : [clipperId, since])).all();
 
+  // "Budget ran out" only when the campaign really has nothing left; see explainEarning.
+  const budgetLeft = await budgetLeftByCampaign(db, (results || []).map(r => r.campaign_id));
+
   const clips = (results || []).map(r => {
     const state = clipState(r);
     const maxPerVideo = maxPayoutPerVideo(r);
     // Same function the allocator writes with, so the two cannot drift.
     const uncapped = r.views >= (r.min_views || 0) ? cpmEarning(r.views, r.cpm) : 0;
     const why = explainEarning(r, {
-      cpm: r.cpm, minViews: r.min_views || 0, maxPerVideo
+      cpm: r.cpm, minViews: r.min_views || 0, maxPerVideo,
+      budgetLeft: budgetLeft.has(r.campaign_id) ? budgetLeft.get(r.campaign_id) : null
     });
     const ageDays = clipAgeDays(r);
     // Mirrors clipState's own 'below_min' gate exactly (src/clipstate.js) --
@@ -203,6 +207,12 @@ export async function settlePayment(db, {
   clipperId, submissionIds = [], writeOffIds = [], amount,
   campaignId = null, method = 'UPI', reference = '', note = '', paidAt = null,
   expectedClipsTotal = null, allowBelowMinimum = false, allowUnfunded = false,
+  // Whether to bring the clips' prices up to date before locking them. Always
+  // true in production. It exists so a test can hold a deliberately forged state
+  // (the retired margin gap, where billed differs from paid) still while it
+  // exercises what settlement does with it: the allocator can no longer produce
+  // that state, so pricing first would erase the very thing under test.
+  reprice = true,
   // Which pot the cash actually left. Recording it is what makes
   // "the agency owes me" and "this is the client's money, not ours"
   // computable at all -- see src/finance.js.
@@ -274,6 +284,23 @@ export async function settlePayment(db, {
       status: 409,
       locked_ids: alreadyLocked.map(r => r.id)
     };
+  }
+
+  // Price BEFORE locking. Locking freezes a clip at whatever earning it carries
+  // and closes it for good ("views it gains later earn nothing"), so a figure
+  // that is merely behind its views would be paid and made permanent, with the
+  // difference lost to the clipper and no screen able to show it (every
+  // outstanding figure excludes locked clips). Earnings are stored, and stored
+  // means only as current as the last pricing pass. Re-pricing here makes the
+  // amount locked the amount the clips are worth now; if that differs from what
+  // the admin's page showed, the expected-total check below refuses the run and
+  // the reload shows the fresh numbers, because the pricing just written stays.
+  if (reprice) {
+    for (const cid of new Set((rows || []).map(r => r.campaign_id))) await reallocateCampaign(db, cid);
+    const repriced = await selectByIds(db,
+      `SELECT id, clipper_id, campaign_id, earning, clipper_earning, status, locked_at
+       FROM submissions WHERE id IN ({IN})`, allIds);
+    for (const r of repriced || []) found.set(r.id, r);
   }
 
   // The amount owed to the CLIPPER, computed from the clips themselves

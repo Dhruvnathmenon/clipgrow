@@ -343,5 +343,20 @@ export async function reallocateCampaign(db, campaignId) {
  */
 export async function reallocateAll(db) {
   const { results } = await db.prepare("SELECT id FROM campaigns WHERE status != 'completed'").all();
-  for (const c of results || []) await allocateCampaignEarnings(db, c.id);
+  // Each campaign is priced on its own. This was a bare loop, so one campaign that
+  // threw left every campaign after it unpriced -- one bad row in one campaign
+  // silently freezing every other campaign's earnings. The healthy ones are all
+  // priced first; the failures are then reported together, so the caller can log
+  // them and nothing is left stale in silence.
+  const failed = [];
+  for (const c of results || []) {
+    try {
+      await allocateCampaignEarnings(db, c.id);
+    } catch (e) {
+      failed.push({ id: c.id, message: (e && e.message) || String(e) });
+    }
+  }
+  if (failed.length) {
+    throw new Error(`Could not re-price campaign ${failed.map(f => f.id).join(', ')}: ${failed[0].message}`);
+  }
 }

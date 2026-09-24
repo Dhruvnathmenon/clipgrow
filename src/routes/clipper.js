@@ -4,7 +4,7 @@ import {
   now, normalizeUsername, defaultDisplayName, getClipperByUsername, getClipperById, getCampaignById, getParticipation,
   publicCampaign, publicAccount, campaignSpend, clipperFinancials,
   clipperStreak, allClipperStreaks, clipperTotals, listParticipationAccounts, getParticipationAccount,
-  unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo,
+  unlinkParticipationAccount, SPEND_EXPR, spendExpr, SPEND_CLIPPER_EXPR, maxPayoutPerVideo, budgetLeftByCampaign,
   RETIRED_VIEWS_BY_CLIPPER_EXPR,
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
@@ -814,13 +814,18 @@ export async function handleClipper(request, env, url) {
        WHERE s.clipper_id = ? ORDER BY s.created_at DESC`
     ).bind(clipperId).all();
 
+    // Whether a shortfall is "the budget ran out" or "the price is behind" depends
+    // on what the campaign has left, so it is read once per campaign, not guessed.
+    const budgetLeft = await budgetLeftByCampaign(env.DB, (results || []).map(s => s.campaign_id));
+
     return json({
       clips: (results || []).map(s => {
         const state = clipState(s);
         const why = explainEarning(s, {
           cpm: s.cpm,
           minViews: s.min_views || 0,
-          maxPerVideo: maxPayoutPerVideo(s)
+          maxPerVideo: maxPayoutPerVideo(s),
+          budgetLeft: budgetLeft.has(s.campaign_id) ? budgetLeft.get(s.campaign_id) : null
         });
         return {
           id: s.id,

@@ -106,6 +106,18 @@ export function makePayoutsDb({ campaigns = [], submissions = [], participations
     if (/^SELECT \* FROM payments WHERE id = \?/.test(sql)) {
       return state.payments.find(p => p.id === args[0]) || null;
     }
+    // budgetLeftByCampaign (src/db.js): a campaign's budget, then what it has spent.
+    if (/^SELECT budget FROM campaigns WHERE id = \?/.test(sql)) {
+      const c = campaignById(args[0]);
+      return c ? { budget: c.budget } : null;
+    }
+    // campaignSpend: locked clips count what was settled, open active ones what they carry.
+    if (/AS spent FROM submissions WHERE campaign_id = \?/.test(sql)) {
+      const spent = state.submissions
+        .filter(s => s.campaign_id === args[0])
+        .reduce((n, s) => n + (s.locked_at ? (s.locked_earning || 0) : (s.status === 'active' ? (s.earning || 0) : 0)), 0);
+      return { spent };
+    }
     throw new Error('fake-payouts-db: unhandled first() query: ' + sql);
   }
 

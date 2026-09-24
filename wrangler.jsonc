@@ -82,15 +82,26 @@
   },
   // Pinned explicitly rather than trusting the account-wide platform default,
   // which has already changed once (Workers Paid moved from 1,000 to 10,000
-  // subrequests/invocation) without this repo noticing. subrequests: 1000 is
-  // ~5x refresh-jobs.js's CALLS_PER_INVOCATION (200), leaving headroom for a
-  // single retrying item without risking a real platform-level cutoff.
+  // subrequests/invocation) without this repo noticing.
+  //
+  // A D1 query IS a subrequest. Cloudflare's docs say so ("a subrequest is any
+  // request a Worker makes ... to Cloudflare services like R2, KV, or D1"), and
+  // this file used to say the opposite while pinning 1000. One refresh chunk costs
+  // about six D1 queries per clip plus the platform call: ~170 clips is ~1,300
+  // subrequests. So from 24 Sep 2026 03:00 UTC every hourly run was killed at ~135
+  // clips ("Too many API requests by single Worker invocation", CPU time 0.6 s of a
+  // 5.7-minute run), before it could write its final state, queue its next leg or
+  // re-price a single clip. That is why new clips sat at Rs 0 with a "budget ran
+  // out" message. 10,000 is the paid default; refresh-jobs.js's SUBREQUEST_BUDGET
+  // (8,000) stops a chunk 2,000 short of it, and a test fails if the two drift.
+  //
   // cpu_ms: 60000 is cheap insurance for the larger per-invocation JSON
   // parse/stringify now that one hop covers more items -- this workload is
   // I/O-wait dominated (fetch/D1 await time doesn't count as CPU time), so
-  // actual CPU usage should stay far under this, let alone the 300000 ceiling.
+  // actual CPU usage should stay far under this (measured: 0.6 s for a full
+  // 5-minute chunk), let alone the 300000 ceiling.
   "limits": {
-    "subrequests": 1000,
+    "subrequests": 10000,
     "cpu_ms": 60000
   }
 }
