@@ -1,5 +1,6 @@
 import { now } from './db.js';
 import { tierForScore } from './bot-detection.js';
+import { clampInt } from './sql-utils.js';
 
 // Video quality review (migration 023). Shared by admin.js and
 // moderator.js, since both an admin and a moderator can review a video --
@@ -51,7 +52,7 @@ export async function reviewQueue(db) {
 
 /** The Reviewed panel: most-recent first, still tagged with the video's original day. */
 export async function reviewedList(db, { limit = 100 } = {}) {
-  const capped = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const capped = clampInt(limit, 100, 1, 500);
   const { results } = await db.prepare(
     `SELECT sr.verdict, sr.feedback, sr.reviewer_type, sr.reviewer_name, sr.reviewed_at,
             s.id AS submission_id, s.permalink, s.platform, s.views, s.posted_at, s.created_at,

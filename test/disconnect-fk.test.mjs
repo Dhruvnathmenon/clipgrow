@@ -76,3 +76,20 @@ test('a reviewed pending clip can still be disconnected', async () => {
   assert.equal(db._rows('social_accounts').length, 0, 'the account row is removed');
   assert.equal(db._rows('submission_reviews').length, 0, 'the review of a now-gone clip goes with it');
 });
+
+// submission_view_snapshots (migration 043) is a second table with a NOT NULL FK
+// onto submissions, added after the reviews fix above. Every hourly refresh writes
+// one per clip, so almost every real pending clip has them, and disconnecting an
+// account failed with the same FOREIGN KEY error until they were cleared too.
+test('a pending clip with view snapshots can still be disconnected', async () => {
+  const db = seed();
+  for (const views of [10, 40, 90]) {
+    await db.prepare(
+      'INSERT INTO submission_view_snapshots (submission_id, clipper_id, views, recorded_at) VALUES (?, ?, ?, ?)'
+    ).bind(900, 1, views, NOW).run();
+  }
+  const r = await disconnectSocialAccount(db, 5);   // threw FOREIGN KEY before the fix
+  assert.equal(r.deleted_pending, 1);
+  assert.equal(db._rows('social_accounts').length, 0, 'the account row is removed');
+  assert.equal(db._rows('submission_view_snapshots').length, 0, "the clip's snapshots go with it");
+});

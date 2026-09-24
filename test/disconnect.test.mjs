@@ -47,6 +47,13 @@ function makeDb({ accounts = [], submissions = [], participationAccounts = [], p
       state.submission_reviews = (state.submission_reviews || []).filter(r => !ids.includes(r.submission_id));
       return { meta: {} };
     }
+    // Same shape as the reviews table above: a real NOT NULL foreign key onto
+    // submissions (migration 043), so it must go before the clip can.
+    if (/^DELETE FROM submission_view_snapshots WHERE submission_id IN/.test(sql)) {
+      const ids = args;
+      state.submission_view_snapshots = (state.submission_view_snapshots || []).filter(r => !ids.includes(r.submission_id));
+      return { meta: {} };
+    }
     if (/^DELETE FROM submissions WHERE id IN/.test(sql)) {
       const ids = args;
       state.submissions = state.submissions.filter(s => !ids.includes(s.id));

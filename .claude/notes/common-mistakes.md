@@ -145,3 +145,48 @@ on its own.
 above the column instead of trailing it. (Real example: migration 038's
 `error_log` table, caught immediately by this exact test before it ever
 reached a real database.)
+
+## A page whose script has one syntax error is completely dead, and says nothing
+
+**Symptom:** a button does nothing. No message, nothing in the UI. (The admin login
+was unclickable for a day.)
+
+**Cause:** a newline typed inside a quoted string in ONE unrelated handler is a
+syntax error, and a syntax error stops the whole inline script from running, so no
+function on the page is ever defined. Almost always introduced by patching HTML
+through a shell (`node -e`, heredocs, `sed`): backslashes and `\n` get eaten.
+
+**Fix / guard:** patch with the Edit tool or a script file, never a shell one-liner.
+`test/page-functions.test.mjs` now parses every inline script on every page, and
+`components/error-net.js` (loaded first on every app page) shows a red banner when a
+page throws or a request goes unhandled, so a break is visible instead of silent.
+
+## Deleting a row while another row still points at it
+
+**Symptom:** an admin "delete" returns a bare 500 ("FOREIGN KEY constraint failed").
+
+**Cause:** D1 enforces foreign keys (`PRAGMA foreign_keys` = 1 in production). A
+DELETE on a parent fails while any child row exists, and the test databases never
+had children. In production 1,583 of 1,635 clips have a review row, so deleting a
+clip failed for nearly all of them. It has happened three times (ig_api_calls,
+submission_reviews, then submission_view_snapshots).
+
+**Fix / guard:** clear the children in the same `db.batch` as the parent. Clips'
+children are listed once in `SUBMISSION_CHILD_TABLES` (src/db.js); a test reads the
+live schema and fails if a table is added that the list does not cover.
+`test/delete-integrity.test.mjs` runs every delete against a database where every
+table has a row.
+
+## Input the code trusted to be the right type
+
+**Symptom:** a 500 from a request only a broken client or a curious visitor sends.
+
+**Causes, all found by `test/hostile-input.test.mjs`:** a JSON body of `null`
+(`readJson` now always returns an object); ONE malformed cookie such as `x=%` on
+the domain (`parseCookies` threw for every request that visitor made); garbage in
+`?state=` (`verifySession` threw); `?limit=2.5` / `?offset=1e21` reaching SQL as a
+non-integer (use `clampInt` from src/sql-utils.js for every paging value); an array
+or object where an id belongs (the router maps D1's type error to a 400).
+
+**Guard:** that test reads the routes out of the source, so a new route is attacked
+automatically. Anything it reports is a real unhandled exception.

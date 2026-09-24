@@ -16,6 +16,7 @@
 import { now } from './db.js';
 import { deleteFile, moveToRejected, DRIVE_REJECTED_RETENTION_MS } from './drive.js';
 import { retryWindow, waitText } from './backoff.js';
+import { clampInt } from './sql-utils.js';
 
 // Three tries per campaign, then the clipper is removed from that campaign.
 // Deliberately per campaign, not lifetime: a clipper who cannot hit one
@@ -428,8 +429,8 @@ export async function reviewLog(db, { status = 'all', reviewer = '', campaignId 
   }
   if (campaignId) { where.push('a.campaign_id = ?'); bind.push(Number(campaignId)); }
 
-  const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
-  const off = Math.max(Number(offset) || 0, 0);
+  const lim = clampInt(limit, 50, 1, 200);
+  const off = clampInt(offset, 0, 0, 1000000);
   const { results } = await db.prepare(
     `SELECT a.id, a.clipper_id, a.campaign_id, a.attempt, a.status,
             a.reviewer_type, a.reviewer_id, a.reviewer_name, a.reviewer_note,

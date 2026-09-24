@@ -28,6 +28,7 @@ import { TRACKING_WINDOW_MS, TERMINAL_SYNC_ERRORS } from './clipstate.js';
 import { logAction } from './audit.js';
 import { isPaused } from './d1-usage.js';
 import { recordViewSnapshot } from './view-snapshots.js';
+import { parseStored } from './sql-utils.js';
 
 // Cloudflare's per-invocation external-subrequest cap is no longer the real
 // ceiling here (Workers Paid defaults to 10,000/invocation, configurable via
@@ -291,7 +292,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
   if (!job) return { error: 'Job not found', done: true };
   if (!ACTIVE.includes(job.status)) return { done: true, alreadyFinished: true };
 
-  let pending = JSON.parse(job.pending_json || '[]');
+  let pending = parseStored(job.pending_json, []);
   // Measured rather than counted per branch: items leave the queue from the
   // normal path and from the account-unavailable skip, while deferral
   // reorders without removing. Comparing the length is the one reading that
@@ -301,7 +302,7 @@ export async function runChunk(db, env, jobId, { adapters = null } = {}) {
     fetched: job.clips_fetched, failed: job.clips_failed,
     skipped: job.clips_skipped, imported: job.imported
   };
-  const acctStats = JSON.parse(job.accounts_json || '{}');
+  const acctStats = parseStored(job.accounts_json, {});
 
   await db.prepare(
     "UPDATE refresh_jobs SET status = 'running', invocations = invocations + 1, updated_at = ? WHERE id = ?"
@@ -603,7 +604,7 @@ export function publicJob(row) {
     imported: row.imported,
     remaining: pendingCount,
     total: done + pendingCount,
-    accounts: JSON.parse(row.accounts_json || '{}'),
+    accounts: parseStored(row.accounts_json, {}),
     error: row.error,
     created_at: row.created_at,
     updated_at: row.updated_at,

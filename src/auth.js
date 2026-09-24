@@ -40,6 +40,9 @@ export async function hashPassword(password) {
 }
 
 export async function verifyPassword(password, hash, salt) {
+  // A row with a missing or malformed hash/salt can never match, and must read
+  // as "wrong password" rather than throw and turn a login into a 500.
+  if (typeof hash !== 'string' || typeof salt !== 'string' || !/^(?:[0-9a-f]{2})+$/i.test(salt)) return false;
   const computed = await pbkdf2(password, salt);
   if (computed.length !== hash.length) return false;
   let diff = 0;
@@ -59,12 +62,16 @@ export async function signSession(payload, secret) {
 }
 
 export async function verifySession(token, secret) {
-  if (!token || !token.includes('.')) return null;
-  const [body, sig] = token.split('.');
-  const key = await hmacKey(secret);
-  const valid = await crypto.subtle.verify('HMAC', key, fromBase64Url(sig), new TextEncoder().encode(body));
-  if (!valid) return null;
+  if (typeof token !== 'string' || !token.includes('.')) return null;
+  // Anything that is not a well-formed, correctly signed token -- a corrupt
+  // cookie, a hand-typed ?state=, a truncated link -- is simply "not signed in".
+  // Decoding it throws (atob on a bad character), which used to escape as a 500
+  // on every page for someone holding a broken cookie.
   try {
+    const [body, sig] = token.split('.');
+    const key = await hmacKey(secret);
+    const valid = await crypto.subtle.verify('HMAC', key, fromBase64Url(sig), new TextEncoder().encode(body));
+    if (!valid) return null;
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body)));
     if (payload.exp && Date.now() > payload.exp) return null;
     return payload;
@@ -79,7 +86,13 @@ export function parseCookies(request) {
   header.split(';').forEach(pair => {
     const idx = pair.indexOf('=');
     if (idx === -1) return;
-    out[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+    const raw = pair.slice(idx + 1).trim();
+    // Every cookie on the domain is read here, not just ours, and one with a
+    // stray "%" (an ad tool, an extension) makes decodeURIComponent throw --
+    // which would break every request that visitor makes. Keep the raw text.
+    let value = raw;
+    try { value = decodeURIComponent(raw); } catch { /* malformed escape: use as sent */ }
+    out[pair.slice(0, idx).trim()] = value;
   });
   return out;
 }

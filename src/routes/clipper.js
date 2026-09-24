@@ -898,8 +898,13 @@ export async function handleClipper(request, env, url) {
   if (pathname === '/api/clipper/submissions' && method === 'POST') {
     const blocked = blockIfReadOnly();
     if (blocked) return blocked;
-    const { campaign_id, url: postUrl, platform: askedPlatform } = await readJson(request);
-    if (!campaign_id || !postUrl) return err('Pick a campaign and paste your post link');
+    const sent = await readJson(request);
+    const { url: postUrl, platform: askedPlatform } = sent;
+    // Only a plain number or numeric string is a campaign id; an array, object
+    // or boolean would otherwise travel on into SQL.
+    const campaign_id = (typeof sent.campaign_id === 'number' || typeof sent.campaign_id === 'string') && Number.isSafeInteger(Number(sent.campaign_id))
+      ? Number(sent.campaign_id) : 0;
+    if (!campaign_id || typeof postUrl !== 'string' || !postUrl.trim()) return err('Pick a campaign and paste your post link');
 
     const campaign = await getCampaignById(env.DB, campaign_id);
     if (!campaign) return err('Campaign not found', 404);

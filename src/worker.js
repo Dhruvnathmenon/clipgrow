@@ -183,6 +183,14 @@ async function route(request, env, url) {
         const res = await handler(request, env, url);
         if (res) return res;
       } catch (e) {
+        // A value of the wrong type (an array or object where a number or text
+        // belongs) reached the database. That is the sender's mistake, so it is a
+        // 400 they can act on, not a 500 that pages nobody usefully. Real
+        // failures still fall through to the 500 below.
+        if (e && /D1_TYPE_ERROR/.test(String(e.message))) {
+          console.warn(`bad value type on ${path}: ${e.message}`);
+          return err('One of the values sent is the wrong type.', 400);
+        }
         console.error(`handler error on ${path}:`, e.stack || e.message);
         // Safety net: catches whatever breaks next, not just the specific
         // failure modes anyone thought to instrument explicitly (see

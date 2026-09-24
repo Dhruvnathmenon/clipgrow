@@ -16,9 +16,14 @@ export function err(message, status = 400) {
   return json({ error: message }, status);
 }
 
+// Always an object. A body of `null`, a number, a string or an array is valid
+// JSON but would make the first `payload.field` a caller reads throw a
+// TypeError (a 500), so anything that is not a plain object reads as empty and
+// the route's own "field is required" check answers it with a 400.
 export async function readJson(request) {
   try {
-    return await request.json();
+    const value = await request.json();
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   } catch {
     return {};
   }

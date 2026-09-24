@@ -53,6 +53,12 @@ export function makeSqliteD1(seed = {}) {
 
   // node:sqlite rejects undefined and booleans; D1 accepts both.
   const norm = (v) => {
+    // Real D1 refuses anything that is not a string, number, boolean, null or
+    // bytes. Plain SQLite here would fail with an unrelated message instead, so
+    // the same error D1 gives is raised, and the Worker's 400 mapping is testable.
+    if (v !== null && typeof v === 'object' && !(v instanceof Uint8Array) && !(v instanceof ArrayBuffer)) {
+      throw new Error(`D1_TYPE_ERROR: Type 'object' not supported for value '${String(v).slice(0, 40)}'`);
+    }
     if (v === undefined) return null;
     if (typeof v === 'boolean') return v ? 1 : 0;
     return v;

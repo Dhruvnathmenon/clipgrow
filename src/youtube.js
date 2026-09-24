@@ -1,3 +1,4 @@
+import { parseStored } from './sql-utils.js';
 // YouTube Data API v3 integration.
 //
 // Deliberately mirrors src/instagram.js in shape and error vocabulary so a
@@ -454,7 +455,7 @@ export async function fetchViews(account, mediaIds, env, { onAttempt } = {}) {
  * Instagram auto-import uses.
  */
 export async function listRecent(account, { sinceTs = 0, maxPages = 3, knownIds = null, onAttempt } = {}, env) {
-  const meta = account.meta_json ? JSON.parse(account.meta_json) : {};
+  const meta = parseStored(account.meta_json, {});
   const playlist = meta.uploads_playlist;
   if (!playlist) return [];
 

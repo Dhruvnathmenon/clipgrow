@@ -3,6 +3,13 @@ import { revokeToken as revokeGoogleToken } from './youtube.js';
 
 export const now = () => Date.now();
 
+// Every table with a foreign key onto submissions. D1 enforces foreign keys, so a
+// clip cannot be deleted while any row in these still points at it -- and almost
+// every real clip has a review and view snapshots. Anything that deletes a clip
+// clears these first (test/delete-integrity.test.mjs reads the live schema and
+// fails if a table is ever added here without being listed).
+export const SUBMISSION_CHILD_TABLES = ['submission_reviews', 'submission_view_snapshots'];
+
 /**
  * Usernames are stored lowercase with internal whitespace removed. Creation and
  * login MUST run input through this same function, otherwise a clipper created
@@ -219,7 +226,9 @@ export async function disconnectSocialAccount(db, accountId, { preserveClips = f
       // Chunked -- an account with more than 100 pending clips would otherwise
       // hit D1's bound-parameter limit and fail the whole disconnect.
       const pendingIds = pending.map(x => x.id);
-      stmts.push(...statementsByIds(db, 'DELETE FROM submission_reviews WHERE submission_id IN ({IN})', pendingIds));
+      for (const table of SUBMISSION_CHILD_TABLES) {
+        stmts.push(...statementsByIds(db, `DELETE FROM ${table} WHERE submission_id IN ({IN})`, pendingIds));
+      }
       stmts.push(...statementsByIds(db, 'DELETE FROM submissions WHERE id IN ({IN})', pendingIds));
 
       // "Total Views Generated" is a lifetime, never-decreasing number --
@@ -724,9 +733,6 @@ export async function clipperFinancials(db, clipperId) {
             COALESCE(SUM(CASE WHEN kind = 'bonus'   THEN amount ELSE 0 END),0) AS bonuses
      FROM payments WHERE clipper_id = ?`
   ).bind(clipperId).first();
-
-  const pending = row.pending || 0;
-  const advanced = paidRow.advanced || 0;
 
   return financialsShape(row, paidRow);
 }

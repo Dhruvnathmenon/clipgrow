@@ -1,4 +1,5 @@
 import { now } from './db.js';
+import { clampInt } from './sql-utils.js';
 
 /**
  * The staff activity log (migration 023). Deliberately not wired into every
@@ -26,7 +27,7 @@ export async function logAction(db, {
 
 /** Paginated, newest first. `beforeId` continues from a prior page's last id. */
 export async function listAuditLog(db, { limit = 50, beforeId = null } = {}) {
-  const capped = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const capped = clampInt(limit, 50, 1, 200);
   const { results } = beforeId
     ? await db.prepare('SELECT * FROM staff_audit_log WHERE id < ? ORDER BY id DESC LIMIT ?')
         .bind(beforeId, capped).all()

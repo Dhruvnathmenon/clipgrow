@@ -20,6 +20,7 @@
 // cancelled the permission screen; they just try again). See SILENT_CODES in
 // the two auth route files.
 import { now } from './db.js';
+import { clampInt } from './sql-utils.js';
 
 export const ERROR_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -49,7 +50,7 @@ export async function logError(db, {
 
 /** Newest first. `unresolvedOnly` is what the admin panel shows by default. */
 export async function listErrors(db, { limit = 200, unresolvedOnly = false } = {}) {
-  const capped = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const capped = clampInt(limit, 200, 1, 500);
   const where = unresolvedOnly ? 'WHERE resolved_at IS NULL' : '';
   const { results } = await db.prepare(
     `SELECT * FROM error_log ${where} ORDER BY id DESC LIMIT ?`

@@ -7,7 +7,7 @@ import {
   normaliseUpiId, validateUpiId,
   normaliseContactNumber, validateContactNumber, normaliseEmail, validateEmail,
   normaliseDiscordUsername, validateDiscordUsername,
-  ACTIVE_WINDOW_MS, pendingClipperExpr
+  ACTIVE_WINDOW_MS, pendingClipperExpr, SUBMISSION_CHILD_TABLES
 } from '../db.js';
 import { reallocateCampaign, reallocateAll, syncAccountClips } from '../earnings.js';
 import { createRefreshJob, startJob, getJob, publicJob, retryJob, cancelJob, listJobs, STALL_AFTER_MS } from '../refresh-jobs.js';
@@ -32,7 +32,7 @@ import { archiveClipper, dormantAccounts, DORMANT_AFTER_MS, GRACE_MS } from '../
 import { duplicateField, DUPLICATE_MESSAGES } from '../identity.js';
 import { emailKey, phoneKey, discordKey } from '../../components/profile-validation.js';
 import { reviewerScorecard, reviewLog } from '../applications.js';
-import { selectByIds } from '../sql-utils.js';
+import { selectByIds, parseStored, clampInt } from '../sql-utils.js';
 import { normaliseReferenceLinks, normaliseRawSources, readStored } from '../campaign-sources.js';
 import { listErrors, resolveError } from '../error-log.js';
 import { platformUsageSnapshot, setPaused } from '../d1-usage.js';
@@ -413,7 +413,7 @@ export async function handleAdmin(request, env, url) {
         from: numOrNull('from'),
         to: numOrNull('to'),
         includeVoid: q.get('include_void') === '1',
-        limit: Math.min(1000, Number(q.get('limit')) || 200)
+        limit: clampInt(q.get('limit'), 200, 1, 1000)
       })
     });
   }
@@ -444,7 +444,7 @@ export async function handleAdmin(request, env, url) {
   params = matchPath('/api/admin/finance/entries/:id/void', pathname);
   if (params && method === 'POST') {
     const body = await readJson(request);
-    const r = await voidEntry(env.DB, Number(params.id), body.reason);
+    const r = await voidEntry(env.DB, Number(params.id), typeof body.reason === 'string' ? body.reason : '');
     if (r.error) return err(r.error, r.status || 400);
     return json(r);
   }
@@ -931,7 +931,7 @@ export async function handleAdmin(request, env, url) {
 
   if (pathname === '/api/admin/campaigns' && method === 'POST') {
     const payload = await readJson(request);
-    const name = (payload.name || '').trim();
+    const name = String(payload.name ?? '').trim();
     if (!name) return err('Campaign name is required');
     const cpm = Number(payload.cpm) || 0;
     const budget = Number(payload.budget) || 0;
@@ -1097,7 +1097,7 @@ export async function handleAdmin(request, env, url) {
     // Validated up front so a bad link cannot leave the campaign half-updated.
     const sources = parseSources(payload);
     if (sources.error) return err(sources.error);
-    const priorBlueprint = JSON.parse(existing.blueprint_json || '{}');
+    const priorBlueprint = parseStored(existing.blueprint_json, {});
     const merged = { ...priorBlueprint, ...pickBlueprint(payload) };
     // The per-video cap lives in the blueprint, not in a column, so a change to
     // it used to slip past the repricing check below -- the campaign kept
@@ -1174,8 +1174,26 @@ export async function handleAdmin(request, env, url) {
     if (subCount.n > 0) {
       return err(`This campaign has ${subCount.n} submission(s). Mark it as over instead of deleting, so clipper earnings are preserved.`, 409);
     }
+    // Payments and reviewed applications are records that must outlive the
+    // campaign, and they point at it, so their presence is a clear refusal
+    // rather than the foreign-key 500 it used to be.
+    const kept = await env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM payments WHERE campaign_id = ?) AS payments,
+              (SELECT COUNT(*) FROM campaign_applications WHERE campaign_id = ?) AS applications`
+    ).bind(params.id, params.id).first();
+    if (kept.payments > 0) {
+      return err(`This campaign has ${kept.payments} payment(s) recorded against it. Mark it as over instead of deleting, so the payment history stays intact.`, 409);
+    }
+    if (kept.applications > 0) {
+      return err(`This campaign has ${kept.applications} video application(s) on record. Mark it as over instead of deleting, so the review history stays intact.`, 409);
+    }
+    // What is left is only what hangs off the campaign: who joined, their
+    // connected-account links, their access requests, and any client assignment.
     await env.DB.batch([
+      env.DB.prepare('DELETE FROM participation_accounts WHERE participation_id IN (SELECT id FROM participations WHERE campaign_id = ?)').bind(params.id),
       env.DB.prepare('DELETE FROM participations WHERE campaign_id = ?').bind(params.id),
+      env.DB.prepare('DELETE FROM tester_requests WHERE campaign_id = ?').bind(params.id),
+      env.DB.prepare('DELETE FROM client_campaigns WHERE campaign_id = ?').bind(params.id),
       env.DB.prepare('DELETE FROM campaigns WHERE id = ?').bind(params.id)
     ]);
     return json({ ok: true });
@@ -1190,12 +1208,19 @@ export async function handleAdmin(request, env, url) {
     if (status && !PART_STATUSES.includes(status)) {
       return err(`'${status}' is not a valid participation status. Accepted: ${PART_STATUSES.join(', ')}.`);
     }
+    // account_id is a foreign key: a number that names no account is refused
+    // here, in words, rather than by the database with a 500.
+    if (account_id !== undefined && account_id !== null) {
+      const id = (typeof account_id === 'number' || typeof account_id === 'string') && Number.isSafeInteger(Number(account_id)) ? Number(account_id) : 0;
+      const exists = id > 0 && await env.DB.prepare('SELECT 1 AS x FROM social_accounts WHERE id = ?').bind(id).first();
+      if (!exists) return err('That account does not exist.', 400);
+    }
     await env.DB.prepare(
       'UPDATE participations SET status = ?, status_note = ?, account_id = ?, inactive_at = ? WHERE id = ?'
     ).bind(
       status || part.status,
       note != null ? note : part.status_note,
-      account_id !== undefined ? account_id : part.account_id,
+      account_id !== undefined ? (account_id === null ? null : Number(account_id)) : part.account_id,
       // Manual early reinstatement -- the automatic path is connecting an
       // account (linkParticipationAccount clears this on its own); this is
       // for the admin to say "I know they're back" without waiting on that.
@@ -1255,7 +1280,11 @@ export async function handleAdmin(request, env, url) {
       'SELECT COUNT(*) AS n FROM submissions WHERE clipper_id = ? AND campaign_id = ?')
       .bind(part.clipper_id, part.campaign_id).first();
     if (subs.n > 0) return err(`This clipper has ${subs.n} video(s) in this campaign. Use Kick instead, so their video history stays on record.`, 409);
-    await env.DB.prepare('DELETE FROM participations WHERE id = ?').bind(params.id).run();
+    // Its connected-account links point at it, so they go in the same batch.
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM participation_accounts WHERE participation_id = ?').bind(params.id),
+      env.DB.prepare('DELETE FROM participations WHERE id = ?').bind(params.id)
+    ]);
     return json({ ok: true });
   }
 
@@ -1391,9 +1420,20 @@ export async function handleAdmin(request, env, url) {
       // not just on the row read a moment ago -- a payout could settle (and
       // thus pay) this exact clip in that gap, and without this the DELETE
       // would still fire, destroying a paid clip's row outright.
-      const del = await env.DB.prepare(
-        'DELETE FROM submissions WHERE id = ? AND NOT (locked_at IS NOT NULL AND payment_id IS NOT NULL)'
-      ).bind(params.id).run();
+      //
+      // The rows that point at this clip (its reviews, its view snapshots) go in
+      // the same batch -- one transaction -- under the same paid check. D1
+      // enforces foreign keys, so deleting the clip alone failed with a 500 for
+      // nearly every real clip, and if the clip is paid in the gap the batch
+      // deletes nothing at all, history included.
+      const notPaid = 'NOT (locked_at IS NOT NULL AND payment_id IS NOT NULL)';
+      const outcome = await env.DB.batch([
+        ...SUBMISSION_CHILD_TABLES.map(t => env.DB.prepare(
+          `DELETE FROM ${t} WHERE submission_id = ? AND EXISTS (SELECT 1 FROM submissions WHERE id = ? AND ${notPaid})`
+        ).bind(params.id, params.id)),
+        env.DB.prepare(`DELETE FROM submissions WHERE id = ? AND ${notPaid}`).bind(params.id)
+      ]);
+      const del = outcome[outcome.length - 1];
       if (!del.meta.changes) {
         return err('This clip was paid in the moment between checking and deleting it. Reverse that payment instead, so the ledger stays correct.', 409);
       }
@@ -2102,7 +2142,7 @@ export async function handleAdmin(request, env, url) {
   // ---------------------------------------------------------- audit log
   if (pathname === '/api/admin/audit-log' && method === 'GET') {
     const limit = Number(url.searchParams.get('limit')) || 50;
-    const beforeId = url.searchParams.get('before_id') ? Number(url.searchParams.get('before_id')) : null;
+    const beforeId = clampInt(url.searchParams.get('before_id'), 0, 1, Number.MAX_SAFE_INTEGER) || null;
     return json({ entries: await listAuditLog(env.DB, { limit, beforeId }) });
   }
 
