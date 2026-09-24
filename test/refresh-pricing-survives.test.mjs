@@ -251,3 +251,25 @@ test('a pricing failure is written to the Error Log, and never stops the refresh
   assert.match(logged[0].detail, /campaign 1/);
   assert.equal(raw._rows('submissions').find(s => s.id === 2).earning, 100);
 });
+
+// The other hidden ceiling: 15 minutes of wall time per scheduled run or queue leg.
+test('a leg that has used its time budget stops before the next item, hands off and prices', async () => {
+  const raw = world({ accounts: 6, perAccount: 2 });
+  const { job_id } = await createRefreshJob(raw, { kind: 'global', triggeredBy: 'test', cooldownMs: 0 });
+  const q = queueOf();
+  const db = wrapD1(raw);
+
+  // A zero time budget means "already out of time": nothing new may start.
+  const r = await advanceJob(db, { ...q }, job_id, { adapters, wallBudgetMs: 0, ...refreshHooks(db) });
+
+  assert.equal(r.outOfRoom, true);
+  assert.equal(r.itemsDone, 0);
+  assert.equal(q.sent.length, 1, 'still hands off');
+  assert.deepEqual(q.sent[0].o, { delaySeconds: 60 }, 'and waits a minute rather than spinning, since it did nothing');
+  assert.equal((await getJob(raw, job_id)).status, 'running');
+});
+
+test('the wall-time budget leaves five minutes of the fifteen for the end of a leg', async () => {
+  const { WALL_BUDGET_MS } = await import('../src/refresh-jobs.js');
+  assert.ok(WALL_BUDGET_MS <= 10 * 60 * 1000, 'Cloudflare cuts a scheduled run or queue leg off at 15 minutes');
+});

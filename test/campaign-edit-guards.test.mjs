@@ -186,3 +186,15 @@ test('lowering the minimum tells the admin how many clips closed at Rs 0 would n
   const again = await admin(env, '/api/admin/campaigns/1', 'PATCH', { min_views: 9000 });
   assert.equal((await again.json()).repriced.closed_now_eligible, undefined, 'nothing to report when none would qualify');
 });
+
+test('re-sending an unchanged budget never blocks an unrelated edit, even on a campaign already paid past it', async () => {
+  // The edit form sends every field every time. A campaign whose paid total somehow exceeds its
+  // budget (older data) must still be renameable.
+  const env = world({ budget: 150 });                       // Rs 200 already paid, budget 150
+  const res = await admin(env, '/api/admin/campaigns/1', 'PATCH', { name: 'Renamed', cpm: 50, budget: 150, min_views: 1000 });
+  assert.equal(res.status, 200);
+  assert.equal(camp(env).name, 'Renamed');
+  // Actually lowering it further is still refused.
+  const lower = await admin(env, '/api/admin/campaigns/1', 'PATCH', { budget: 100 });
+  assert.equal(lower.status, 409);
+});

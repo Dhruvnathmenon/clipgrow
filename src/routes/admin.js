@@ -1133,8 +1133,10 @@ export async function handleAdmin(request, env, url) {
     if (capProblem) return err(capProblem);
     // What has already been paid out is spent for good. A budget below it would
     // leave the campaign having paid out more than it ever had, and the allocator
-    // would answer by pricing every unpaid clip at nothing.
-    if (payload.budget != null) {
+    // would answer by pricing every unpaid clip at nothing. Only checked when the
+    // budget is actually being CHANGED: the edit form re-sends every field, so an
+    // unrelated edit to an older campaign must never be blocked by its own budget.
+    if (payload.budget != null && Number(payload.budget) !== Number(existing.budget)) {
       const paid = await env.DB.prepare(
         'SELECT COALESCE(SUM(locked_earning), 0) AS paid FROM submissions WHERE campaign_id = ? AND locked_at IS NOT NULL'
       ).bind(params.id).first();

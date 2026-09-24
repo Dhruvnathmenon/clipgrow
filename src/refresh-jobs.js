@@ -58,6 +58,13 @@ export const CALLS_PER_INVOCATION = 200;
 // this number to the pinned limit, so raising one without the other fails.
 export const SUBREQUEST_BUDGET = 8000;
 
+// The second hidden ceiling: a scheduled run or a queue leg is cut off at 15 minutes of
+// wall-clock time (Cloudflare's Workers limits page). A leg of 200 platform calls takes
+// about 7 minutes when Instagram is at its usual speed (2.4 s a clip measured on 24 Sep),
+// and a slow day could double that. Stopping to hand off after 10 minutes leaves five for
+// what still has to happen after the last item, the same way the request budget does.
+export const WALL_BUDGET_MS = 10 * 60 * 1000;
+
 // How many work items may be completed before progress is written back.
 // pending_json used to be persisted only after the whole loop, so an
 // invocation that died partway through discarded every clip it had already
@@ -304,7 +311,8 @@ export async function releaseAccounts(db, jobId) {
  * put a continuation message on the queue. Enqueueing is left to the caller so
  * this stays a pure state machine that tests can drive without a queue binding.
  */
-export async function runChunk(db, env, jobId, { adapters = null, subrequestBudget = SUBREQUEST_BUDGET } = {}) {
+export async function runChunk(db, env, jobId, { adapters = null, subrequestBudget = SUBREQUEST_BUDGET, wallBudgetMs = WALL_BUDGET_MS } = {}) {
+  const startedAtMs = Date.now();
   const job = await getJob(db, jobId);
   if (!job) return { error: 'Job not found', done: true };
   if (!ACTIVE.includes(job.status)) return { done: true, alreadyFinished: true };
@@ -355,6 +363,8 @@ export async function runChunk(db, env, jobId, { adapters = null, subrequestBudg
     // finish properly (write state, queue the next leg, re-price). Handing off
     // here costs one queue hop; not doing so costs the whole job.
     if (subrequestsUsed() >= subrequestBudget) { outOfRoom = true; break; }
+    // ...and out of TIME is the same situation: hand off while there is still room to finish.
+    if (Date.now() - startedAtMs >= wallBudgetMs) { outOfRoom = true; break; }
 
     const account = await loadAccount(db, item.a, accountCache);
 
