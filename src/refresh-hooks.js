@@ -16,6 +16,7 @@
 import { reallocateAll } from './earnings.js';
 import { scoreRecentSubmissions } from './bot-scoring.js';
 import { logError } from './error-log.js';
+import { SUBREQUEST_BUDGET } from './refresh-jobs.js';
 
 /** Prices every open campaign; a failure goes to the Error Log, where the admin page badges it. */
 export async function repriceAll(db, where) {
@@ -32,9 +33,31 @@ export async function repriceAll(db, where) {
   }
 }
 
+const NEAR_LIMIT_QUIET_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * A leg that had to stop early for room or time is the earliest warning there is that the
+ * refresh is outgrowing its limits: harmless once, the start of another outage if it keeps
+ * happening. Said once per six hours, not once per leg, so it stays readable.
+ */
+export async function noteNearLimit(db, r) {
+  if (!r || !r.outOfRoom) return;
+  try {
+    const recent = await db.prepare('SELECT id FROM error_log WHERE code = ? AND created_at > ? LIMIT 1')
+      .bind('REFRESH_NEAR_LIMIT', Date.now() - NEAR_LIMIT_QUIET_MS).first();
+    if (recent) return;
+    await logError(db, {
+      actorType: 'system', source: 'refresh', code: 'REFRESH_NEAR_LIMIT',
+      message: 'A view-refresh step stopped early to stay under the per-run limits Cloudflare sets. Nothing is lost: the rest continues in the next step.',
+      detail: `It had used ${r.subrequests} of its ${SUBREQUEST_BUDGET} request budget when it stopped. If this appears every hour, the refresh is growing past what one run can do: raise limits.subrequests in wrangler.jsonc together with SUBREQUEST_BUDGET, or look at what each clip costs.`,
+      path: 'refresh'
+    });
+  } catch { /* a warning about a warning is not worth failing the refresh over */ }
+}
+
 export function refreshHooks(db) {
   return {
-    afterChunk: () => repriceAll(db, 'refresh'),
+    afterChunk: async (_jobId, r) => { await repriceAll(db, 'refresh'); await noteNearLimit(db, r); },
     onFinish: async () => { await scoreRecentSubmissions(db); }
   };
 }

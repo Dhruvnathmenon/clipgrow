@@ -273,3 +273,26 @@ test('the wall-time budget leaves five minutes of the fifteen for the end of a l
   const { WALL_BUDGET_MS } = await import('../src/refresh-jobs.js');
   assert.ok(WALL_BUDGET_MS <= 10 * 60 * 1000, 'Cloudflare cuts a scheduled run or queue leg off at 15 minutes');
 });
+
+test('a leg that stops for room tells the Error Log once, not once per leg', async () => {
+  const raw = world({ accounts: 12, perAccount: 3 });
+  const { job_id } = await createRefreshJob(raw, { kind: 'global', triggeredBy: 'test', cooldownMs: 0 });
+  const db = wrapD1(raw);
+  const q = queueOf();
+  for (let i = 0; i < 4; i++) {
+    await advanceJob(db, { ...q }, job_id, { adapters, subrequestBudget: 60, ...refreshHooks(db) });
+  }
+  const notes = raw._rows('error_log').filter(e => e.code === 'REFRESH_NEAR_LIMIT');
+  assert.equal(notes.length, 1, 'said once');
+  assert.equal(notes[0].source, 'refresh');
+  assert.match(notes[0].detail, /request budget/);
+  assert.match(notes[0].message, /Nothing is lost/);
+});
+
+test('a leg that finished its work says nothing about limits', async () => {
+  const raw = world({ accounts: 2, perAccount: 1 });
+  const { job_id } = await createRefreshJob(raw, { kind: 'global', triggeredBy: 'test', cooldownMs: 0 });
+  const db = wrapD1(raw);
+  await advanceJob(db, { ...queueOf() }, job_id, { adapters, ...refreshHooks(db) });
+  assert.equal(raw._rows('error_log').filter(e => e.code === 'REFRESH_NEAR_LIMIT').length, 0);
+});
