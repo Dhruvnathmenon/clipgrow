@@ -41,12 +41,24 @@ test('an unhandled failed request shows what failed', () => {
   assert.match(b.text(), /That did not work: Internal server error/);
 });
 
-test('a script that failed to load is reported; a broken image is not', () => {
+test('one of our own scripts failing to load is reported; a broken image is not', () => {
   let b = fakeBrowser();
-  b.fire('error', { target: { tagName: 'SCRIPT' }, message: '' });
+  b.fire('error', { target: { tagName: 'SCRIPT', src: 'https://clipgrow.in/components/clipper-applications.js?v=5' }, message: '' });
   assert.match(b.text(), /did not load/);
   b = fakeBrowser();
-  b.fire('error', { target: { tagName: 'IMG' }, message: '' });
+  b.fire('error', { target: { tagName: 'IMG', src: 'https://clipgrow.in/x.png' }, message: '' });
+  assert.equal(b.text(), null);
+});
+
+// Cloudflare injects its analytics beacon into every page; ad blockers and privacy
+// extensions block it. That fired the "did not load" banner permanently for anyone
+// with a blocker, over a script the page does not depend on.
+test('a blocked third-party script (the Cloudflare analytics beacon) never shows a banner', () => {
+  const b = fakeBrowser();
+  b.fire('error', { target: { tagName: 'SCRIPT', src: 'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495' }, message: '' });
+  b.fire('error', { target: { tagName: 'SCRIPT', src: 'https://www.googletagmanager.com/gtag/js?id=x' }, message: '' });
+  b.fire('error', { target: { tagName: 'SCRIPT', src: 'https://clipgrow.in.evil.example/x.js' }, message: '' });
+  b.fire('error', { target: { tagName: 'SCRIPT' }, message: '' });
   assert.equal(b.text(), null);
 });
 

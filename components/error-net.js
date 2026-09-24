@@ -52,8 +52,14 @@
   window.addEventListener('error', function (ev) {
     var t = ev.target;
     if (t && t !== window) {
-      if (t.tagName === 'SCRIPT') banner('Part of this page did not load, so some buttons may not work. Refresh the page; if it keeps happening, tell the ClipGrow admin.');
-      return; // a broken image or font is not worth a banner
+      // Only OUR OWN scripts count. Cloudflare adds its analytics beacon to every
+      // page, and ad blockers and privacy extensions block it, which fires this
+      // same event for a script nothing on the page depends on -- so anyone with a
+      // blocker saw a permanent banner. A broken image or font is not worth one either.
+      if (t.tagName === 'SCRIPT' && typeof t.src === 'string' && t.src.indexOf(location.origin + '/') === 0) {
+        banner('Part of this page did not load, so some buttons may not work. Refresh the page; if it keeps happening, tell the ClipGrow admin.');
+      }
+      return;
     }
     var m = String(ev.message || '');
     if (!m || m === 'Script error.' || /ResizeObserver loop/i.test(m) || !ours(ev.filename)) return;
