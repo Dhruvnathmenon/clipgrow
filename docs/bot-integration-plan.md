@@ -139,6 +139,12 @@ Each phase: goal, what changes, tests written **first**, how we prove it in prod
 `checkpoint/23…`.
 
 ### Phase 0. Preparation (nothing touches production)
+
+> **Status: done 25 Sep 2026** (`checkpoint/23-bot-phase0`). Built: `test/helpers/bot-contract.mjs`, `test/helpers/fake-bot.mjs`,
+> `test/bot-contract.test.mjs` (22 tests, each tool mutation-tested), Endrig's documents kept verbatim in `docs/endrig/`, and the bot-side
+> open-campaigns filter pushed to `Endrig7/clipcore` as `135d5ab` (62 bot tests pass, 7 of them new). Nothing was deployed.
+> Still open: D3, D4 and D5 (Dhruv) and D1, D2, D7 (Endrig, asked for).
+
 - Fake bot for tests: `test/helpers/fake-bot.mjs`, a real local HTTP server implementing the three contracts exactly as documented
   (validation messages, `202` / `200` variants, `event_id` dedupe for 30 minutes, `401`, and switchable misbehaviour: `500`,
   hang, dropped connection, slow reply).
